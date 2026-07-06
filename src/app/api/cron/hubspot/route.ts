@@ -10,9 +10,11 @@ function authorized(req: NextRequest): boolean {
   return req.headers.get("authorization") === `Bearer ${secret}`;
 }
 
-/** Every 15 min: incremental HubSpot sync. */
+/** Every 15 min: incremental HubSpot sync. `?full=1` forces a full backfill
+ * (admin use, still requires the cron secret). */
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const results = await runSync(["hubspot_incremental"]);
+  const full = req.nextUrl.searchParams.get("full") === "1";
+  const results = await runSync([full ? "hubspot_full" : "hubspot_incremental"]);
   return NextResponse.json(results);
 }
