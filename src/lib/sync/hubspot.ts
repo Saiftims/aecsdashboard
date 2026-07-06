@@ -62,9 +62,23 @@ function parseMarker(body: string | null, key: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** On full syncs, remove cache rows that no longer exist in HubSpot (records
+ * deleted in the CRM must disappear from the dashboard too). */
+async function purgeStale(
+  sb: ReturnType<typeof supabaseService>,
+  table: string,
+  keepIds: string[],
+) {
+  if (!keepIds.length) return;
+  const list = `(${keepIds.map((id) => `"${id}"`).join(",")})`;
+  const { error } = await sb.from(table).delete().not("hubspot_id", "in", list);
+  if (error) console.error(`purgeStale ${table}: ${error.message}`);
+}
+
 export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number) {
   const sb = supabaseService();
   const stats: Record<string, number> = {};
+  const fetchedIds: Record<string, string[]> = {};
 
   const fetchObjects = async (object: string, props: string[], assoc?: string[]) =>
     mode === "full" || !sinceMs
@@ -74,6 +88,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   // ---- companies ----
   const companies = await fetchObjects("companies", COMPANY_PROPS);
   stats.companies = companies.length;
+  fetchedIds.companies = companies.map((c) => c.id);
   if (companies.length) {
     await sb.from("companies").upsert(
       companies.map((c) => ({
@@ -92,6 +107,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   // HubSpot's domain auto-association; we fetch v4 assoc only in full mode) ----
   const contacts = await fetchObjects("contacts", CONTACT_PROPS, ["companies"]);
   stats.contacts = contacts.length;
+  fetchedIds.contacts = contacts.map((c) => c.id);
   if (contacts.length) {
     await sb.from("contacts").upsert(
       contacts.map((c) => ({
@@ -112,6 +128,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   // ---- deals ----
   const deals = await fetchObjects("deals", DEAL_PROPS, ["companies", "contacts"]);
   stats.deals = deals.length;
+  fetchedIds.deals = deals.map((d) => d.id);
   if (deals.length) {
     await sb.from("deals").upsert(
       deals.map((d) => ({
@@ -138,9 +155,11 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
 
   // ---- engagements (always full: volumes are small; search API not available
   // for all engagement types on all tiers) ----
+  const activityIds: string[] = [];
   for (const [kind, props] of Object.entries(ENGAGEMENTS)) {
     const rows = await hsListAll(kind, props, ["contacts", "deals", "companies"]);
     stats[kind] = rows.length;
+    activityIds.push(...rows.map((r) => r.id));
     if (!rows.length) continue;
     await sb.from("activities").upsert(
       rows.map((a) => {
@@ -175,6 +194,15 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
       }),
       { onConflict: "hubspot_id" },
     );
+  }
+
+  // Engagements are always fetched in full, so stale ones can always be purged;
+  // core objects only on full mode (incremental fetches are partial by design).
+  await purgeStale(sb, "activities", activityIds);
+  if (mode === "full") {
+    await purgeStale(sb, "deals", fetchedIds.deals ?? []);
+    await purgeStale(sb, "contacts", fetchedIds.contacts ?? []);
+    await purgeStale(sb, "companies", fetchedIds.companies ?? []);
   }
 
   return stats;
