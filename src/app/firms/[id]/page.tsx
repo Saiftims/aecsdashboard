@@ -195,11 +195,63 @@ export default async function FirmPage({
           />
 
           <Card>
-            <CardHeader title="Key people" />
+            <CardHeader
+              title="Contacts"
+              action={<Badge>{contacts?.length ?? 0}</Badge>}
+            />
+            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {(contacts ?? []).map((c) => {
+                const name = `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || c.email;
+                const cp = c.properties ?? {};
+                const role = cp.sw_contact_role as string | undefined;
+                const isChampion = cp.sw_champion_status === "active";
+                return (
+                  <div key={c.hubspot_id} className="px-4 py-2.5 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{name}</span>
+                      {isChampion ? <Badge tone="green">champion</Badge> : null}
+                      {role && role !== "other" && !isChampion ? (
+                        <Badge>{role.replaceAll("_", " ")}</Badge>
+                      ) : null}
+                    </div>
+                    {cp.jobtitle ? (
+                      <div className="text-xs text-zinc-500">{cp.jobtitle}</div>
+                    ) : null}
+                    <div className="mt-0.5 space-y-0.5 text-xs">
+                      {c.email ? (
+                        <div>
+                          <a href={`mailto:${c.email}`} className="text-blue-600 hover:underline">
+                            {c.email}
+                          </a>
+                        </div>
+                      ) : null}
+                      {cp.phone ? (
+                        <div>
+                          <a href={`tel:${cp.phone}`} className="text-blue-600 hover:underline">
+                            {cp.phone}
+                          </a>
+                        </div>
+                      ) : null}
+                      {!c.email && !cp.phone ? (
+                        <span className="text-zinc-400">no email / phone on record</span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              {!contacts?.length ? (
+                <p className="px-4 py-4 text-sm text-zinc-400">
+                  No contacts on this firm yet - log a visit or add one in HubSpot.
+                </p>
+              ) : null}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader title="Key people & next step" />
             <div className="space-y-1 p-4 text-sm">
               <Row k="Champion" v={champion ? `${champion.first_name ?? ""} ${champion.last_name ?? ""}` : p.sw_active_champion ?? "-"} />
               <Row k="Decision-maker" v={decisionMaker ? `${decisionMaker.first_name ?? ""} ${decisionMaker.last_name ?? ""}` : "-"} />
-              <Row k="Contacts" v={String(contacts?.length ?? 0)} />
               <Row k="Est. monthly volume" v={p.sw_estimated_monthly_case_volume ?? "-"} />
               <Row k="Expansion potential" v={p.sw_expansion_potential ?? "-"} />
               <Row k="Next step" v={mainDeal?.properties?.sw_next_step ?? "-"} />
