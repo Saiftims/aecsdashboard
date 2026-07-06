@@ -12,6 +12,8 @@ export interface DrillRow {
   companyId?: string | null;
   dealId?: string | null;
   when?: string | null;
+  nextStep?: string | null;
+  nextStepDate?: string | null;
 }
 
 export interface DrillResult {
@@ -50,12 +52,18 @@ const EMAIL_DIRECTIONS: Record<string, string> = {
 };
 
 function dealRow(ctx: Ctx, d: DealRow, subtitle?: string): DrillRow {
+  // Demos: prefer the Calendly-synced demo date over deal creation date.
+  const when = (d.stage === SALES_STAGES.demoScheduled || d.stage === SALES_STAGES.demoCompleted)
+    ? (d.properties?.sw_demo_date ?? d.hs_created_at)
+    : d.hs_created_at;
   return {
     title: d.name ?? d.hubspot_id,
     subtitle: subtitle ?? d.stage_label ?? undefined,
     companyId: d.company_hubspot_id,
     dealId: d.hubspot_id,
-    when: d.hs_created_at,
+    when,
+    nextStep: d.properties?.sw_next_step ?? null,
+    nextStepDate: d.properties?.sw_next_step_date ?? null,
   };
 }
 

@@ -32,7 +32,7 @@ export default async function DrillPage({
       <Card>
         <CardHeader title="Related records" />
         <Table
-          headers={["Record", "Detail", "When", "Links"]}
+          headers={["Record", "Detail", "When", "Next step", "Links"]}
           rows={result.rows.map((r) => [
             r.companyId ? (
               <Link key="t" href={`/firms/${r.companyId}`} className="font-medium hover:underline">
@@ -43,6 +43,16 @@ export default async function DrillPage({
             ),
             r.subtitle ?? "-",
             r.when ? new Date(r.when).toLocaleDateString() : "-",
+            r.nextStep ? (
+              <span key="n">
+                {r.nextStep}
+                {r.nextStepDate ? (
+                  <span className="text-xs text-zinc-400"> (by {r.nextStepDate})</span>
+                ) : null}
+              </span>
+            ) : (
+              <span key="n" className="text-zinc-400">none set</span>
+            ),
             <span key="l" className="space-x-2 text-xs">
               {r.companyId ? (
                 <Link href={`/firms/${r.companyId}`} className="text-blue-600 hover:underline">
