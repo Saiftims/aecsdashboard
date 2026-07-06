@@ -7,6 +7,16 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
+  // Misconfigured deployment (missing Supabase env) - explain instead of 500.
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return new NextResponse(
+      "Setup incomplete: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY " +
+      "are not set in the deployment environment. Add them in Vercel -> Settings -> " +
+      "Environment Variables and redeploy.",
+      { status: 503, headers: { "content-type": "text/plain" } },
+    );
+  }
+
   let res = NextResponse.next({ request: req });
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
