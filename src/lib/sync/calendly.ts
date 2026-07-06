@@ -18,7 +18,7 @@ interface CalendlyEvent {
 }
 
 async function calGet<T>(path: string, params: Record<string, string>): Promise<T> {
-  const token = process.env.CALENDLY_TOKEN;
+  const token = (process.env.CALENDLY_TOKEN ?? "").trim();
   if (!token) throw new Error("CALENDLY_TOKEN not configured");
   const url = new URL(path.startsWith("http") ? path : `${BASE}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
@@ -38,7 +38,7 @@ async function calGet<T>(path: string, params: Record<string, string>): Promise<
 }
 
 export async function syncCalendly() {
-  const org = process.env.CALENDLY_ORG;
+  const org = (process.env.CALENDLY_ORG ?? "").trim();
   if (!org) throw new Error("CALENDLY_ORG not configured");
   const sb = supabaseService();
   const now = new Date();
