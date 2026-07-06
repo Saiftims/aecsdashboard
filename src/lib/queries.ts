@@ -308,9 +308,11 @@ export async function aeDashboard(ownerId?: string | null) {
 
   for (const d of openDeals) {
     const ageDays = d.hs_created_at ? differenceInDays(now, new Date(d.hs_created_at)) : 99;
+    const uncontactedStage =
+      d.stage === SALES_STAGES.mql || d.stage === SALES_STAGES.attemptingContact;
     if (d.stage === SALES_STAGES.mql && ageDays <= 2 && !touched(d)) {
       push(1, "New inbound leads", d, `MQL created ${ageDays}d ago - contact now`);
-    } else if (d.stage === SALES_STAGES.mql && !touched(d)) {
+    } else if (uncontactedStage && !touched(d)) {
       push(2, "Awaiting first contact", d, `No outreach logged yet (${ageDays}d old)`);
     }
   }
@@ -355,8 +357,11 @@ export async function aeDashboard(ownerId?: string | null) {
     settings,
     metrics: {
       leadsAssigned: salesDeals.length,
+      // Never contacted = MQL or Attempting Contact stage with no real touch
+      // (stage moves alone don't count as contact).
       newAwaitingContact: openDeals.filter(
-        (d) => d.stage === SALES_STAGES.mql && !touched(d),
+        (d) => (d.stage === SALES_STAGES.mql || d.stage === SALES_STAGES.attemptingContact) &&
+               !touched(d),
       ).length,
       medianSpeedToLeadHours: median(speedSamples),
       calls: typeCount("call"), emails: typeCount("email"),

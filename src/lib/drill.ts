@@ -100,8 +100,10 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
     label: "Awaiting first contact",
     rows: (ctx) =>
       ctx.deals
-        .filter((d) => d.stage === SALES_STAGES.mql && ctx.lastTouch(d) === null)
-        .map((d) => dealRow(ctx, d, "No outreach logged")),
+        .filter((d) =>
+          (d.stage === SALES_STAGES.mql || d.stage === SALES_STAGES.attemptingContact) &&
+          ctx.lastTouch(d) === null)
+        .map((d) => dealRow(ctx, d, `No outreach logged (${d.stage_label})`)),
   },
   calls_7d: { label: "Calls (7d)", rows: (ctx) => activityRows(ctx, (a) => (a.activity_type ?? a.kind) === "call") },
   emails_7d: { label: "Emails (7d)", rows: (ctx) => activityRows(ctx, (a) => (a.activity_type ?? a.kind) === "email") },
