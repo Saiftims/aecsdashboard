@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/hubspot", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/cases", "schedule": "0 5 * * *" }
+  ]
+}
