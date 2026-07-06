@@ -24,11 +24,30 @@ interface Ctx {
   companies: CompanyRow[];
   activities: ActivityRow[];
   companyName: Map<string, string>;
+  dealCompany: Map<string, string>;    // deal id -> company id
+  contactCompany: Map<string, string>; // contact id -> company id
   lastTouchByDeal: Map<string, number>;
   futureTaskDealIds: Set<string>;
   stalledDealDays: number;
   now: Date;
 }
+
+/** Best-effort firm resolution for an activity: direct company association,
+ * else via its deal, else via its contact. */
+function activityCompanyId(ctx: Ctx, a: ActivityRow): string | null {
+  return (
+    a.company_hubspot_id ??
+    (a.deal_hubspot_id ? ctx.dealCompany.get(a.deal_hubspot_id) : null) ??
+    (a.contact_hubspot_id ? ctx.contactCompany.get(a.contact_hubspot_id) : null) ??
+    null
+  );
+}
+
+const EMAIL_DIRECTIONS: Record<string, string> = {
+  EMAIL: "sent",
+  INCOMING_EMAIL: "received",
+  FORWARDED_EMAIL: "forwarded",
+};
 
 function dealRow(ctx: Ctx, d: DealRow, subtitle?: string): DrillRow {
   return {
@@ -45,13 +64,19 @@ function activityRows(ctx: Ctx, filter: (a: ActivityRow) => boolean): DrillRow[]
   return ctx.activities
     .filter((a) => a.occurred_at && new Date(a.occurred_at) >= weekStart && filter(a))
     .sort((a, b) => (b.occurred_at ?? "").localeCompare(a.occurred_at ?? ""))
-    .map((a) => ({
-      title: a.subject ?? a.outcome ?? a.kind,
-      subtitle: a.outcome ?? undefined,
-      companyId: a.company_hubspot_id,
-      dealId: a.deal_hubspot_id,
-      when: a.occurred_at,
-    }));
+    .map((a) => {
+      const companyId = activityCompanyId(ctx, a);
+      const firm = companyId ? ctx.companyName.get(companyId) : null;
+      const outcome = a.outcome ? (EMAIL_DIRECTIONS[a.outcome] ?? a.outcome) : null;
+      return {
+        // Firm first - that's what you scan the list by.
+        title: firm || a.subject || a.outcome || a.kind,
+        subtitle: [a.subject, outcome].filter(Boolean).join(" - ") || undefined,
+        companyId,
+        dealId: a.deal_hubspot_id,
+        when: a.occurred_at,
+      };
+    });
 }
 
 const stageMetric = (stageId: string) => (ctx: Ctx) =>
@@ -170,7 +195,7 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
     : METRICS[metric];
   if (!def) return null;
 
-  const { settings, deals, companies, activities } = await fetchCore();
+  const { settings, deals, companies, contacts, activities } = await fetchCore();
   const now = new Date();
   const mine = <T extends { owner_id: string | null }>(xs: T[]) =>
     ownerId ? xs.filter((x) => x.owner_id === ownerId) : xs;
@@ -199,6 +224,15 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
     companies,
     activities: scopedActivities,
     companyName: new Map(companies.map((c) => [c.hubspot_id, c.name ?? c.domain ?? ""])),
+    dealCompany: new Map(
+      deals.filter((d) => d.company_hubspot_id)
+        .map((d) => [d.hubspot_id, d.company_hubspot_id as string]),
+    ),
+    contactCompany: new Map(
+      (contacts as { hubspot_id: string; company_hubspot_id: string | null }[])
+        .filter((c) => c.company_hubspot_id)
+        .map((c) => [c.hubspot_id, c.company_hubspot_id as string]),
+    ),
     lastTouchByDeal,
     futureTaskDealIds,
     stalledDealDays: settings.stalledDealDays,
