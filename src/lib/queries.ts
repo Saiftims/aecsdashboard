@@ -52,7 +52,6 @@ export interface ActivityRow {
   kind: string;
   owner_id: string | null;
   subject: string | null;
-  body: string | null;
   outcome: string | null;
   activity_type: string | null;
   contact_hubspot_id: string | null;
@@ -70,7 +69,13 @@ export async function fetchCore() {
     sb.from("deals").select("*").then((r) => (r.data ?? []) as DealRow[]),
     sb.from("companies").select("*").then((r) => (r.data ?? []) as CompanyRow[]),
     sb.from("contacts").select("hubspot_id, email, first_name, last_name, company_hubspot_id, owner_id, lifecycle_stage, properties"),
-    sb.from("activities").select("*").then((r) => (r.data ?? []) as ActivityRow[]),
+    // Note: body/properties intentionally excluded - large payloads (215+ note
+    // bodies) that no dashboard aggregate needs.
+    sb.from("activities").select(
+      "hubspot_id, kind, owner_id, subject, outcome, activity_type, " +
+      "contact_hubspot_id, deal_hubspot_id, company_hubspot_id, " +
+      "occurred_at, due_at, completed",
+    ).then((r) => (r.data ?? []) as unknown as ActivityRow[]),
   ]);
   return { settings, deals, companies, contacts: contacts.data ?? [], activities };
 }
@@ -304,7 +309,7 @@ export async function aeDashboard(ownerId?: string | null) {
       `No touch in ${settings.stalledDealDays}+ days`);
   }
   for (const a of activities) {
-    if (a.kind === "task" && !a.completed && (a.body ?? "").includes("[type:walk_in]")) {
+    if (a.kind === "task" && !a.completed && a.activity_type === "walk_in") {
       queue.push({
         priority: 8, bucket: "Walk-ins scheduled",
         title: a.subject ?? "Walk-in", detail: "Planned LA walk-in",

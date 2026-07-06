@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { env } from "@/lib/env";
 
 /** Auth-aware client for server components / route handlers (RLS enforced). */
@@ -42,8 +43,10 @@ export interface AppUser {
   hubspot_owner_id: string | null;
 }
 
-/** Current app user (or null when unauthenticated). */
-export async function currentAppUser(): Promise<AppUser | null> {
+/** Current app user (or null when unauthenticated). Wrapped in React cache()
+ * so layout + page share ONE lookup per request instead of hitting Supabase
+ * auth twice (matters: each round trip is a network hop to Supabase). */
+export const currentAppUser = cache(async (): Promise<AppUser | null> => {
   const sb = await supabaseServer();
   const {
     data: { user },
@@ -51,4 +54,4 @@ export async function currentAppUser(): Promise<AppUser | null> {
   if (!user) return null;
   const { data } = await sb.from("app_users").select("*").eq("id", user.id).single();
   return (data as AppUser) ?? null;
-}
+});
