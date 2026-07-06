@@ -1,6 +1,8 @@
 /** HubSpot -> Supabase cache sync (idempotent upserts keyed by HubSpot id).
  * Incremental via the search API (hs_lastmodifieddate); full for backfills. */
-import { hsListAll, hsListModifiedSince, type HsObject } from "@/lib/hubspot/client";
+import {
+  HubSpotError, hsListAll, hsListModifiedSince, type HsObject,
+} from "@/lib/hubspot/client";
 import { SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
 import { supabaseService } from "@/lib/supabase/server";
 
@@ -48,6 +50,11 @@ const ENGAGEMENTS: Record<string, string[]> = {
   notes: ["hs_timestamp", "hs_note_body", "hubspot_owner_id"],
   tasks: ["hs_timestamp", "hs_task_subject", "hs_task_body", "hs_task_status",
           "hs_task_type", "hubspot_owner_id"],
+  // Requires the private app to have email scopes (sales-email-read,
+  // crm.objects.emails.read, crm.schemas.emails.read). Until granted, this
+  // fetch 403s and is skipped gracefully - everything else still syncs.
+  emails: ["hs_timestamp", "hs_email_subject", "hs_email_direction",
+           "hs_email_status", "hubspot_owner_id"],
 };
 
 function assocIds(o: HsObject, kind: string): string[] {
@@ -156,8 +163,21 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   // ---- engagements (always full: volumes are small; search API not available
   // for all engagement types on all tiers) ----
   const activityIds: string[] = [];
+  let engagementScopeMissing = false;
   for (const [kind, props] of Object.entries(ENGAGEMENTS)) {
-    const rows = await hsListAll(kind, props, ["contacts", "deals", "companies"]);
+    let rows;
+    try {
+      rows = await hsListAll(kind, props, ["contacts", "deals", "companies"]);
+    } catch (e) {
+      // Missing scope (e.g. emails before the private app is upgraded) must
+      // not fail the whole sync - skip the kind and continue.
+      if (e instanceof HubSpotError && e.status === 403) {
+        stats[`${kind}_skipped_no_scope`] = 1;
+        engagementScopeMissing = true;
+        continue;
+      }
+      throw e;
+    }
     stats[kind] = rows.length;
     activityIds.push(...rows.map((r) => r.id));
     if (!rows.length) continue;
@@ -168,7 +188,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
           a.properties.hs_note_body ?? a.properties.hs_task_body ?? null;
         const subject =
           a.properties.hs_call_title ?? a.properties.hs_meeting_title ??
-          a.properties.hs_task_subject ?? null;
+          a.properties.hs_task_subject ?? a.properties.hs_email_subject ?? null;
         return {
           hubspot_id: a.id,
           kind: kind.slice(0, -1), // call/meeting/note/task
@@ -179,6 +199,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
             parseMarker(body, "outcome") ??
             a.properties.hs_call_disposition ??
             a.properties.hs_meeting_outcome ??
+            a.properties.hs_email_direction ??
             null,
           activity_type: parseMarker(body, "type"),
           contact_hubspot_id: assocIds(a, "contacts")[0] ?? null,
@@ -196,9 +217,10 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
     );
   }
 
-  // Engagements are always fetched in full, so stale ones can always be purged;
+  // Engagements are always fetched in full, so stale ones can always be purged
+  // (unless a kind was skipped for missing scope - then the id list is partial);
   // core objects only on full mode (incremental fetches are partial by design).
-  await purgeStale(sb, "activities", activityIds);
+  if (!engagementScopeMissing) await purgeStale(sb, "activities", activityIds);
   if (mode === "full") {
     await purgeStale(sb, "deals", fetchedIds.deals ?? []);
     await purgeStale(sb, "contacts", fetchedIds.contacts ?? []);
