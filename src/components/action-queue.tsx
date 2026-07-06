@@ -31,10 +31,24 @@ export function ActionQueue({ items, title }: { items: QueueItem[]; title: strin
                     <span className="truncate text-xs text-zinc-500">{r.detail}</span>
                   </li>
                 ))}
-                {rows.length > 8 ? (
-                  <li className="text-xs text-zinc-400">+{rows.length - 8} more</li>
-                ) : null}
               </ul>
+              {rows.length > 8 ? (
+                <details className="mt-1">
+                  <summary className="cursor-pointer select-none text-xs font-medium text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                    +{rows.length - 8} more
+                  </summary>
+                  <ul className="mt-1 space-y-1">
+                    {rows.slice(8).map((r, i) => (
+                      <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                        <Link href={r.href} className="font-medium hover:underline">
+                          {r.title}
+                        </Link>
+                        <span className="truncate text-xs text-zinc-500">{r.detail}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
             </div>
           ))}
         </div>
