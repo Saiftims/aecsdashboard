@@ -1,5 +1,6 @@
 /** Small shadcn-style UI kit (Tailwind). */
 import { clsx } from "clsx";
+import Link from "next/link";
 import type { HTMLAttributes, ReactNode } from "react";
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
@@ -24,15 +25,18 @@ export function CardHeader({ title, action }: { title: ReactNode; action?: React
 }
 
 export function Stat({
-  label, value, sub, tone,
+  label, value, sub, tone, href,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   tone?: "good" | "warn" | "bad";
+  href?: string;
 }) {
-  return (
-    <Card className="px-4 py-3">
+  const inner = (
+    <Card
+      className={clsx("px-4 py-3", href && "transition hover:border-zinc-400 hover:shadow-md dark:hover:border-zinc-600")}
+    >
       <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
       <div
         className={clsx("mt-1 text-2xl font-bold", {
@@ -46,6 +50,7 @@ export function Stat({
       {sub ? <div className="mt-0.5 text-xs text-zinc-500">{sub}</div> : null}
     </Card>
   );
+  return href ? <Link href={href} className="block">{inner}</Link> : inner;
 }
 
 export function Badge({

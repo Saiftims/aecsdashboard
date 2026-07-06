@@ -32,22 +32,22 @@ export default async function ExecutivePage() {
           <Stat label="Contact rate" value={kpis.contactRate === null ? "-" : `${kpis.contactRate}%`} />
           <Stat label="Demo booking rate" value={kpis.demoBookingRate === null ? "-" : `${kpis.demoBookingRate}%`} />
           <Stat label="Demo completion" value={kpis.demoCompletionRate === null ? "-" : `${kpis.demoCompletionRate}%`} />
-          <Stat label="Qualified (open)" value={kpis.qualifiedOpen} />
-          <Stat label="First-case commitments" value={kpis.firstCaseCommitted} />
-          <Stat label="New firms this month" value={kpis.newFirmsThisMonth} tone="good" />
-          <Stat label="Pipeline value (est)" value={fmtMoney(kpis.pipelineValue)} />
-          <Stat label="Revenue closed (month)" value={fmtMoney(kpis.revenueClosedThisMonth)} />
+          <Stat label="Qualified (open)" value={kpis.qualifiedOpen} href="/drill/qualified" />
+          <Stat label="First-case commitments" value={kpis.firstCaseCommitted} href="/drill/first_case_commitments" />
+          <Stat label="New firms this month" value={kpis.newFirmsThisMonth} tone="good" href="/drill/firms_closed" />
+          <Stat label="Pipeline value (est)" value={fmtMoney(kpis.pipelineValue)} href="/drill/leads_assigned" />
+          <Stat label="Revenue closed (month)" value={fmtMoney(kpis.revenueClosedThisMonth)} href="/drill/firms_closed" />
         </div>
       </section>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Customers & Usage</h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Stat label="Customer firms" value={kpis.totalCustomerFirms} />
-          <Stat label="Activated" value={kpis.activatedFirms} tone="good" />
-          <Stat label="Repeat users" value={kpis.repeatUsers} />
-          <Stat label="Healthy accounts" value={kpis.healthyAccounts} tone="good" />
-          <Stat label="At risk" value={kpis.atRiskAccounts} tone={kpis.atRiskAccounts ? "bad" : "good"} />
+          <Stat label="Customer firms" value={kpis.totalCustomerFirms} href="/firms" />
+          <Stat label="Activated" value={kpis.activatedFirms} tone="good" href="/drill/activation_activated" />
+          <Stat label="Repeat users" value={kpis.repeatUsers} href="/drill/activation_repeat_user" />
+          <Stat label="Healthy accounts" value={kpis.healthyAccounts} tone="good" href="/firms?health=green" />
+          <Stat label="At risk" value={kpis.atRiskAccounts} tone={kpis.atRiskAccounts ? "bad" : "good"} href="/drill/activation_at_risk" />
           <Stat label="Cases this month" value={kpis.casesThisMonth} />
           <Stat
             label="Est. case revenue (month)"

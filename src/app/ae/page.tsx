@@ -21,39 +21,41 @@ export default async function AePage() {
       <h1 className="text-2xl font-bold">AE Dashboard</h1>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        <Stat label="Leads assigned" value={metrics.leadsAssigned} />
+        <Stat label="Leads assigned" value={metrics.leadsAssigned} href="/drill/leads_assigned" />
         <Stat
           label="Awaiting first contact"
           value={metrics.newAwaitingContact}
           tone={metrics.newAwaitingContact ? "warn" : "good"}
+          href="/drill/awaiting_first_contact"
         />
         <Stat
           label="Speed to lead (median)"
           value={metrics.medianSpeedToLeadHours === null ? "-" : `${metrics.medianSpeedToLeadHours.toFixed(1)}h`}
           tone={metrics.medianSpeedToLeadHours !== null && metrics.medianSpeedToLeadHours <= 2 ? "good" : "warn"}
         />
-        <Stat label="Calls (7d)" value={metrics.calls} />
-        <Stat label="Emails (7d)" value={metrics.emails} />
-        <Stat label="Voicemails (7d)" value={metrics.voicemails} />
-        <Stat label="LinkedIn (7d)" value={metrics.linkedin} />
-        <Stat label="In-person visits (7d)" value={metrics.inPersonVisits} />
-        <Stat label="Connected convos (7d)" value={metrics.connected} />
-        <Stat label="Qualified (open)" value={metrics.qualified} />
-        <Stat label="Demos booked" value={metrics.demosBooked} />
-        <Stat label="Demos completed" value={metrics.demosCompleted} />
-        <Stat label="Demo no-shows (7d)" value={metrics.demoNoShows} />
-        <Stat label="First cases identified" value={metrics.firstCasesIdentified} />
-        <Stat label="First-case commitments" value={metrics.firstCaseCommitments} tone="good" />
-        <Stat label="Firms closed" value={metrics.newFirmsClosed} tone="good" />
-        <Stat label="Revenue closed" value={`$${Math.round(metrics.revenueClosed).toLocaleString()}`} />
-        <Stat label="Overdue tasks" value={metrics.overdueTasks} tone={metrics.overdueTasks ? "bad" : "good"} />
+        <Stat label="Calls (7d)" value={metrics.calls} href="/drill/calls_7d" />
+        <Stat label="Emails (7d)" value={metrics.emails} href="/drill/emails_7d" />
+        <Stat label="Voicemails (7d)" value={metrics.voicemails} href="/drill/voicemails_7d" />
+        <Stat label="LinkedIn (7d)" value={metrics.linkedin} href="/drill/linkedin_7d" />
+        <Stat label="In-person visits (7d)" value={metrics.inPersonVisits} href="/drill/visits_7d" />
+        <Stat label="Connected convos (7d)" value={metrics.connected} href="/drill/connected_7d" />
+        <Stat label="Qualified (open)" value={metrics.qualified} href="/drill/qualified" />
+        <Stat label="Demos booked" value={metrics.demosBooked} href="/drill/demos_booked" />
+        <Stat label="Demos completed" value={metrics.demosCompleted} href="/drill/demos_completed" />
+        <Stat label="Demo no-shows (7d)" value={metrics.demoNoShows} href="/drill/demo_noshows_7d" />
+        <Stat label="First cases identified" value={metrics.firstCasesIdentified} href="/drill/first_cases_identified" />
+        <Stat label="First-case commitments" value={metrics.firstCaseCommitments} tone="good" href="/drill/first_case_commitments" />
+        <Stat label="Firms closed" value={metrics.newFirmsClosed} tone="good" href="/drill/firms_closed" />
+        <Stat label="Revenue closed" value={`$${Math.round(metrics.revenueClosed).toLocaleString()}`} href="/drill/firms_closed" />
+        <Stat label="Overdue tasks" value={metrics.overdueTasks} tone={metrics.overdueTasks ? "bad" : "good"} href="/drill/overdue_tasks" />
         <Stat
           label="Deals w/o future task"
           value={metrics.dealsNoFutureTask}
           tone={metrics.dealsNoFutureTask ? "bad" : "good"}
           sub="target: zero"
+          href="/drill/deals_no_future_task"
         />
-        <Stat label="Stalled deals" value={metrics.stalledDeals} tone={metrics.stalledDeals ? "warn" : "good"} />
+        <Stat label="Stalled deals" value={metrics.stalledDeals} tone={metrics.stalledDeals ? "warn" : "good"} href="/drill/stalled" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

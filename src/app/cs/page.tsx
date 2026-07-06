@@ -20,28 +20,28 @@ export default async function CsPage() {
       <h1 className="text-2xl font-bold">Customer Success</h1>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        <Stat label="New handoffs" value={metrics.newHandoffs} tone={metrics.newHandoffs ? "warn" : "good"} />
-        <Stat label="Awaiting acceptance" value={metrics.awaitingAcceptance} />
-        <Stat label="Onboarding scheduled" value={metrics.onboardingScheduled} />
-        <Stat label="Onboarding completed" value={metrics.onboardingCompleted} />
-        <Stat label="No first case yet" value={metrics.firmsWithoutFirstCase} tone={metrics.firmsWithoutFirstCase ? "warn" : "good"} />
+        <Stat label="New handoffs" value={metrics.newHandoffs} tone={metrics.newHandoffs ? "warn" : "good"} href="/drill/activation_handoff_pending" />
+        <Stat label="Awaiting acceptance" value={metrics.awaitingAcceptance} href="/drill/activation_handoff_pending" />
+        <Stat label="Onboarding scheduled" value={metrics.onboardingScheduled} href="/drill/activation_onboarding_scheduled" />
+        <Stat label="Onboarding completed" value={metrics.onboardingCompleted} href="/drill/activation_onboarding_completed" />
+        <Stat label="No first case yet" value={metrics.firmsWithoutFirstCase} tone={metrics.firmsWithoutFirstCase ? "warn" : "good"} href="/drill/activation" />
         <Stat
           label="Time to first case"
           value={metrics.medianTimeToFirstCaseDays === null ? "-" : `${metrics.medianTimeToFirstCaseDays}d`}
           sub="median"
         />
-        <Stat label="Activated firms" value={metrics.activatedFirms} tone="good" />
+        <Stat label="Activated firms" value={metrics.activatedFirms} tone="good" href="/drill/activation_activated" />
         <Stat label="Activation rate" value={metrics.activationRate === null ? "-" : `${metrics.activationRate}%`} />
         <Stat label="Repeat-user rate" value={metrics.repeatUserRate === null ? "-" : `${metrics.repeatUserRate}%`} />
-        <Stat label="Monthly active firms" value={`${metrics.monthlyActiveFirms}/${metrics.totalCustomerFirms}`} />
+        <Stat label="Monthly active firms" value={`${metrics.monthlyActiveFirms}/${metrics.totalCustomerFirms}`} href="/firms?active=yes" />
         <Stat label="Cases this month" value={metrics.casesThisMonth} />
         <Stat label="Revenue this month (est)" value={`$${Math.round(metrics.revenueThisMonth).toLocaleString()}`} />
-        <Stat label="Inactive 30d+" value={metrics.inactive30} tone={metrics.inactive30 ? "warn" : "good"} />
-        <Stat label="Inactive 45d+" value={metrics.inactive45} tone={metrics.inactive45 ? "bad" : "good"} />
-        <Stat label="At risk" value={metrics.atRisk} tone={metrics.atRisk ? "bad" : "good"} />
-        <Stat label="Reactivation in progress" value={metrics.reactivationInProgress} />
-        <Stat label="Reactivated" value={metrics.reactivated} tone="good" />
-        <Stat label="Open issues" value={metrics.openIssues} tone={metrics.openIssues ? "bad" : "good"} />
+        <Stat label="Inactive 30d+" value={metrics.inactive30} tone={metrics.inactive30 ? "warn" : "good"} href="/drill/inactive_30" />
+        <Stat label="Inactive 45d+" value={metrics.inactive45} tone={metrics.inactive45 ? "bad" : "good"} href="/drill/inactive_45" />
+        <Stat label="At risk" value={metrics.atRisk} tone={metrics.atRisk ? "bad" : "good"} href="/drill/activation_at_risk" />
+        <Stat label="Reactivation in progress" value={metrics.reactivationInProgress} href="/drill/activation_reactivation_in_progress" />
+        <Stat label="Reactivated" value={metrics.reactivated} tone="good" href="/drill/activation_repeat_user" />
+        <Stat label="Open issues" value={metrics.openIssues} tone={metrics.openIssues ? "bad" : "good"} href="/firms?health=red" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
