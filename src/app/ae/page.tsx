@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { ActionQueue } from "@/components/action-queue";
-import { Card, CardHeader, Stat, Table } from "@/components/ui";
+import { Card, CardHeader, Stat, Table, TargetCard } from "@/components/ui";
 import { aeDashboard } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
 
@@ -12,13 +12,31 @@ export default async function AePage() {
   if (user.role === "cs") redirect("/cs");
 
   // AEs see their own book; executives see everything.
-  const { metrics, queue, stageCounts } = await aeDashboard(
+  const { metrics, queue, stageCounts, today } = await aeDashboard(
     user.role === "ae" ? user.hubspot_owner_id : null,
   );
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">AE Dashboard</h1>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Today
+        </h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <TargetCard label="Calls today" value={today.calls.value} target={today.calls.target} sub="incl. voicemails" />
+          <TargetCard label="Emails today" value={today.emails.value} target={today.emails.target} />
+          <TargetCard label="Follow-ups completed" value={today.followups.value} target={today.followups.target} sub="due tasks cleared" />
+          <TargetCard
+            label="New leads in SLA"
+            value={today.newLeadsSla.value}
+            target={today.newLeadsSla.target}
+            sub={today.newLeadsSla.isSla ? "of today's new leads" : "no new leads yet today"}
+          />
+          <TargetCard label="Tasks completed" value={today.tasksCompleted.value} target={today.tasksCompleted.target} />
+        </div>
+      </section>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <Stat label="Leads assigned" value={metrics.leadsAssigned} href="/drill/leads_assigned" />

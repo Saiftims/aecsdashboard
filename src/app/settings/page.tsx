@@ -52,6 +52,19 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
+          <CardHeader title="AE daily targets" />
+          <div className="space-y-3 p-4">
+            <SettingField settingKey="daily_calls_target" label="Calls per day" defaultValue={settings.dailyCallsTarget} />
+            <SettingField settingKey="daily_emails_target" label="Emails per day" defaultValue={settings.dailyEmailsTarget} />
+            <SettingField settingKey="daily_followups_target" label="Follow-ups completed per day" defaultValue={settings.dailyFollowupsTarget} />
+            <SettingField settingKey="daily_new_leads_target" label="New leads contacted per day (fallback when none arrive)" defaultValue={settings.dailyNewLeadsTarget} />
+            <SettingField settingKey="daily_tasks_target" label="Tasks completed per day" defaultValue={settings.dailyTasksTarget} />
+            <SettingField settingKey="sla_first_contact_hours" label="First-contact SLA (hours)" defaultValue={settings.slaFirstContactHours} />
+            <SettingField settingKey="dashboard_timezone" label="Dashboard timezone (day boundaries)" defaultValue={settings.dashboardTimezone} type="text" />
+          </div>
+        </Card>
+
+        <Card>
           <CardHeader title="HubSpot" />
           <div className="space-y-3 p-4">
             <SettingField settingKey="hubspot_portal_id" label="Portal ID" defaultValue={settings.hubspotPortalId} type="text" />

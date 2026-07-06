@@ -53,6 +53,36 @@ export function Stat({
   return href ? <Link href={href} className="block">{inner}</Link> : inner;
 }
 
+/** Daily target card: "Calls today 8 / 30" with a progress bar. */
+export function TargetCard({
+  label, value, target, sub,
+}: {
+  label: string;
+  value: number;
+  target: number;
+  sub?: string;
+}) {
+  const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
+  const done = target > 0 && value >= target;
+  return (
+    <Card className="px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1">
+        <span className={clsx("text-2xl font-bold", done && "text-emerald-600")}>{value}</span>
+        <span className="text-sm text-zinc-400">/ {target}</span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+        <div
+          className={clsx("h-full rounded-full transition-all",
+            done ? "bg-emerald-500" : pct >= 50 ? "bg-blue-500" : "bg-amber-500")}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {sub ? <div className="mt-1 text-xs text-zinc-500">{sub}</div> : null}
+    </Card>
+  );
+}
+
 export function Badge({
   children, tone = "default",
 }: {

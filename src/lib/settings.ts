@@ -7,6 +7,13 @@ export interface GtmSettings {
   secondCaseTargetDays: number;
   healthyCasesPer30d: number;
   stalledDealDays: number;
+  dashboardTimezone: string;
+  slaFirstContactHours: number;
+  dailyCallsTarget: number;
+  dailyEmailsTarget: number;
+  dailyFollowupsTarget: number;
+  dailyNewLeadsTarget: number;
+  dailyTasksTarget: number;
   hubspotPortalId: string;
   hubspotSalesPipelineId: string;
   aeWeeklyTargets: Record<string, unknown>;
@@ -22,6 +29,13 @@ const DEFAULTS: GtmSettings = {
   secondCaseTargetDays: 45,
   healthyCasesPer30d: 2,
   stalledDealDays: 14,
+  dashboardTimezone: "America/Los_Angeles",
+  slaFirstContactHours: 2,
+  dailyCallsTarget: 30,
+  dailyEmailsTarget: 20,
+  dailyFollowupsTarget: 25,
+  dailyNewLeadsTarget: 5,
+  dailyTasksTarget: 30,
   hubspotPortalId: "148349267",
   hubspotSalesPipelineId: "default",
   aeWeeklyTargets: {},
@@ -37,6 +51,13 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   second_case_target_days: "secondCaseTargetDays",
   healthy_cases_per_30d: "healthyCasesPer30d",
   stalled_deal_days: "stalledDealDays",
+  dashboard_timezone: "dashboardTimezone",
+  sla_first_contact_hours: "slaFirstContactHours",
+  daily_calls_target: "dailyCallsTarget",
+  daily_emails_target: "dailyEmailsTarget",
+  daily_followups_target: "dailyFollowupsTarget",
+  daily_new_leads_target: "dailyNewLeadsTarget",
+  daily_tasks_target: "dailyTasksTarget",
   hubspot_portal_id: "hubspotPortalId",
   hubspot_sales_pipeline_id: "hubspotSalesPipelineId",
   ae_weekly_targets: "aeWeeklyTargets",
@@ -60,6 +81,13 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.secondCaseTargetDays = Number(out.secondCaseTargetDays) || 45;
   out.healthyCasesPer30d = Number(out.healthyCasesPer30d) || 2;
   out.stalledDealDays = Number(out.stalledDealDays) || 14;
+  out.slaFirstContactHours = Number(out.slaFirstContactHours) || 2;
+  out.dailyCallsTarget = Number(out.dailyCallsTarget) || 30;
+  out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
+  out.dailyFollowupsTarget = Number(out.dailyFollowupsTarget) || 25;
+  out.dailyNewLeadsTarget = Number(out.dailyNewLeadsTarget) || 5;
+  out.dailyTasksTarget = Number(out.dailyTasksTarget) || 30;
+  out.dashboardTimezone = String(out.dashboardTimezone || "America/Los_Angeles");
   return out;
 }
 

@@ -9,6 +9,9 @@ const ALLOWED_KEYS = new Set([
   "second_case_target_days", "healthy_cases_per_30d", "stalled_deal_days",
   "hubspot_portal_id", "hubspot_sales_pipeline_id",
   "ae_weekly_targets", "cs_targets", "ae_scorecard_weights", "cs_scorecard_weights",
+  "dashboard_timezone", "sla_first_contact_hours",
+  "daily_calls_target", "daily_emails_target", "daily_followups_target",
+  "daily_new_leads_target", "daily_tasks_target",
 ]);
 
 const schema = z.object({ key: z.string(), value: z.unknown() });

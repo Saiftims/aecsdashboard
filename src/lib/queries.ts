@@ -62,6 +62,16 @@ export interface ActivityRow {
   occurred_at: string | null;
   due_at: string | null;
   completed: boolean | null;
+  /** For tasks: hs_lastmodifieddate, used as completion-time approximation. */
+  modified_at: string | null;
+}
+
+/** Same calendar day in the dashboard timezone (default LA). */
+export function sameLocalDay(a: string | Date, b: string | Date, tz: string): boolean {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  return fmt.format(new Date(a)) === fmt.format(new Date(b));
 }
 
 export async function fetchCore() {
@@ -76,7 +86,8 @@ export async function fetchCore() {
     sb.from("activities").select(
       "hubspot_id, kind, owner_id, subject, outcome, activity_type, " +
       "contact_hubspot_id, deal_hubspot_id, company_hubspot_id, " +
-      "occurred_at, due_at, completed",
+      "occurred_at, due_at, completed, " +
+      "modified_at:properties->>hs_lastmodifieddate",
     ).then((r) => (r.data ?? []) as unknown as ActivityRow[]),
   ]);
   return { settings, deals, companies, contacts: contacts.data ?? [], activities };
@@ -296,6 +307,45 @@ export async function aeDashboard(ownerId?: string | null) {
   const speedSamples = salesDeals.map((d) => firstResponseHours(d, activities))
     .filter((h): h is number => h !== null && h < 24 * 14);
 
+  // ---- today's activity vs daily targets ------------------------------------
+  const tz = settings.dashboardTimezone;
+  const isToday = (ts: string | null) => Boolean(ts && sameLocalDay(ts, now, tz));
+  const todayActs = activities.filter((a) => mine(a) && isToday(a.occurred_at));
+  const actType = (a: ActivityRow) => a.activity_type ?? a.kind;
+
+  const completedTasksToday = activities.filter(
+    (a) => mine(a) && a.kind === "task" && a.completed && isToday(a.modified_at),
+  );
+  // Follow-ups completed = completed today AND was due today or earlier
+  // (cleared from the follow-up list, not a future task closed early).
+  const followupsToday = completedTasksToday.filter(
+    (a) => a.due_at && new Date(a.due_at).getTime() <= now.getTime(),
+  );
+
+  // New leads today + SLA: first meaningful touch within N hours of creation.
+  const newLeadsToday = salesDeals.filter(
+    (d) => d.hs_created_at && isToday(d.hs_created_at),
+  );
+  const slaMs = settings.slaFirstContactHours * 3600 * 1000;
+  const contactedWithinSla = newLeadsToday.filter((d) => {
+    const created = new Date(d.hs_created_at!).getTime();
+    const touches = activities
+      .filter((a) => isMeaningfulTouch(a) && a.occurred_at &&
+        (a.deal_hubspot_id === d.hubspot_id ||
+         (d.primary_contact_id && a.contact_hubspot_id === d.primary_contact_id)))
+      .map((a) => new Date(a.occurred_at!).getTime())
+      .filter((t) => t >= created);
+    return touches.length > 0 && Math.min(...touches) - created <= slaMs;
+  });
+
+  const today = {
+    calls: { value: todayActs.filter((a) => actType(a) === "call" || actType(a) === "voicemail").length, target: settings.dailyCallsTarget },
+    emails: { value: todayActs.filter((a) => actType(a) === "email").length, target: settings.dailyEmailsTarget },
+    followups: { value: followupsToday.length, target: settings.dailyFollowupsTarget },
+    newLeadsSla: { value: contactedWithinSla.length, target: newLeadsToday.length || settings.dailyNewLeadsTarget, isSla: newLeadsToday.length > 0 },
+    tasksCompleted: { value: completedTasksToday.length, target: settings.dailyTasksTarget },
+  };
+
   // ---- prioritized daily action queue --------------------------------------
   const companyName = new Map(companies.map((c) => [c.hubspot_id, c.name ?? c.domain ?? ""]));
   const queue: QueueItem[] = [];
@@ -369,6 +419,7 @@ export async function aeDashboard(ownerId?: string | null) {
 
   return {
     settings,
+    today,
     metrics: {
       leadsAssigned: salesDeals.length,
       // Never contacted = MQL or Attempting Contact stage with no real touch
