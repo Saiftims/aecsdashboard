@@ -43,9 +43,26 @@ export default async function AePage() {
         <Stat label="Demos booked" value={metrics.demosBooked} href="/drill/demos_booked" />
         <Stat label="Demos completed" value={metrics.demosCompleted} href="/drill/demos_completed" />
         <Stat label="Demo no-shows (7d)" value={metrics.demoNoShows} href="/drill/demo_noshows_7d" />
-        <Stat label="First cases identified" value={metrics.firstCasesIdentified} href="/drill/first_cases_identified" />
-        <Stat label="First-case commitments" value={metrics.firstCaseCommitments} tone="good" href="/drill/first_case_commitments" />
-        <Stat label="Firms closed" value={metrics.newFirmsClosed} tone="good" href="/drill/firms_closed" />
+        <Stat
+          label="First-case commitments"
+          value={metrics.firstCaseCommitments}
+          tone="good"
+          sub="committed, no case yet"
+          href="/drill/first_case_commitments"
+        />
+        <Stat
+          label="First cases identified"
+          value={metrics.firstCasesIdentified}
+          sub="1 case in motion"
+          href="/drill/first_cases_identified"
+        />
+        <Stat
+          label="Firms closed"
+          value={metrics.newFirmsClosed}
+          tone="good"
+          sub="closed won (3+ cases)"
+          href="/drill/firms_closed"
+        />
         <Stat label="Revenue closed" value={`$${Math.round(metrics.revenueClosed).toLocaleString()}`} href="/drill/firms_closed" />
         <Stat label="Overdue tasks" value={metrics.overdueTasks} tone={metrics.overdueTasks ? "bad" : "good"} href="/drill/overdue_tasks" />
         <Stat
