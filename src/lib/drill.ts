@@ -1,7 +1,7 @@
 /** Drill-down lists behind the dashboard stat tiles. Each metric returns the
  * underlying records with links to the related firm/deal. */
 import { differenceInDays, subDays } from "date-fns";
-import { SALES_STAGES, SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
+import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
   fetchCore, isOpenSalesDeal, type ActivityRow, type CompanyRow, type DealRow,
 } from "@/lib/queries";
@@ -81,8 +81,10 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
   demos_completed: {
     label: "Demos completed",
     rows: (ctx) => {
-      const order = [SALES_STAGES.demoCompleted, SALES_STAGES.firstCaseIdentified,
-                     SALES_STAGES.firstCaseCommitted, SALES_STAGES.closedWon];
+      const order: string[] = [
+        SALES_STAGES.demoCompleted, SALES_STAGES.firstCaseIdentified,
+        SALES_STAGES.firstCaseCommitted, SALES_STAGES.closedWon,
+      ];
       return ctx.deals
         .filter((d) => order.includes(d.stage ?? ""))
         .map((d) => dealRow(ctx, d));
