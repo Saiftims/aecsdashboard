@@ -49,7 +49,8 @@ const ENGAGEMENTS: Record<string, string[]> = {
              "hs_meeting_outcome", "hs_meeting_start_time", "hubspot_owner_id"],
   notes: ["hs_timestamp", "hs_note_body", "hubspot_owner_id"],
   tasks: ["hs_timestamp", "hs_task_subject", "hs_task_body", "hs_task_status",
-          "hs_task_type", "hubspot_owner_id", "hs_lastmodifieddate"],
+          "hs_task_type", "hubspot_owner_id", "hs_lastmodifieddate",
+          "hs_task_completion_date"],
   // Requires the private app to have email scopes (sales-email-read,
   // crm.objects.emails.read, crm.schemas.emails.read). Until granted, this
   // fetch 403s and is skipped gracefully - everything else still syncs.

@@ -62,8 +62,16 @@ export interface ActivityRow {
   occurred_at: string | null;
   due_at: string | null;
   completed: boolean | null;
-  /** For tasks: hs_lastmodifieddate, used as completion-time approximation. */
+  /** For tasks: real completion timestamp when HubSpot provides it. */
+  completed_at: string | null;
+  /** For tasks: hs_lastmodifieddate, completion-time fallback. */
   modified_at: string | null;
+}
+
+/** Best available completion time for a completed task. */
+export function taskCompletedAt(a: ActivityRow): string | null {
+  if (!a.completed) return null;
+  return a.completed_at ?? a.modified_at;
 }
 
 /** Same calendar day in the dashboard timezone (default LA). */
@@ -87,6 +95,7 @@ export async function fetchCore() {
       "hubspot_id, kind, owner_id, subject, outcome, activity_type, " +
       "contact_hubspot_id, deal_hubspot_id, company_hubspot_id, " +
       "occurred_at, due_at, completed, " +
+      "completed_at:properties->>hs_task_completion_date, " +
       "modified_at:properties->>hs_lastmodifieddate",
     ).then((r) => (r.data ?? []) as unknown as ActivityRow[]),
   ]);
@@ -314,7 +323,7 @@ export async function aeDashboard(ownerId?: string | null) {
   const actType = (a: ActivityRow) => a.activity_type ?? a.kind;
 
   const completedTasksToday = activities.filter(
-    (a) => mine(a) && a.kind === "task" && a.completed && isToday(a.modified_at),
+    (a) => mine(a) && a.kind === "task" && a.completed && isToday(taskCompletedAt(a)),
   );
   // Follow-ups completed = completed today AND was due today or earlier
   // (cleared from the follow-up list, not a future task closed early).
