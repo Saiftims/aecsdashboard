@@ -108,6 +108,45 @@ function reachedAtLeast(d: DealRow, stageId: string): boolean {
   return cur >= 0 && want >= 0 && cur >= want;
 }
 
+/** A "meaningful touch" = real outreach: calls, meetings, emails, or notes
+ * explicitly logged through the quick logger ([type:...] marker). Excludes
+ * tasks and the agent's auto-generated context notes, which are not contact. */
+export function isMeaningfulTouch(a: ActivityRow): boolean {
+  if (a.kind === "task") return false;
+  if (a.kind === "note") return Boolean(a.activity_type);
+  return true; // call, meeting, email
+}
+
+/** Last meaningful-touch lookup for deals: checks activity on the deal itself
+ * AND on the deal's primary contact (Gmail-logged emails often associate with
+ * the contact only). Returns epoch ms or null if never touched. */
+export function buildLastTouchLookup(
+  activities: ActivityRow[],
+  now: Date,
+): (d: DealRow) => number | null {
+  const byDeal = new Map<string, number>();
+  const byContact = new Map<string, number>();
+  const nowMs = now.getTime();
+  for (const a of activities) {
+    if (!isMeaningfulTouch(a) || !a.occurred_at) continue;
+    const t = new Date(a.occurred_at).getTime();
+    if (t > nowMs) continue;
+    if (a.deal_hubspot_id) {
+      byDeal.set(a.deal_hubspot_id, Math.max(byDeal.get(a.deal_hubspot_id) ?? 0, t));
+    }
+    if (a.contact_hubspot_id) {
+      byContact.set(a.contact_hubspot_id,
+        Math.max(byContact.get(a.contact_hubspot_id) ?? 0, t));
+    }
+  }
+  return (d: DealRow) => {
+    const dealT = byDeal.get(d.hubspot_id);
+    const contactT = d.primary_contact_id ? byContact.get(d.primary_contact_id) : undefined;
+    const best = Math.max(dealT ?? 0, contactT ?? 0);
+    return best > 0 ? best : null;
+  };
+}
+
 function firstResponseHours(d: DealRow, activities: ActivityRow[]): number | null {
   const explicit = d.properties?.sw_first_response_hours;
   if (explicit) return Number(explicit);
@@ -245,17 +284,9 @@ export async function aeDashboard(ownerId?: string | null) {
   const futureTaskDealIds = new Set(
     openTasks.filter((a) => a.due_at && new Date(a.due_at) >= now).map((a) => a.deal_hubspot_id),
   );
-  const lastTouchByDeal = new Map<string, number>();
-  for (const a of activities) {
-    if (!a.deal_hubspot_id || !a.occurred_at || a.kind === "task") continue;
-    const t = new Date(a.occurred_at).getTime();
-    if (t <= now.getTime()) {
-      lastTouchByDeal.set(a.deal_hubspot_id,
-        Math.max(lastTouchByDeal.get(a.deal_hubspot_id) ?? 0, t));
-    }
-  }
+  const lastTouch = buildLastTouchLookup(activities, now);
   const stalled = openDeals.filter((d) => {
-    const last = lastTouchByDeal.get(d.hubspot_id) ??
+    const last = lastTouch(d) ??
       (d.hs_created_at ? new Date(d.hs_created_at).getTime() : 0);
     return differenceInDays(now, new Date(last)) > settings.stalledDealDays;
   });
@@ -266,7 +297,7 @@ export async function aeDashboard(ownerId?: string | null) {
   // ---- prioritized daily action queue --------------------------------------
   const companyName = new Map(companies.map((c) => [c.hubspot_id, c.name ?? c.domain ?? ""]));
   const queue: QueueItem[] = [];
-  const touchedDealIds = new Set(lastTouchByDeal.keys());
+  const touched = (d: DealRow) => lastTouch(d) !== null;
   const push = (priority: number, bucket: string, d: DealRow, detail: string) =>
     queue.push({
       priority, bucket, dealId: d.hubspot_id,
@@ -277,9 +308,9 @@ export async function aeDashboard(ownerId?: string | null) {
 
   for (const d of openDeals) {
     const ageDays = d.hs_created_at ? differenceInDays(now, new Date(d.hs_created_at)) : 99;
-    if (d.stage === SALES_STAGES.mql && ageDays <= 2) {
+    if (d.stage === SALES_STAGES.mql && ageDays <= 2 && !touched(d)) {
       push(1, "New inbound leads", d, `MQL created ${ageDays}d ago - contact now`);
-    } else if (d.stage === SALES_STAGES.mql && !touchedDealIds.has(d.hubspot_id)) {
+    } else if (d.stage === SALES_STAGES.mql && !touched(d)) {
       push(2, "Awaiting first contact", d, `No outreach logged yet (${ageDays}d old)`);
     }
   }
@@ -325,7 +356,7 @@ export async function aeDashboard(ownerId?: string | null) {
     metrics: {
       leadsAssigned: salesDeals.length,
       newAwaitingContact: openDeals.filter(
-        (d) => d.stage === SALES_STAGES.mql && !touchedDealIds.has(d.hubspot_id),
+        (d) => d.stage === SALES_STAGES.mql && !touched(d),
       ).length,
       medianSpeedToLeadHours: median(speedSamples),
       calls: typeCount("call"), emails: typeCount("email"),
@@ -511,13 +542,7 @@ export async function dataQuality() {
     (caseAccounts ?? []).flatMap((c) => [c.sw_organization_id ?? c.sw_account_id]).filter(Boolean),
   )] as string[];
 
-  const lastTouchByDeal = new Map<string, number>();
-  for (const a of activities) {
-    if (a.deal_hubspot_id && a.occurred_at && a.kind !== "task") {
-      lastTouchByDeal.set(a.deal_hubspot_id,
-        Math.max(lastTouchByDeal.get(a.deal_hubspot_id) ?? 0, new Date(a.occurred_at).getTime()));
-    }
-  }
+  const lastTouch = buildLastTouchLookup(activities, now);
 
   const dupEmails = findDuplicates(contacts.map((c) => c.email).filter(Boolean) as string[]);
   const dupDomains = findDuplicates(companies.map((c) => c.domain).filter(Boolean) as string[]);
@@ -550,7 +575,7 @@ export async function dataQuality() {
       (a) => a.kind === "task" && !a.completed && a.due_at && new Date(a.due_at) < now)
       .map((a) => ({ hubspot_id: a.hubspot_id, name: a.subject }))),
     check("Open deals with no activity 14+ days", openDeals.filter((d) => {
-      const last = lastTouchByDeal.get(d.hubspot_id) ??
+      const last = lastTouch(d) ??
         (d.hs_created_at ? new Date(d.hs_created_at).getTime() : 0);
       return differenceInDays(now, new Date(last)) > 14;
     })),

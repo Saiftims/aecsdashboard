@@ -3,7 +3,8 @@
 import { differenceInDays, subDays } from "date-fns";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
-  fetchCore, isOpenSalesDeal, type ActivityRow, type CompanyRow, type DealRow,
+  buildLastTouchLookup, fetchCore, isOpenSalesDeal,
+  type ActivityRow, type CompanyRow, type DealRow,
 } from "@/lib/queries";
 
 export interface DrillRow {
@@ -28,7 +29,7 @@ interface Ctx {
   companyName: Map<string, string>;
   dealCompany: Map<string, string>;    // deal id -> company id
   contactCompany: Map<string, string>; // contact id -> company id
-  lastTouchByDeal: Map<string, number>;
+  lastTouch: (d: DealRow) => number | null;
   futureTaskDealIds: Set<string>;
   stalledDealDays: number;
   now: Date;
@@ -99,7 +100,7 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
     label: "Awaiting first contact",
     rows: (ctx) =>
       ctx.deals
-        .filter((d) => d.stage === SALES_STAGES.mql && !ctx.lastTouchByDeal.has(d.hubspot_id))
+        .filter((d) => d.stage === SALES_STAGES.mql && ctx.lastTouch(d) === null)
         .map((d) => dealRow(ctx, d, "No outreach logged")),
   },
   calls_7d: { label: "Calls (7d)", rows: (ctx) => activityRows(ctx, (a) => (a.activity_type ?? a.kind) === "call") },
@@ -153,7 +154,7 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
       ctx.deals
         .filter((d) => {
           if (!isOpenSalesDeal(d)) return false;
-          const last = ctx.lastTouchByDeal.get(d.hubspot_id) ??
+          const last = ctx.lastTouch(d) ??
             (d.hs_created_at ? new Date(d.hs_created_at).getTime() : 0);
           return differenceInDays(ctx.now, new Date(last)) > ctx.stalledDealDays;
         })
@@ -210,15 +211,7 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
 
   const scopedDeals = mine(deals);
   const scopedActivities = mine(activities);
-  const lastTouchByDeal = new Map<string, number>();
-  for (const a of activities) {
-    if (!a.deal_hubspot_id || !a.occurred_at || a.kind === "task") continue;
-    const t = new Date(a.occurred_at).getTime();
-    if (t <= now.getTime())
-
-      lastTouchByDeal.set(a.deal_hubspot_id,
-        Math.max(lastTouchByDeal.get(a.deal_hubspot_id) ?? 0, t));
-  }
+  const lastTouch = buildLastTouchLookup(activities, now);
   const futureTaskDealIds = new Set(
     activities
       .filter((a) => a.kind === "task" && !a.completed && a.due_at &&
@@ -241,7 +234,7 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
         .filter((c) => c.company_hubspot_id)
         .map((c) => [c.hubspot_id, c.company_hubspot_id as string]),
     ),
-    lastTouchByDeal,
+    lastTouch,
     futureTaskDealIds,
     stalledDealDays: settings.stalledDealDays,
     now,
