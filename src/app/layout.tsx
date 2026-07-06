@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist } from "next/font/google";
 import "./globals.css";
+import { RefreshButton } from "@/components/refresh-button";
 import { currentAppUser } from "@/lib/supabase/server";
 
 const geist = Geist({ subsets: ["latin"] });
@@ -34,8 +35,11 @@ export default async function RootLayout({
         {user ? (
           <div className="flex min-h-screen">
             <aside className="hidden w-56 shrink-0 border-r border-zinc-200 bg-white px-3 py-5 dark:border-zinc-800 dark:bg-zinc-900 md:block">
-              <div className="mb-6 px-2 text-lg font-bold">
+              <div className="mb-4 px-2 text-lg font-bold">
                 Silent Witness <span className="text-zinc-400">GTM</span>
+              </div>
+              <div className="mb-4 px-1">
+                <RefreshButton />
               </div>
               <nav className="space-y-1">
                 {nav.map((n) => (
