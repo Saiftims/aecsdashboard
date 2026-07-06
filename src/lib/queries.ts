@@ -2,7 +2,9 @@
  * HubSpot remains the system of record via the sync. */
 import { differenceInDays, startOfMonth, subDays } from "date-fns";
 import { median } from "@/lib/metrics";
-import { SALES_STAGES, type ActivationStage } from "@/lib/hubspot/stages";
+import {
+  SALES_STAGES, hubspotDealUrl, type ActivationStage,
+} from "@/lib/hubspot/stages";
 import { loadSettings } from "@/lib/settings";
 import { supabaseService } from "@/lib/supabase/server";
 
@@ -303,7 +305,11 @@ export async function aeDashboard(ownerId?: string | null) {
       priority, bucket, dealId: d.hubspot_id,
       companyId: d.company_hubspot_id ?? undefined,
       title: d.name ?? companyName.get(d.company_hubspot_id ?? "") ?? d.hubspot_id,
-      detail, href: d.company_hubspot_id ? `/firms/${d.company_hubspot_id}` : "#",
+      detail,
+      // No associated company -> open the deal in HubSpot directly.
+      href: d.company_hubspot_id
+        ? `/firms/${d.company_hubspot_id}`
+        : hubspotDealUrl(settings.hubspotPortalId, d.hubspot_id),
     });
 
   for (const d of openDeals) {
@@ -323,7 +329,11 @@ export async function aeDashboard(ownerId?: string | null) {
       companyId: t.company_hubspot_id ?? undefined,
       title: t.subject ?? "Task",
       detail: `Due ${t.due_at ? differenceInDays(now, new Date(t.due_at)) : "?"}d ago`,
-      href: t.company_hubspot_id ? `/firms/${t.company_hubspot_id}` : "#",
+      href: t.company_hubspot_id
+        ? `/firms/${t.company_hubspot_id}`
+        : t.deal_hubspot_id
+          ? hubspotDealUrl(settings.hubspotPortalId, t.deal_hubspot_id)
+          : "#",
     });
   }
   for (const d of openDeals) {
@@ -347,7 +357,11 @@ export async function aeDashboard(ownerId?: string | null) {
         priority: 8, bucket: "Walk-ins scheduled",
         title: a.subject ?? "Walk-in", detail: "Planned LA walk-in",
         companyId: a.company_hubspot_id ?? undefined,
-        href: a.company_hubspot_id ? `/firms/${a.company_hubspot_id}` : "#",
+        href: a.company_hubspot_id
+          ? `/firms/${a.company_hubspot_id}`
+          : a.deal_hubspot_id
+            ? hubspotDealUrl(settings.hubspotPortalId, a.deal_hubspot_id)
+            : "#",
       });
     }
   }
@@ -440,7 +454,9 @@ export async function csDashboard() {
       priority, bucket, dealId: d.hubspot_id,
       companyId: d.company_hubspot_id ?? undefined,
       title: d.name ?? d.hubspot_id, detail,
-      href: d.company_hubspot_id ? `/firms/${d.company_hubspot_id}` : "#",
+      href: d.company_hubspot_id
+        ? `/firms/${d.company_hubspot_id}`
+        : hubspotDealUrl(settings.hubspotPortalId, d.hubspot_id),
     });
   at("handoff_pending").forEach((d) =>
     pushDeal(1, "New handoffs", d, "Accept handoff + schedule onboarding"));

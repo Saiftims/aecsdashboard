@@ -2,6 +2,21 @@ import Link from "next/link";
 import { Badge, Card, CardHeader } from "@/components/ui";
 import type { QueueItem } from "@/lib/queries";
 
+function RowLink({ href, children }: { href: string; children: React.ReactNode }) {
+  if (href.startsWith("http")) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} className="font-medium hover:underline">
+      {children}
+    </Link>
+  );
+}
+
 export function ActionQueue({ items, title }: { items: QueueItem[]; title: string }) {
   const buckets = new Map<string, QueueItem[]>();
   for (const it of items) {
@@ -25,9 +40,7 @@ export function ActionQueue({ items, title }: { items: QueueItem[]; title: strin
               <ul className="space-y-1">
                 {rows.slice(0, 8).map((r, i) => (
                   <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
-                    <Link href={r.href} className="font-medium hover:underline">
-                      {r.title}
-                    </Link>
+                    <RowLink href={r.href}>{r.title}</RowLink>
                     <span className="truncate text-xs text-zinc-500">{r.detail}</span>
                   </li>
                 ))}
@@ -40,9 +53,7 @@ export function ActionQueue({ items, title }: { items: QueueItem[]; title: strin
                   <ul className="mt-1 space-y-1">
                     {rows.slice(8).map((r, i) => (
                       <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
-                        <Link href={r.href} className="font-medium hover:underline">
-                          {r.title}
-                        </Link>
+                        <RowLink href={r.href}>{r.title}</RowLink>
                         <span className="truncate text-xs text-zinc-500">{r.detail}</span>
                       </li>
                     ))}
