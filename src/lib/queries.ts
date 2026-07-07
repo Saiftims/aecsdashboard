@@ -139,15 +139,17 @@ export function isMeaningfulTouch(a: ActivityRow): boolean {
   return true; // call, meeting, email
 }
 
-/** Last meaningful-touch lookup for deals: checks activity on the deal itself
- * AND on the deal's primary contact (Gmail-logged emails often associate with
- * the contact only). Returns epoch ms or null if never touched. */
-export function buildLastTouchLookup(
-  activities: ActivityRow[],
-  now: Date,
-): (d: DealRow) => number | null {
+export interface TouchMaps {
+  byDeal: Map<string, number>;
+  byContact: Map<string, number>;
+  byCompany: Map<string, number>;
+}
+
+/** Last meaningful-touch time per deal/contact/company (epoch ms). */
+export function buildTouchMaps(activities: ActivityRow[], now: Date): TouchMaps {
   const byDeal = new Map<string, number>();
   const byContact = new Map<string, number>();
+  const byCompany = new Map<string, number>();
   const nowMs = now.getTime();
   for (const a of activities) {
     if (!isMeaningfulTouch(a) || !a.occurred_at) continue;
@@ -160,7 +162,23 @@ export function buildLastTouchLookup(
       byContact.set(a.contact_hubspot_id,
         Math.max(byContact.get(a.contact_hubspot_id) ?? 0, t));
     }
+    if (a.company_hubspot_id) {
+      byCompany.set(a.company_hubspot_id,
+        Math.max(byCompany.get(a.company_hubspot_id) ?? 0, t));
+    }
   }
+  return { byDeal, byContact, byCompany };
+}
+
+/** Last meaningful-touch lookup for deals: checks activity on the deal itself
+ * AND on the deal's primary contact (Gmail-logged emails often associate with
+ * the contact only). Returns epoch ms or null if never touched. */
+export function buildLastTouchLookup(
+  activities: ActivityRow[],
+  now: Date,
+  maps?: TouchMaps,
+): (d: DealRow) => number | null {
+  const { byDeal, byContact } = maps ?? buildTouchMaps(activities, now);
   return (d: DealRow) => {
     const dealT = byDeal.get(d.hubspot_id);
     const contactT = d.primary_contact_id ? byContact.get(d.primary_contact_id) : undefined;
@@ -168,6 +186,24 @@ export function buildLastTouchLookup(
     return best > 0 ? best : null;
   };
 }
+
+/** A task is "superseded" when its lead received a real touch (call/email/
+ * meeting/logged activity) AFTER the task came due - the follow-up happened,
+ * it just wasn't checked off. Superseded tasks are not flagged as overdue. */
+export function isTaskSuperseded(a: ActivityRow, maps: TouchMaps): boolean {
+  if (!a.due_at) return false;
+  const due = new Date(a.due_at).getTime();
+  const touched = Math.max(
+    a.deal_hubspot_id ? (maps.byDeal.get(a.deal_hubspot_id) ?? 0) : 0,
+    a.contact_hubspot_id ? (maps.byContact.get(a.contact_hubspot_id) ?? 0) : 0,
+    a.company_hubspot_id ? (maps.byCompany.get(a.company_hubspot_id) ?? 0) : 0,
+  );
+  return touched > due;
+}
+
+/** Grace window: a deal touched within the last N days is being worked and is
+ * not flagged as "no future task" even if none is scheduled yet. */
+export const FOLLOWUP_GRACE_DAYS = 3;
 
 function firstResponseHours(d: DealRow, activities: ActivityRow[]): number | null {
   const explicit = d.properties?.sw_first_response_hours;
@@ -302,17 +338,30 @@ export async function aeDashboard(ownerId?: string | null) {
     weekActs.filter((a) => (a.activity_type ?? a.kind) === t).length;
 
   const openTasks = activities.filter((a) => a.kind === "task" && !a.completed && mine(a));
-  const overdueTasks = openTasks.filter((a) => a.due_at && new Date(a.due_at) < now);
+  const touchMaps = buildTouchMaps(activities, now);
+  const lastTouch = buildLastTouchLookup(activities, now, touchMaps);
+  // Overdue = past due AND the lead was NOT touched after the due date
+  // (a later call/email supersedes the un-checked task).
+  const overdueTasks = openTasks.filter(
+    (a) => a.due_at && new Date(a.due_at) < now && !isTaskSuperseded(a, touchMaps),
+  );
   const futureTaskDealIds = new Set(
     openTasks.filter((a) => a.due_at && new Date(a.due_at) >= now).map((a) => a.deal_hubspot_id),
   );
-  const lastTouch = buildLastTouchLookup(activities, now);
+  // "Covered" = has a scheduled future task OR was touched within the grace
+  // window (freshly-worked deals aren't neglected just because no task exists).
+  const recentlyTouched = (d: DealRow) => {
+    const t = lastTouch(d);
+    return t !== null && differenceInDays(now, new Date(t)) <= FOLLOWUP_GRACE_DAYS;
+  };
+  const covered = (d: DealRow) =>
+    futureTaskDealIds.has(d.hubspot_id) || recentlyTouched(d);
   const stalled = openDeals.filter((d) => {
     const last = lastTouch(d) ??
       (d.hs_created_at ? new Date(d.hs_created_at).getTime() : 0);
     return differenceInDays(now, new Date(last)) > settings.stalledDealDays;
   });
-  const noFutureTask = openDeals.filter((d) => !futureTaskDealIds.has(d.hubspot_id));
+  const noFutureTask = openDeals.filter((d) => !covered(d));
   const speedSamples = salesDeals.map((d) => firstResponseHours(d, activities))
     .filter((h): h is number => h !== null && h < 24 * 14);
 
@@ -399,10 +448,10 @@ export async function aeDashboard(ownerId?: string | null) {
     if (d.stage === SALES_STAGES.demoScheduled && d.properties?.sw_demo_date === now.toISOString().slice(0, 10)) {
       push(4, "Demos today", d, "Demo scheduled today");
     }
-    if (d.stage === SALES_STAGES.demoCompleted && !futureTaskDealIds.has(d.hubspot_id)) {
+    if (d.stage === SALES_STAGES.demoCompleted && !covered(d)) {
       push(5, "Post-demo follow-ups", d, "Demo done - send follow-up + next step");
     }
-    if (d.stage === SALES_STAGES.qualified && !futureTaskDealIds.has(d.hubspot_id)) {
+    if (d.stage === SALES_STAGES.qualified && !covered(d)) {
       push(6, "Qualified without future task", d, "Qualified deal has no future task");
     }
   }
@@ -623,7 +672,8 @@ export async function dataQuality() {
     (caseAccounts ?? []).flatMap((c) => [c.sw_organization_id ?? c.sw_account_id]).filter(Boolean),
   )] as string[];
 
-  const lastTouch = buildLastTouchLookup(activities, now);
+  const dqTouchMaps = buildTouchMaps(activities, now);
+  const lastTouch = buildLastTouchLookup(activities, now, dqTouchMaps);
 
   const dupEmails = findDuplicates(contacts.map((c) => c.email).filter(Boolean) as string[]);
   const dupDomains = findDuplicates(companies.map((c) => c.domain).filter(Boolean) as string[]);
@@ -652,8 +702,9 @@ export async function dataQuality() {
       items: swIdsWithCases.filter((id) => !mappedSwIds.has(id))
         .map((id) => ({ id, name: `SW firm ${id}` })),
     },
-    check("Overdue tasks", activities.filter(
-      (a) => a.kind === "task" && !a.completed && a.due_at && new Date(a.due_at) < now)
+    check("Overdue tasks (no touch since due)", activities.filter(
+      (a) => a.kind === "task" && !a.completed && a.due_at &&
+             new Date(a.due_at) < now && !isTaskSuperseded(a, dqTouchMaps))
       .map((a) => ({ hubspot_id: a.hubspot_id, name: a.subject }))),
     check("Open deals with no activity 14+ days", openDeals.filter((d) => {
       const last = lastTouch(d) ??

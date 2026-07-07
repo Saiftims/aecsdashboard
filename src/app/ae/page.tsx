@@ -82,12 +82,18 @@ export default async function AePage() {
           href="/drill/firms_closed"
         />
         <Stat label="Revenue closed" value={`$${Math.round(metrics.revenueClosed).toLocaleString()}`} href="/drill/firms_closed" />
-        <Stat label="Overdue tasks" value={metrics.overdueTasks} tone={metrics.overdueTasks ? "bad" : "good"} href="/drill/overdue_tasks" />
         <Stat
-          label="Deals w/o future task"
+          label="Overdue tasks"
+          value={metrics.overdueTasks}
+          tone={metrics.overdueTasks ? "bad" : "good"}
+          sub="no touch since due"
+          href="/drill/overdue_tasks"
+        />
+        <Stat
+          label="Deals w/o follow-up"
           value={metrics.dealsNoFutureTask}
           tone={metrics.dealsNoFutureTask ? "bad" : "good"}
-          sub="target: zero"
+          sub="no task + no recent touch"
           href="/drill/deals_no_future_task"
         />
         <Stat label="Stalled deals" value={metrics.stalledDeals} tone={metrics.stalledDeals ? "warn" : "good"} href="/drill/stalled" />

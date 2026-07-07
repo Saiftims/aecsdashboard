@@ -3,7 +3,8 @@
 import { differenceInDays, subDays } from "date-fns";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
-  buildLastTouchLookup, fetchCore, isOpenSalesDeal,
+  FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
+  isOpenSalesDeal, isTaskSuperseded,
   type ActivityRow, type CompanyRow, type DealRow,
 } from "@/lib/queries";
 
@@ -30,9 +31,17 @@ interface Ctx {
   dealCompany: Map<string, string>;    // deal id -> company id
   contactCompany: Map<string, string>; // contact id -> company id
   lastTouch: (d: DealRow) => number | null;
+  isSuperseded: (a: ActivityRow) => boolean;
   futureTaskDealIds: Set<string>;
   stalledDealDays: number;
   now: Date;
+}
+
+/** Covered = future task scheduled OR touched within the grace window. */
+function isCovered(ctx: Ctx, d: DealRow): boolean {
+  if (ctx.futureTaskDealIds.has(d.hubspot_id)) return true;
+  const t = ctx.lastTouch(d);
+  return t !== null && differenceInDays(ctx.now, new Date(t)) <= FOLLOWUP_GRACE_DAYS;
 }
 
 /** Best-effort firm resolution for an activity: direct company association,
@@ -130,11 +139,11 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
   first_case_commitments: { label: "First-case commitments", rows: stageMetric(SALES_STAGES.firstCaseCommitted) },
   firms_closed: { label: "Firms closed", rows: stageMetric(SALES_STAGES.closedWon) },
   overdue_tasks: {
-    label: "Overdue tasks",
+    label: "Overdue tasks (no touch since due)",
     rows: (ctx) =>
       ctx.activities
         .filter((a) => a.kind === "task" && !a.completed && a.due_at &&
-                       new Date(a.due_at) < ctx.now)
+                       new Date(a.due_at) < ctx.now && !ctx.isSuperseded(a))
         .map((a) => ({
           title: a.subject ?? "Task",
           subtitle: `due ${differenceInDays(ctx.now, new Date(a.due_at!))}d ago`,
@@ -144,11 +153,11 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
         })),
   },
   deals_no_future_task: {
-    label: "Open deals without a future task",
+    label: "Open deals without follow-up coverage",
     rows: (ctx) =>
       ctx.deals
-        .filter((d) => isOpenSalesDeal(d) && !ctx.futureTaskDealIds.has(d.hubspot_id))
-        .map((d) => dealRow(ctx, d)),
+        .filter((d) => isOpenSalesDeal(d) && !isCovered(ctx, d))
+        .map((d) => dealRow(ctx, d, "No future task + no recent touch")),
   },
   stalled: {
     label: "Stalled deals",
@@ -213,7 +222,8 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
 
   const scopedDeals = mine(deals);
   const scopedActivities = mine(activities);
-  const lastTouch = buildLastTouchLookup(activities, now);
+  const touchMaps = buildTouchMaps(activities, now);
+  const lastTouch = buildLastTouchLookup(activities, now, touchMaps);
   const futureTaskDealIds = new Set(
     activities
       .filter((a) => a.kind === "task" && !a.completed && a.due_at &&
@@ -237,6 +247,7 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
         .map((c) => [c.hubspot_id, c.company_hubspot_id as string]),
     ),
     lastTouch,
+    isSuperseded: (a: ActivityRow) => isTaskSuperseded(a, touchMaps),
     futureTaskDealIds,
     stalledDealDays: settings.stalledDealDays,
     now,
