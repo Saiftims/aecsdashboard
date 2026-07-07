@@ -205,6 +205,14 @@ export function isTaskSuperseded(a: ActivityRow, maps: TouchMaps): boolean {
  * not flagged as "no future task" even if none is scheduled yet. */
 export const FOLLOWUP_GRACE_DAYS = 3;
 
+/** A deal with a demo booked today or later is fully covered - the demo IS the
+ * follow-up plan, no interim touch or task needed. */
+export function hasFutureDemo(d: DealRow, now: Date): boolean {
+  const demo = d.properties?.sw_demo_date;
+  if (!demo) return false;
+  return demo.slice(0, 10) >= now.toISOString().slice(0, 10);
+}
+
 function firstResponseHours(d: DealRow, activities: ActivityRow[]): number | null {
   const explicit = d.properties?.sw_first_response_hours;
   if (explicit) return Number(explicit);
@@ -340,22 +348,34 @@ export async function aeDashboard(ownerId?: string | null) {
   const openTasks = activities.filter((a) => a.kind === "task" && !a.completed && mine(a));
   const touchMaps = buildTouchMaps(activities, now);
   const lastTouch = buildLastTouchLookup(activities, now, touchMaps);
+  // Deals (and their companies) with a demo booked today or later.
+  const futureDemoDealIds = new Set(
+    deals.filter((d) => hasFutureDemo(d, now)).map((d) => d.hubspot_id),
+  );
+  const futureDemoCompanyIds = new Set(
+    deals.filter((d) => hasFutureDemo(d, now) && d.company_hubspot_id)
+      .map((d) => d.company_hubspot_id as string),
+  );
   // Overdue = past due AND the lead was NOT touched after the due date
-  // (a later call/email supersedes the un-checked task).
+  // (a later call/email supersedes the un-checked task) AND there's no
+  // upcoming demo (a booked demo makes interim follow-up unnecessary).
   const overdueTasks = openTasks.filter(
-    (a) => a.due_at && new Date(a.due_at) < now && !isTaskSuperseded(a, touchMaps),
+    (a) => a.due_at && new Date(a.due_at) < now &&
+           !isTaskSuperseded(a, touchMaps) &&
+           !(a.deal_hubspot_id && futureDemoDealIds.has(a.deal_hubspot_id)) &&
+           !(a.company_hubspot_id && futureDemoCompanyIds.has(a.company_hubspot_id)),
   );
   const futureTaskDealIds = new Set(
     openTasks.filter((a) => a.due_at && new Date(a.due_at) >= now).map((a) => a.deal_hubspot_id),
   );
-  // "Covered" = has a scheduled future task OR was touched within the grace
-  // window (freshly-worked deals aren't neglected just because no task exists).
+  // "Covered" = scheduled future task OR touched within the grace window OR a
+  // demo booked today/later (the demo IS the plan).
   const recentlyTouched = (d: DealRow) => {
     const t = lastTouch(d);
     return t !== null && differenceInDays(now, new Date(t)) <= FOLLOWUP_GRACE_DAYS;
   };
   const covered = (d: DealRow) =>
-    futureTaskDealIds.has(d.hubspot_id) || recentlyTouched(d);
+    futureTaskDealIds.has(d.hubspot_id) || recentlyTouched(d) || hasFutureDemo(d, now);
   const stalled = openDeals.filter((d) => {
     const last = lastTouch(d) ??
       (d.hs_created_at ? new Date(d.hs_created_at).getTime() : 0);
@@ -702,9 +722,13 @@ export async function dataQuality() {
       items: swIdsWithCases.filter((id) => !mappedSwIds.has(id))
         .map((id) => ({ id, name: `SW firm ${id}` })),
     },
-    check("Overdue tasks (no touch since due)", activities.filter(
-      (a) => a.kind === "task" && !a.completed && a.due_at &&
-             new Date(a.due_at) < now && !isTaskSuperseded(a, dqTouchMaps))
+    check("Overdue tasks (no touch since due, no upcoming demo)", activities.filter(
+      (a) => {
+        if (a.kind !== "task" || a.completed || !a.due_at) return false;
+        if (new Date(a.due_at) >= now || isTaskSuperseded(a, dqTouchMaps)) return false;
+        const demoDeal = deals.find((d) => d.hubspot_id === a.deal_hubspot_id);
+        return !(demoDeal && hasFutureDemo(demoDeal, now));
+      })
       .map((a) => ({ hubspot_id: a.hubspot_id, name: a.subject }))),
     check("Open deals with no activity 14+ days", openDeals.filter((d) => {
       const last = lastTouch(d) ??

@@ -4,7 +4,7 @@ import { differenceInDays, subDays } from "date-fns";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
-  isOpenSalesDeal, isTaskSuperseded,
+  hasFutureDemo, isOpenSalesDeal, isTaskSuperseded,
   type ActivityRow, type CompanyRow, type DealRow,
 } from "@/lib/queries";
 
@@ -37,9 +37,11 @@ interface Ctx {
   now: Date;
 }
 
-/** Covered = future task scheduled OR touched within the grace window. */
+/** Covered = future task scheduled OR touched within the grace window OR a
+ * demo booked today/later (the demo IS the plan). */
 function isCovered(ctx: Ctx, d: DealRow): boolean {
   if (ctx.futureTaskDealIds.has(d.hubspot_id)) return true;
+  if (hasFutureDemo(d, ctx.now)) return true;
   const t = ctx.lastTouch(d);
   return t !== null && differenceInDays(ctx.now, new Date(t)) <= FOLLOWUP_GRACE_DAYS;
 }
@@ -139,11 +141,16 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
   first_case_commitments: { label: "First-case commitments", rows: stageMetric(SALES_STAGES.firstCaseCommitted) },
   firms_closed: { label: "Firms closed", rows: stageMetric(SALES_STAGES.closedWon) },
   overdue_tasks: {
-    label: "Overdue tasks (no touch since due)",
+    label: "Overdue tasks (no touch since due, no upcoming demo)",
     rows: (ctx) =>
       ctx.activities
-        .filter((a) => a.kind === "task" && !a.completed && a.due_at &&
-                       new Date(a.due_at) < ctx.now && !ctx.isSuperseded(a))
+        .filter((a) => {
+          if (a.kind !== "task" || a.completed || !a.due_at) return false;
+          if (new Date(a.due_at) >= ctx.now || ctx.isSuperseded(a)) return false;
+          const deal = a.deal_hubspot_id
+            ? ctx.deals.find((d) => d.hubspot_id === a.deal_hubspot_id) : undefined;
+          return !(deal && hasFutureDemo(deal, ctx.now));
+        })
         .map((a) => ({
           title: a.subject ?? "Task",
           subtitle: `due ${differenceInDays(ctx.now, new Date(a.due_at!))}d ago`,
