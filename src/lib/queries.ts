@@ -530,6 +530,109 @@ export async function aeDashboard(ownerId?: string | null) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// 7-day activity + funnel report (drill target from the Today cards).
+// ---------------------------------------------------------------------------
+const STAGE_RANK: Record<string, number> = {
+  [SALES_STAGES.mql]: 1,
+  [SALES_STAGES.attemptingContact]: 2,
+  [SALES_STAGES.connected]: 3,
+  [SALES_STAGES.qualified]: 4,
+  [SALES_STAGES.demoScheduled]: 5,
+  [SALES_STAGES.demoCompleted]: 6,
+  [SALES_STAGES.firstCaseIdentified]: 7,
+  [SALES_STAGES.firstCaseCommitted]: 8,
+  [SALES_STAGES.closedWon]: 9,
+  [SALES_STAGES.closedLost]: 1, // was a lead; no reliable progress history
+  [SALES_STAGES.nurture]: 1,
+};
+
+export interface FunnelStep {
+  label: string;
+  count: number;
+  convFromPrev: number | null; // % of previous step
+  convFromTop: number | null; // % of leads
+}
+
+export async function activityReport(ownerId?: string | null) {
+  const { settings, deals, activities } = await fetchCore();
+  const now = new Date();
+  const tz = settings.dashboardTimezone;
+  const weekAgo = subDays(now, 7);
+  const nowMs = now.getTime();
+  const mine = <T extends { owner_id: string | null }>(x: T) =>
+    !ownerId || x.owner_id === ownerId;
+
+  const acts7 = activities.filter(
+    (a) => mine(a) && a.kind !== "task" && a.occurred_at &&
+           new Date(a.occurred_at) >= weekAgo && new Date(a.occurred_at).getTime() <= nowMs,
+  );
+  const t = (a: ActivityRow) => a.activity_type ?? a.kind;
+
+  const activityTotals = {
+    touches: acts7.length,
+    calls: acts7.filter((a) => t(a) === "call").length,
+    emails: acts7.filter((a) => t(a) === "email").length,
+    voicemails: acts7.filter((a) => t(a) === "voicemail").length,
+    linkedin: acts7.filter((a) => t(a) === "linkedin").length,
+    meetings: acts7.filter((a) => a.kind === "meeting").length,
+    inPersonVisits: acts7.filter((a) => t(a) === "in_person_visit").length,
+    connected: acts7.filter((a) => a.outcome === "connected").length,
+  };
+
+  // Daily breakdown (last 7 LA days).
+  const daily: { day: string; calls: number; emails: number; other: number }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(nowMs - i * 86400000);
+    const label = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(d);
+    const md = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "numeric", day: "numeric" }).format(d);
+    daily.push({ day: `${label} ${md}`, calls: 0, emails: 0, other: 0 });
+  }
+  const dayIndex = new Map(daily.map((b, i) => [b.day, i]));
+  for (const a of acts7) {
+    const label = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(new Date(a.occurred_at!));
+    const md = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "numeric", day: "numeric" }).format(new Date(a.occurred_at!));
+    const idx = dayIndex.get(`${label} ${md}`);
+    if (idx === undefined) continue;
+    if (t(a) === "call" || t(a) === "voicemail") daily[idx].calls += 1;
+    else if (t(a) === "email") daily[idx].emails += 1;
+    else daily[idx].other += 1;
+  }
+
+  // Funnel cohort = deals created in the last 7 days (this week's new business).
+  const cohort = deals.filter(
+    (d) => mine(d) && d.hs_created_at && new Date(d.hs_created_at) >= weekAgo,
+  );
+  const lastTouch = buildLastTouchLookup(activities, now);
+  const rank = (d: DealRow) => STAGE_RANK[d.stage ?? ""] ?? 0;
+  const reached = (r: number) => cohort.filter((d) => rank(d) >= r).length;
+
+  const steps: { label: string; count: number }[] = [
+    { label: "Leads", count: cohort.length },
+    { label: "Contacted", count: cohort.filter((d) => lastTouch(d) !== null).length },
+    { label: "Connected", count: reached(3) },
+    { label: "Demo Scheduled", count: reached(5) },
+    { label: "Demo Completed", count: reached(6) },
+    { label: "First Case Identified", count: reached(7) },
+    { label: "First Case Committed", count: reached(8) },
+    { label: "Closed Won", count: cohort.filter((d) => d.stage === SALES_STAGES.closedWon).length },
+  ];
+  const top = steps[0].count || 1;
+  const funnel: FunnelStep[] = steps.map((s, i) => ({
+    label: s.label,
+    count: s.count,
+    convFromPrev: i === 0 ? null
+      : steps[i - 1].count ? Math.round((s.count / steps[i - 1].count) * 100) : null,
+    convFromTop: i === 0 ? null : Math.round((s.count / top) * 100),
+  }));
+
+  const revenue = cohort
+    .filter((d) => d.stage === SALES_STAGES.closedWon)
+    .reduce((sum, d) => sum + (d.amount ?? 0), 0);
+
+  return { settings, activityTotals, daily, funnel, revenue, cohortSize: cohort.length };
+}
+
 function countByStage(deals: DealRow[]) {
   const out: Record<string, number> = {};
   for (const d of deals) {

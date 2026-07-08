@@ -15,6 +15,7 @@ export const metadata: Metadata = {
 const NAV = [
   { href: "/", label: "Executive", roles: ["executive"] },
   { href: "/ae", label: "AE", roles: ["executive", "ae"] },
+  { href: "/activity", label: "Activity & Funnel", roles: ["executive", "ae", "cs"] },
   { href: "/cs", label: "Customer Success", roles: ["executive", "cs"] },
   { href: "/firms", label: "Firms", roles: ["executive", "ae", "cs"] },
   { href: "/data-quality", label: "Data Quality", roles: ["executive", "ae", "cs"] },

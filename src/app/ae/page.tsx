@@ -25,16 +25,17 @@ export default async function AePage() {
           Today
         </h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <TargetCard label="Calls today" value={today.calls.value} target={today.calls.target} sub="incl. voicemails" />
-          <TargetCard label="Emails today" value={today.emails.value} target={today.emails.target} />
-          <TargetCard label="Follow-ups completed" value={today.followups.value} target={today.followups.target} sub="due tasks cleared" />
+          <TargetCard label="Calls today" value={today.calls.value} target={today.calls.target} sub="incl. voicemails · 7-day view →" href="/activity" />
+          <TargetCard label="Emails today" value={today.emails.value} target={today.emails.target} sub="7-day view →" href="/activity" />
+          <TargetCard label="Follow-ups completed" value={today.followups.value} target={today.followups.target} sub="due tasks cleared · 7-day view →" href="/activity" />
           <TargetCard
             label="New leads in SLA"
             value={today.newLeadsSla.value}
             target={today.newLeadsSla.target}
-            sub={today.newLeadsSla.isSla ? "of today's new leads" : "no new leads yet today"}
+            sub={today.newLeadsSla.isSla ? "of today's new leads · 7-day view →" : "no new leads yet today · 7-day view →"}
+            href="/activity"
           />
-          <TargetCard label="Tasks completed" value={today.tasksCompleted.value} target={today.tasksCompleted.target} />
+          <TargetCard label="Tasks completed" value={today.tasksCompleted.value} target={today.tasksCompleted.target} sub="7-day view →" href="/activity" />
         </div>
       </section>
 

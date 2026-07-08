@@ -55,17 +55,18 @@ export function Stat({
 
 /** Daily target card: "Calls today 8 / 30" with a progress bar. */
 export function TargetCard({
-  label, value, target, sub,
+  label, value, target, sub, href,
 }: {
   label: string;
   value: number;
   target: number;
   sub?: string;
+  href?: string;
 }) {
   const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
   const done = target > 0 && value >= target;
-  return (
-    <Card className="px-4 py-3">
+  const inner = (
+    <Card className={clsx("px-4 py-3", href && "transition hover:border-zinc-400 hover:shadow-md dark:hover:border-zinc-600")}>
       <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
       <div className="mt-1 flex items-baseline gap-1">
         <span className={clsx("text-2xl font-bold", done && "text-emerald-600")}>{value}</span>
@@ -81,6 +82,7 @@ export function TargetCard({
       {sub ? <div className="mt-1 text-xs text-zinc-500">{sub}</div> : null}
     </Card>
   );
+  return href ? <Link href={href} className="block">{inner}</Link> : inner;
 }
 
 export function Badge({
