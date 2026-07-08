@@ -11,7 +11,7 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const { activityTotals, daily, funnel, revenue, cohortSize } = await activityReport(
+  const { settings, activityTotals, daily, funnel, revenue, cohortSize } = await activityReport(
     user.role === "ae" ? user.hubspot_owner_id : null,
   );
   const scope = user.role === "ae" ? "your" : "team";
@@ -43,9 +43,20 @@ export default async function ActivityPage() {
       </section>
 
       <Card>
-        <CardHeader title="Daily activity (calls, emails, meetings)" />
+        <CardHeader
+          title="Daily calls & emails vs targets"
+          action={
+            <span className="text-xs text-zinc-500">
+              targets: {settings.dailyCallsTarget} calls · {settings.dailyEmailsTarget} emails / day
+            </span>
+          }
+        />
         <div className="p-4">
-          <DailyActivityChart data={daily} />
+          <DailyActivityChart
+            data={daily}
+            callsTarget={settings.dailyCallsTarget}
+            emailsTarget={settings.dailyEmailsTarget}
+          />
         </div>
       </Card>
 
