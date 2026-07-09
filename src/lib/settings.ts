@@ -20,6 +20,7 @@ export interface GtmSettings {
   csTargets: Record<string, unknown>;
   aeScorecardWeights: Record<string, number>;
   csScorecardWeights: Record<string, number>;
+  segmentConfig: Record<string, { monthly_target: number | null; at_risk_floor_30d: number; churn_days: number }>;
 }
 
 const DEFAULTS: GtmSettings = {
@@ -42,6 +43,12 @@ const DEFAULTS: GtmSettings = {
   csTargets: {},
   aeScorecardWeights: {},
   csScorecardWeights: {},
+  segmentConfig: {
+    small: { monthly_target: 2, at_risk_floor_30d: 1, churn_days: 90 },
+    mid_size: { monthly_target: 5, at_risk_floor_30d: 2, churn_days: 75 },
+    large: { monthly_target: 10, at_risk_floor_30d: 4, churn_days: 60 },
+    strategic: { monthly_target: null, at_risk_floor_30d: 4, churn_days: 45 },
+  },
 };
 
 const KEY_MAP: Record<string, keyof GtmSettings> = {
@@ -64,6 +71,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   cs_targets: "csTargets",
   ae_scorecard_weights: "aeScorecardWeights",
   cs_scorecard_weights: "csScorecardWeights",
+  segment_config: "segmentConfig",
 };
 
 export async function loadSettings(): Promise<GtmSettings> {

@@ -47,6 +47,19 @@ export interface CompanyRow {
   health_factors: unknown;
   risk_flags: string[];
   usage_trend: string | null;
+  // CS model (0002)
+  firm_segment: string | null;
+  monthly_case_target: number | null;
+  account_health: string | null;
+  first_case_commitment_date: string | null;
+  first_case_completed_date: string | null;
+  second_case_submitted_date: string | null;
+  cases_this_month: number;
+  cases_45d: number;
+  target_attainment_percent: number | null;
+  open_issue_count: number;
+  next_cs_action: string | null;
+  next_cs_action_due_date: string | null;
 }
 
 export interface ActivityRow {
@@ -643,135 +656,212 @@ function countByStage(deals: DealRow[]) {
 }
 
 // ---------------------------------------------------------------------------
-export async function csDashboard() {
-  const { settings, deals, companies } = await fetchCore();
-  const now = new Date();
-  const monthStart = startOfMonth(now);
-  const activation = deals.filter((d) => d.activation_stage);
-  const at = (s: ActivationStage) => activation.filter((d) => d.activation_stage === s);
-  const companyById = new Map(companies.map((c) => [c.hubspot_id, c]));
-
-  const withoutFirstCase = activation.filter((d) => {
-    const c = d.company_hubspot_id ? companyById.get(d.company_hubspot_id) : null;
-    return !c?.first_case_at &&
-      !["handoff_pending", "churned_or_inactive"].includes(d.activation_stage ?? "");
-  });
-
-  const ttfcSamples: number[] = [];
-  for (const d of activation) {
-    const c = d.company_hubspot_id ? companyById.get(d.company_hubspot_id) : null;
-    if (c?.first_case_at && d.closed_at) {
-      ttfcSamples.push(differenceInDays(new Date(c.first_case_at), new Date(d.closed_at)));
-    }
-  }
-
-  const customerCompanies = companies.filter((c) =>
-    activation.some((d) => d.company_hubspot_id === c.hubspot_id) || c.cases_lifetime > 0,
-  );
-  const inactive30 = customerCompanies.filter(
-    (c) => c.last_case_at && differenceInDays(now, new Date(c.last_case_at)) > 30,
-  );
-  const inactive45 = customerCompanies.filter(
-    (c) => c.last_case_at && differenceInDays(now, new Date(c.last_case_at)) > 45,
-  );
-
-  const { data: monthCases } = await supabaseService()
-    .from("cases").select("sw_id").gte("submitted_at", monthStart.toISOString());
-  const casesThisMonth = monthCases?.length ?? 0;
-
-  // ---- CS daily queue -------------------------------------------------------
-  const queue: QueueItem[] = [];
-  const pushDeal = (priority: number, bucket: string, d: DealRow, detail: string) =>
-    queue.push({
-      priority, bucket, dealId: d.hubspot_id,
-      companyId: d.company_hubspot_id ?? undefined,
-      title: d.name ?? d.hubspot_id, detail,
-      href: d.company_hubspot_id
-        ? `/firms/${d.company_hubspot_id}`
-        : hubspotDealUrl(settings.hubspotPortalId, d.hubspot_id),
-    });
-  at("handoff_pending").forEach((d) =>
-    pushDeal(1, "New handoffs", d, "Accept handoff + schedule onboarding"));
-  at("onboarding_scheduled").forEach((d) =>
-    pushDeal(2, "Awaiting onboarding", d, "Run kickoff / onboarding"));
-  withoutFirstCase.forEach((d) =>
-    pushDeal(3, "No first case yet", d, "Help identify + submit the first case"));
-  at("first_case_submitted").forEach((d) =>
-    pushDeal(4, "First cases in flight", d, "Support the first case to delivery"));
-  at("first_case_delivered").forEach((d) =>
-    pushDeal(5, "Results delivered - follow up", d, "Review results with the firm"));
-  inactive30.forEach((c) =>
-    queue.push({
-      priority: 6, bucket: "Inactive 30+ days", companyId: c.hubspot_id,
-      title: c.name ?? c.domain ?? c.hubspot_id,
-      detail: `Last case ${c.last_case_at ? differenceInDays(now, new Date(c.last_case_at)) : "?"}d ago`,
-      href: `/firms/${c.hubspot_id}`,
-    }));
-  at("at_risk").forEach((d) =>
-    pushDeal(7, "At-risk accounts", d, "Create a recovery plan"));
-  companies.filter((c) => (c.risk_flags ?? []).some((f) => f.includes("issue")))
-    .forEach((c) => queue.push({
-      priority: 8, bucket: "Open issues", companyId: c.hubspot_id,
-      title: c.name ?? c.hubspot_id, detail: c.risk_flags.join("; "),
-      href: `/firms/${c.hubspot_id}`,
-    }));
-  companies.filter((c) => c.properties?.sw_expansion_potential === "high")
-    .forEach((c) => queue.push({
-      priority: 9, bucket: "Expansion opportunities", companyId: c.hubspot_id,
-      title: c.name ?? c.hubspot_id, detail: "High expansion potential",
-      href: `/firms/${c.hubspot_id}`,
-    }));
-  queue.sort((a, b) => a.priority - b.priority);
-
-  const activatedCount = activation.filter((d) =>
-    ["activated", "repeat_user", "healthy_account"].includes(d.activation_stage ?? ""),
-  ).length;
-
-  return {
-    settings,
-    metrics: {
-      newHandoffs: at("handoff_pending").length,
-      awaitingAcceptance: activation.filter(
-        (d) => d.activation_stage === "handoff_pending" &&
-               d.properties?.sw_handoff_accepted_by_cs !== "true").length,
-      onboardingScheduled: at("onboarding_scheduled").length,
-      onboardingCompleted: at("onboarding_completed").length,
-      firmsWithoutFirstCase: withoutFirstCase.length,
-      medianTimeToFirstCaseDays: median(ttfcSamples),
-      activatedFirms: activatedCount,
-      activationRate: customerCompanies.length
-        ? Math.round((activatedCount / Math.max(activation.length, 1)) * 100) : null,
-      repeatUserRate: customerCompanies.length
-        ? Math.round((customerCompanies.filter((c) => c.cases_lifetime >= 2).length /
-            customerCompanies.length) * 100) : null,
-      monthlyActiveFirms: customerCompanies.filter((c) => c.cases_30d > 0).length,
-      totalCustomerFirms: customerCompanies.length,
-      casesThisMonth,
-      revenueThisMonth: casesThisMonth * settings.defaultCasePrice,
-      inactive30: inactive30.length,
-      inactive45: inactive45.length,
-      atRisk: at("at_risk").length,
-      reactivationInProgress: at("reactivation_in_progress").length,
-      reactivated: activation.filter(
-        (d) => d.properties?.sw_reactivation_status === "reactivated").length,
-      openIssues: companies.filter((c) => (c.risk_flags ?? []).some((f) => f.includes("issue"))).length,
-      expansionOpportunities: companies.filter(
-        (c) => c.properties?.sw_expansion_potential === "high").length,
-    },
-    queue,
-    activationBoard: groupActivation(activation),
-  };
+export interface CsCaseRow {
+  case_id: string;
+  company_hubspot_id: string | null;
+  case_status: string | null;
+  submitted_date: string | null;
+  delivered_date: string | null;
+  revenue_amount: number | null;
+  expert_review_offered: boolean;
+  expert_review_booked: boolean;
+  expert_review_completed: boolean;
+  case_name: string | null;
+  issue_flag: boolean;
 }
 
-function groupActivation(deals: DealRow[]) {
-  const out: Record<string, { id: string; name: string | null; companyId: string | null }[]> = {};
+export interface CsBoardRow {
+  companyId: string;
+  firm: string;
+  segment: string | null;
+  monthlyTarget: number | null;
+  casesThisMonth: number;
+  cases30d: number;
+  attainment: number | null;
+  lastCaseDate: string | null;
+  daysSinceLastCase: number | null;
+  health: string | null;
+  openIssues: number;
+  expertReviewMissing: boolean;
+  nextAction: string | null;
+  nextActionDue: string | null;
+}
+
+export type CsSegment = "all" | "small" | "mid_size" | "large" | "strategic";
+
+export async function csDashboard(segment: CsSegment = "all") {
+  const { settings, deals, companies } = await fetchCore();
+  const sb = supabaseService();
+  const now = new Date();
+  const monthStart = startOfMonth(now);
+
+  const [{ data: cases }, { data: handoffs }] = await Promise.all([
+    sb.from("cases").select(
+      "case_id, company_hubspot_id, case_status, submitted_date, delivered_date, " +
+      "revenue_amount, expert_review_offered, expert_review_booked, " +
+      "expert_review_completed, case_name, issue_flag",
+    ).then((r) => ({ data: (r.data ?? []) as unknown as CsCaseRow[] })),
+    sb.from("handoffs").select("*"),
+  ]);
+
+  // customer universe = firms with cases OR a closed-won/activation deal
+  const customerIds = new Set<string>();
+  for (const c of cases ?? []) if (c.company_hubspot_id) customerIds.add(c.company_hubspot_id);
   for (const d of deals) {
-    const k = d.activation_stage ?? "unknown";
-    (out[k] ??= []).push({
-      id: d.hubspot_id, name: d.name, companyId: d.company_hubspot_id,
+    if ((d.stage === SALES_STAGES.closedWon || d.activation_stage) && d.company_hubspot_id) {
+      customerIds.add(d.company_hubspot_id);
+    }
+  }
+  let customers = companies.filter((c) => customerIds.has(c.hubspot_id));
+  if (segment !== "all") customers = customers.filter((c) => c.firm_segment === segment);
+  const custIds = new Set(customers.map((c) => c.hubspot_id));
+
+  const casesForCust = (cases ?? []).filter((c) => c.company_hubspot_id && custIds.has(c.company_hubspot_id));
+  const casesByCompany = new Map<string, CsCaseRow[]>();
+  for (const c of casesForCust) {
+    casesByCompany.set(c.company_hubspot_id!, [...(casesByCompany.get(c.company_hubspot_id!) ?? []), c]);
+  }
+  const expertMissingByCompany = new Map<string, boolean>();
+  for (const [cid, list] of casesByCompany) {
+    expertMissingByCompany.set(cid, list.some((c) => c.case_status === "delivered" && !c.expert_review_offered));
+  }
+
+  const daysSince = (iso: string | null) => iso ? differenceInDays(now, new Date(iso)) : null;
+  const health = (h: string) => customers.filter((c) => c.account_health === h);
+
+  // ---- KPI metrics ----
+  const monthCases = casesForCust.filter((c) => c.submitted_date && new Date(c.submitted_date) >= monthStart);
+  const activatedFirms = customers.filter((c) => c.first_case_completed_date);
+  const secondCaseConv = activatedFirms.length
+    ? Math.round((activatedFirms.filter((c) => c.second_case_submitted_date).length / activatedFirms.length) * 100)
+    : null;
+  const ttfc: number[] = [];
+  for (const c of customers) {
+    if (c.first_case_at && c.first_case_commitment_date) {
+      ttfc.push(differenceInDays(new Date(c.first_case_at), new Date(c.first_case_commitment_date)));
+    }
+  }
+  const attainmentVals = customers.map((c) => c.target_attainment_percent).filter((v): v is number => v != null);
+
+  const metrics = {
+    activatedFirms: activatedFirms.length,
+    healthyFirms: health("healthy").length,
+    activeBelowTarget: health("active_below_target").length,
+    atRiskFirms: health("at_risk").length,
+    churnedFirms: health("churned").length,
+    reactivationInProgress: deals.filter((d) => d.activation_stage === "reactivation_in_progress").length,
+    casesThisMonth: monthCases.length,
+    revenueThisMonth: monthCases.reduce((s, c) => s + (Number(c.revenue_amount) || settings.defaultCasePrice), 0),
+    expertReviewsOffered: casesForCust.filter((c) => c.expert_review_offered).length,
+    expertReviewsBooked: casesForCust.filter((c) => c.expert_review_booked).length,
+    expertReviewsCompleted: casesForCust.filter((c) => c.expert_review_completed).length,
+    secondCaseConversionRate: secondCaseConv,
+    avgDaysToFirstCase: ttfc.length ? Math.round(ttfc.reduce((a, b) => a + b, 0) / ttfc.length) : null,
+    targetAttainmentAvg: attainmentVals.length
+      ? Math.round(attainmentVals.reduce((a, b) => a + b, 0) / attainmentVals.length) : null,
+    totalCustomers: customers.length,
+    monthlyActiveFirms: customers.filter((c) => c.cases_30d > 0).length,
+  };
+
+  // ---- Account Health Board ----
+  const board: CsBoardRow[] = customers.map((c) => ({
+    companyId: c.hubspot_id,
+    firm: c.name ?? c.domain ?? c.hubspot_id,
+    segment: c.firm_segment,
+    monthlyTarget: c.monthly_case_target,
+    casesThisMonth: c.cases_this_month ?? 0,
+    cases30d: c.cases_30d ?? 0,
+    attainment: c.target_attainment_percent,
+    lastCaseDate: c.last_case_at,
+    daysSinceLastCase: daysSince(c.last_case_at),
+    health: c.account_health,
+    openIssues: c.open_issue_count ?? 0,
+    expertReviewMissing: expertMissingByCompany.get(c.hubspot_id) ?? false,
+    nextAction: c.next_cs_action,
+    nextActionDue: c.next_cs_action_due_date,
+  })).sort((a, b) => healthRank(a.health) - healthRank(b.health));
+
+  // ---- Today's CS Priorities (10-step) ----
+  const queue: QueueItem[] = [];
+  const pushCo = (priority: number, bucket: string, c: { hubspot_id: string; name: string | null; domain: string | null }, detail: string) =>
+    queue.push({
+      priority, bucket, companyId: c.hubspot_id,
+      title: c.name ?? c.domain ?? c.hubspot_id, detail,
+      href: `/firms/${c.hubspot_id}`,
+    });
+  const byId = new Map(customers.map((c) => [c.hubspot_id, c]));
+
+  // 1. open customer issues
+  for (const c of customers) if ((c.open_issue_count ?? 0) > 0) pushCo(1, "Open customer issues", c, `${c.open_issue_count} open issue(s)`);
+  // 2. new handoffs not accepted (+SLA overdue)
+  for (const h of handoffs ?? []) {
+    if (h.handoff_status !== "pending") continue;
+    const co = h.company_hubspot_id ? byId.get(h.company_hubspot_id) : null;
+    if (segment !== "all" && !co) continue;
+    const hrs = h.handoff_created_date ? Math.round((now.getTime() - new Date(h.handoff_created_date).getTime()) / 3600000) : 0;
+    queue.push({
+      priority: 2, bucket: "New handoffs to accept", companyId: h.company_hubspot_id ?? undefined,
+      title: co?.name ?? h.company_hubspot_id ?? h.deal_hubspot_id,
+      detail: hrs > 24 ? `SLA overdue (${hrs}h, target 24h)` : `Pending ${hrs}h`,
+      href: h.company_hubspot_id ? `/firms/${h.company_hubspot_id}` : "#",
     });
   }
-  return out;
+  // 3/4. commitment with no submitted case after 7/14 days
+  for (const c of customers) {
+    const cd = daysSince(c.first_case_commitment_date);
+    if (c.first_case_commitment_date && !c.first_case_at && cd !== null) {
+      if (cd > 14) pushCo(4, "No first case after 14 days", c, `Committed ${cd}d ago, no case`);
+      else if (cd > 7) pushCo(3, "No first case after 7 days", c, `Committed ${cd}d ago, no case`);
+    }
+  }
+  // 5. delivered cases with expert review not offered
+  for (const c of casesForCust) {
+    if (c.case_status === "delivered" && !c.expert_review_offered) {
+      const co = c.company_hubspot_id ? byId.get(c.company_hubspot_id) : null;
+      queue.push({
+        priority: 5, bucket: "Offer expert review", companyId: c.company_hubspot_id ?? undefined,
+        title: co?.name ?? c.case_name ?? c.case_id, detail: `Delivered case "${c.case_name ?? c.case_id}" - offer 15-min review`,
+        href: c.company_hubspot_id ? `/firms/${c.company_hubspot_id}` : "#",
+      });
+    }
+  }
+  // 6. expert review offered but not booked
+  for (const c of casesForCust) {
+    if (c.expert_review_offered && !c.expert_review_booked) {
+      const co = c.company_hubspot_id ? byId.get(c.company_hubspot_id) : null;
+      queue.push({
+        priority: 6, bucket: "Expert review offered, not booked", companyId: c.company_hubspot_id ?? undefined,
+        title: co?.name ?? c.case_name ?? c.case_id, detail: "Follow up to book the review",
+        href: c.company_hubspot_id ? `/firms/${c.company_hubspot_id}` : "#",
+      });
+    }
+  }
+  // 7. first case completed but no second case after 30 days
+  for (const c of customers) {
+    const fc = daysSince(c.first_case_completed_date);
+    if (c.first_case_completed_date && !c.second_case_submitted_date && fc !== null && fc > 30) {
+      pushCo(7, "No second case (30d+)", c, `First case completed ${fc}d ago`);
+    }
+  }
+  // 8. at-risk
+  for (const c of health("at_risk")) pushCo(8, "At-risk accounts", c, (c.risk_flags ?? []).join("; ") || "At risk");
+  // 9. inactive 30+ days
+  for (const c of customers) {
+    const d = daysSince(c.last_case_at);
+    if (d !== null && d > 30 && c.account_health !== "churned") pushCo(9, "Inactive 30+ days", c, `Last case ${d}d ago`);
+  }
+  // 10. churned for reactivation
+  for (const c of health("churned")) pushCo(10, "Churned - reactivate", c, `Last case ${daysSince(c.last_case_at) ?? "?"}d ago`);
+  queue.sort((a, b) => a.priority - b.priority);
+
+  return { settings, segment, metrics, board, queue };
+}
+
+function healthRank(h: string | null): number {
+  const order = ["at_risk", "churned", "active_below_target", "awaiting_first_case",
+                 "new_handoff", "activated", "healthy"];
+  const i = order.indexOf(h ?? "");
+  return i === -1 ? 99 : i;
 }
 
 // ---------------------------------------------------------------------------

@@ -44,6 +44,120 @@ export function computeHealth(input: HealthInput): HealthResult {
   return { score, category, factors };
 }
 
+// ---------------------------------------------------------------------------
+// Account health (CS model) — segment-aware, transparent, priority-ordered.
+// Priority: churned > at_risk > healthy > active_below_target > activated
+//           > awaiting_first_case > new_handoff
+// ---------------------------------------------------------------------------
+
+export type FirmSegment = "small" | "mid_size" | "large" | "strategic";
+
+export type AccountHealthStatus =
+  | "churned" | "at_risk" | "healthy" | "active_below_target"
+  | "activated" | "awaiting_first_case" | "new_handoff";
+
+export interface SegmentRule {
+  monthlyTarget: number | null; // strategic may be null (custom required)
+  atRiskFloor30d: number; // min cases in 30d after activation before at-risk
+  churnDays: number; // days since last case -> churned
+}
+
+export interface AccountHealthInput {
+  segment: FirmSegment | null;
+  monthlyTarget: number | null; // effective (override or segment default)
+  rule: SegmentRule;
+  // lifecycle dates
+  handoffExists: boolean;
+  handoffAccepted: boolean;
+  firstCaseCommitmentDate: string | null;
+  firstCaseSubmittedDate: string | null;
+  firstCaseCompletedDate: string | null;
+  secondCaseDate: string | null;
+  // usage
+  casesLifetime: number;
+  casesThisMonth: number;
+  cases30d: number;
+  daysSinceLastCase: number | null;
+  // signals
+  openIssueCount: number;
+  hasDeliveredCaseWithoutExpertReviewOffered: boolean;
+  hasActiveOpp: boolean;
+  now?: Date;
+}
+
+export interface AccountHealthResult {
+  status: AccountHealthStatus;
+  category: "green" | "yellow" | "red" | "neutral";
+  reasons: string[]; // why (transparent)
+}
+
+function daysSince(iso: string | null, now: Date): number | null {
+  if (!iso) return null;
+  return Math.floor((now.getTime() - new Date(iso).getTime()) / 86400000);
+}
+
+export function computeAccountHealth(i: AccountHealthInput): AccountHealthResult {
+  const now = i.now ?? new Date();
+  const activated = Boolean(i.firstCaseCompletedDate);
+  const commitSince = daysSince(i.firstCaseCommitmentDate, now);
+  const firstCompletedSince = daysSince(i.firstCaseCompletedDate, now);
+  const reasons: string[] = [];
+
+  // 1) Churned (segment-specific inactivity, and no active opportunity)
+  if (
+    i.casesLifetime > 0 &&
+    i.daysSinceLastCase !== null &&
+    i.daysSinceLastCase >= i.rule.churnDays &&
+    !i.hasActiveOpp
+  ) {
+    return { status: "churned", category: "red",
+      reasons: [`No case in ${i.daysSinceLastCase}d (churn threshold ${i.rule.churnDays}d for ${i.segment})`] };
+  }
+
+  // 2) At Risk (any trigger)
+  if (i.firstCaseCommitmentDate && !i.firstCaseSubmittedDate && commitSince !== null && commitSince > 14)
+    reasons.push("No first case within 14 days of commitment");
+  if (i.firstCaseCompletedDate && !i.secondCaseDate && firstCompletedSince !== null && firstCompletedSince > 45)
+    reasons.push("First case completed but no second case within 45 days");
+  if (activated && i.cases30d < i.rule.atRiskFloor30d)
+    reasons.push(`Only ${i.cases30d} case(s) in 30d (floor ${i.rule.atRiskFloor30d} for ${i.segment})`);
+  if (i.openIssueCount > 0) reasons.push(`${i.openIssueCount} open issue(s)`);
+  if (i.hasDeliveredCaseWithoutExpertReviewOffered)
+    reasons.push("Delivered case without expert review offered");
+  if (reasons.length) return { status: "at_risk", category: "red", reasons };
+
+  // 3) Healthy
+  if (activated && i.monthlyTarget !== null && i.casesThisMonth >= i.monthlyTarget)
+    return { status: "healthy", category: "green",
+      reasons: [`${i.casesThisMonth}/${i.monthlyTarget} cases this month`] };
+
+  // 4) Active below target
+  if (activated && i.casesThisMonth > 0)
+    return { status: "active_below_target", category: "yellow",
+      reasons: [`${i.casesThisMonth}/${i.monthlyTarget ?? "?"} cases this month`] };
+
+  // 5) Activated (first case completed, none this month yet)
+  if (activated)
+    return { status: "activated", category: "green", reasons: ["First case completed"] };
+
+  // 6) Awaiting first case
+  if (i.firstCaseCommitmentDate && !i.firstCaseSubmittedDate)
+    return { status: "awaiting_first_case", category: "yellow",
+      reasons: ["Committed, no case submitted yet"] };
+
+  // 7) New handoff
+  return { status: "new_handoff", category: "neutral",
+    reasons: [i.handoffAccepted ? "Handoff accepted, pre-first-case" : "Handoff not yet accepted"] };
+}
+
+/** Segment default rules; overridden by settings.segment_config at runtime. */
+export const DEFAULT_SEGMENT_RULES: Record<FirmSegment, SegmentRule> = {
+  small: { monthlyTarget: 2, atRiskFloor30d: 1, churnDays: 90 },
+  mid_size: { monthlyTarget: 5, atRiskFloor30d: 2, churnDays: 75 },
+  large: { monthlyTarget: 10, atRiskFloor30d: 4, churnDays: 60 },
+  strategic: { monthlyTarget: null, atRiskFloor30d: 4, churnDays: 45 },
+};
+
 export interface RiskFlagInput {
   onboardingCompleted: boolean;
   daysSinceClosedWon: number | null;

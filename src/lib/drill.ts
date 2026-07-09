@@ -231,7 +231,38 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
       .map((d) => dealRow(ctx, d, `$${Math.round(Number(d.amount ?? 0)).toLocaleString()}`)),
   },
 
-  // ---- CS ----
+  // ---- CS account-health cohorts ----
+  cs_activated: {
+    label: "Activated firms",
+    rows: (ctx) => ctx.companies.filter((c) => c.first_case_completed_date)
+      .map((c) => companyRow(c)),
+  },
+  cs_healthy: {
+    label: "Healthy firms",
+    rows: (ctx) => ctx.companies.filter((c) => c.account_health === "healthy").map((c) => companyRow(c)),
+  },
+  cs_below_target: {
+    label: "Active below target",
+    rows: (ctx) => ctx.companies.filter((c) => c.account_health === "active_below_target")
+      .map((c) => companyRow(c, `${c.cases_this_month}/${c.monthly_case_target ?? "?"} this month`)),
+  },
+  cs_at_risk: {
+    label: "At-risk firms",
+    rows: (ctx) => ctx.companies.filter((c) => c.account_health === "at_risk")
+      .map((c) => companyRow(c, (c.risk_flags ?? []).join("; "))),
+  },
+  cs_churned: {
+    label: "Churned firms",
+    rows: (ctx) => ctx.companies.filter((c) => c.account_health === "churned").map((c) => companyRow(c)),
+  },
+  cs_expert_missing: {
+    label: "Delivered cases missing expert review",
+    rows: (ctx) => ctx.companies
+      .filter((c) => (c.risk_flags ?? []).some((f) => f.toLowerCase().includes("expert review")))
+      .map((c) => companyRow(c, "Delivered case without expert review offered")),
+  },
+
+  // ---- CS activation-stage ----
   activation: {
     label: "Activation accounts",
     rows: (ctx) =>
@@ -247,6 +278,15 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
     rows: (ctx) => inactiveFirms(ctx, 45),
   },
 };
+
+function companyRow(c: CompanyRow, subtitle?: string): DrillRow {
+  return {
+    title: c.name ?? c.domain ?? c.hubspot_id,
+    subtitle: subtitle ?? (c.account_health ?? undefined),
+    companyId: c.hubspot_id,
+    when: c.last_case_at,
+  };
+}
 
 function inactiveFirms(ctx: Ctx, days: number): DrillRow[] {
   return ctx.companies

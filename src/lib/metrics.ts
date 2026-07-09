@@ -5,8 +5,10 @@ export interface FirmUsage {
   casesLifetime: number;
   cases7d: number;
   cases30d: number;
+  cases45d: number;
   cases60d: number;
   cases90d: number;
+  casesThisMonth: number; // calendar month-to-date
   casesPrev30d: number; // days 31-60 window, for trend
   firstCaseAt: string | null;
   lastCaseAt: string | null;
@@ -35,6 +37,10 @@ export function computeFirmUsage(
   const cases30d = within(30);
   const cases60d = within(60);
   const casesPrev30d = cases60d - cases30d;
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const casesThisMonth = sorted.filter(
+    (c) => new Date(c.submittedAt).getTime() >= monthStart,
+  ).length;
 
   const first = sorted[0] ?? null;
   const last = sorted[sorted.length - 1] ?? null;
@@ -56,8 +62,10 @@ export function computeFirmUsage(
     casesLifetime: sorted.length,
     cases7d: within(7),
     cases30d,
+    cases45d: within(45),
     cases60d,
     cases90d: within(90),
+    casesThisMonth,
     casesPrev30d,
     firstCaseAt: first?.submittedAt ?? null,
     lastCaseAt: last?.submittedAt ?? null,

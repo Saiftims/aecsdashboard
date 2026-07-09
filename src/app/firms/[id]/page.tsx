@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { MonthlyBarChart } from "@/components/charts";
 import { AcceptHandoffButton, FirmActions } from "@/components/firm-actions";
+import { CaseWorkflow, type CaseItem } from "@/components/case-workflow";
 import { Badge, Card, CardHeader, Stat, Table, healthTone } from "@/components/ui";
 import {
   ACTIVATION_STAGE_LABELS, hubspotCompanyUrl, hubspotDealUrl, type ActivationStage,
@@ -39,18 +40,20 @@ export default async function FirmPage({
     sb.from("app_users").select("hubspot_owner_id, full_name, email"),
   ]);
 
-  let firmCases: CaseRecord[] = [];
-  if (mapping) {
-    const { data } = await sb.from("cases").select("*")
-      .or(`sw_account_id.eq.${mapping.sw_account_id},sw_organization_id.eq.${mapping.sw_organization_id ?? "___"}`)
-      .order("submitted_at", { ascending: true });
-    firmCases = (data ?? []).map((c) => ({
-      swId: c.sw_id, swAccountId: c.sw_account_id, swOrganizationId: c.sw_organization_id,
-      name: c.name, caseStage: c.case_stage, analysisType: c.analysis_type,
-      submittedAt: c.submitted_at, deliveredAt: c.delivered_at,
-      reportStatus: c.report_status, raw: c.raw,
-    }));
-  }
+  // Cases now link directly to the company (case ingestion sets company_hubspot_id).
+  const { data: caseRows } = await sb.from("cases")
+    .select("case_id, case_name, case_status, submitted_date, delivered_date, " +
+            "revenue_amount, expert_review_offered, expert_review_booked, " +
+            "expert_review_completed, issue_flag, source")
+    .eq("company_hubspot_id", id)
+    .order("submitted_date", { ascending: true });
+  const caseItems = (caseRows ?? []) as unknown as CaseItem[];
+  const firmCases: CaseRecord[] = caseItems.map((c) => ({
+    swId: c.case_id, swAccountId: null, swOrganizationId: null,
+    name: c.case_name, caseStage: c.case_status, analysisType: null,
+    submittedAt: c.submitted_date ?? new Date().toISOString(),
+    deliveredAt: c.delivered_date, reportStatus: null, raw: c,
+  }));
 
   const salesDeal = (deals ?? []).find((d) => !d.activation_stage) ?? (deals ?? [])[0];
   const activationDeal = (deals ?? []).find((d) => d.activation_stage);
@@ -192,6 +195,14 @@ export default async function FirmPage({
             currentStage={mainDeal?.stage ?? undefined}
             currentActivationStage={activationDeal?.activation_stage ?? undefined}
             owners={ownerOptions}
+          />
+
+          <CaseWorkflow
+            companyId={company.hubspot_id}
+            segment={company.firm_segment ?? (p.sw_firm_segment as string | null) ?? null}
+            monthlyTarget={company.monthly_case_target ?? null}
+            cases={caseItems}
+            canEdit={user.role !== "ae"}
           />
 
           <Card>

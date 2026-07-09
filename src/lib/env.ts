@@ -20,6 +20,7 @@ export const env = {
   swApiBaseUrl: () => clean("SW_API_BASE_URL"),
   swApiKey: () => clean("SILENT_WITNESS_API_KEY"),
   posthogKey: () => clean("POSTHOG_API_KEY"),
+  posthogProjectId: () => clean("POSTHOG_PROJECT_ID"),
   posthogHost: () => clean("POSTHOG_HOST") || "https://us.posthog.com",
   slackWebhookUrl: () => clean("SLACK_WEBHOOK_URL"),
   cronSecret: () => clean("CRON_SECRET"),
