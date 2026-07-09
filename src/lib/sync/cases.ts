@@ -8,14 +8,14 @@
  */
 import {
   PostHogProvider, TEST_ACCOUNT_IDS, TEST_EMAILS, isTestCaseActor,
-  type PostHogCase,
+  FREE_EMAIL_DOMAINS, type PostHogCase, type PostHogSignup,
 } from "@/lib/cases/provider";
 import { env } from "@/lib/env";
 import {
   computeAccountHealth, type FirmSegment, type SegmentRule,
 } from "@/lib/health";
 import { hsCreateObject, hsUpdateProperties, ASSOC } from "@/lib/hubspot/client";
-import { SALES_STAGES } from "@/lib/hubspot/stages";
+import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
 import { computeFirmUsage } from "@/lib/metrics";
 import { loadSettings } from "@/lib/settings";
 import { supabaseService } from "@/lib/supabase/server";
@@ -53,7 +53,10 @@ function derivedStatus(c: { submitted_date: string | null; completed_date: strin
 // ---------------------------------------------------------------------------
 export async function syncCases() {
   const sb = supabaseService();
-  const stats = { posthog: 0, mapped: 0, unmapped: 0, intake: 0, bootstrapped: 0, purgedTest: 0 };
+  const stats = {
+    posthog: 0, mapped: 0, unmapped: 0, intake: 0, bootstrapped: 0, purgedTest: 0,
+    signups: 0, signupsMapped: 0, signupsCreated: 0,
+  };
 
   // Purge any previously-ingested test/internal cases (idempotent cleanup).
   const purge = await sb.from("cases").delete({ count: "exact" })
@@ -86,14 +89,16 @@ export async function syncCases() {
   }
   const existingById = new Map((existingCases ?? []).map((c) => [c.case_id, c]));
 
-  // ---- PostHog cases ----
+  // ---- PostHog cases + signups ----
   let phCases: PostHogCase[] = [];
+  let phSignups: PostHogSignup[] = [];
   if (env.posthogKey() && env.posthogProjectId()) {
     try {
       const provider = new PostHogProvider(
         env.posthogKey(), env.posthogProjectId(), env.posthogHost(),
       );
       phCases = await provider.listAllCases();
+      phSignups = await provider.listSignups();
     } catch (e) {
       console.error("PostHog fetch failed:", e instanceof Error ? e.message : e);
     }
@@ -221,7 +226,85 @@ export async function syncCases() {
   if (inserts.length) await sb.from("cases").insert(inserts);
   for (const u of updates) await sb.from("cases").update(u.row).eq("case_id", u.case_id);
 
+  // ---- Signups: firms that created an app account -------------------------
+  // Map each signed-up account to a firm (account id -> email domain). Unmapped
+  // signups on a real (non-free) domain get a lightweight HubSpot company + MQL
+  // deal so CS can work them. Earliest signup/subscription per firm wins.
+  const companyName = new Map<string, string | null>(
+    (companies ?? []).map((c) => [c.hubspot_id, c.name]),
+  );
+  const signupByCompany = new Map<string, { signedUpAt: string | null; subscribedAt: string | null; accountId: string }>();
+  const recordSignup = (companyId: string, s: PostHogSignup) => {
+    const prev = signupByCompany.get(companyId);
+    const min = (a: string | null, b: string | null) =>
+      !a ? b : !b ? a : (a < b ? a : b);
+    signupByCompany.set(companyId, {
+      accountId: prev?.accountId ?? s.accountId,
+      signedUpAt: min(prev?.signedUpAt ?? null, s.signedUpAt),
+      subscribedAt: min(prev?.subscribedAt ?? null, s.subscribedAt),
+    });
+  };
+
+  for (const s of phSignups) {
+    if (isTestCaseActor(s.email, s.accountId)) continue;
+    stats.signups += 1;
+    let companyId: string | null = byAccount.get(s.accountId) ?? null;
+    if (!companyId) {
+      const dom = emailDomain(s.email);
+      const co = dom ? byDomain.get(dom) : undefined;
+      if (co) companyId = co.hubspot_id;
+      // Unmapped + real firm domain -> create a lightweight company + MQL deal.
+      if (!companyId && dom && !FREE_EMAIL_DOMAINS.has(dom)) {
+        const name = companyNameFromDomain(dom);
+        const created = await hsCreateObject("companies", {
+          name, domain: dom, sw_lead_source: "app_signup",
+        });
+        if (created.ok && created.id) {
+          companyId = created.id;
+          const lite: CompanyLite = {
+            hubspot_id: companyId, name, domain: dom, sw_account_id: null, properties: {},
+          };
+          byDomain.set(dom, lite);
+          companyName.set(companyId, name);
+          // Seed the Supabase cache row so it shows before the next HubSpot sync.
+          await sb.from("companies").upsert(
+            { hubspot_id: companyId, name, domain: dom, properties: {} },
+            { onConflict: "hubspot_id" },
+          ).then(() => undefined, () => undefined);
+          // MQL-style deal so it also appears in the sales funnel.
+          await hsCreateObject("deals", {
+            dealname: name,
+            pipeline: SALES_PIPELINE_ID,
+            dealstage: SALES_STAGES.mql,
+            sw_lead_source: "app_signup",
+          }, [{ toId: companyId, associationTypeId: ASSOC.dealToCompany }]);
+          stats.signupsCreated += 1;
+        }
+      }
+    }
+    if (!companyId) { stats.unmapped += 1; continue; }
+    if (s.accountId && !byAccount.has(s.accountId)) byAccount.set(s.accountId, companyId);
+    stats.signupsMapped += 1;
+    recordSignup(companyId, s);
+  }
+
+  for (const [companyId, s] of signupByCompany) {
+    await sb.from("companies").update({
+      signed_up_at: s.signedUpAt,
+      subscribed_at: s.subscribedAt,
+      signup_account_id: s.accountId,
+      updated_at: new Date().toISOString(),
+    }).eq("hubspot_id", companyId).then(() => undefined, () => undefined);
+  }
+  void companyName;
+
   return stats;
+}
+
+/** Human-ish company name from an email domain, e.g. pcilc.la -> "Pcilc". */
+function companyNameFromDomain(domain: string): string {
+  const base = domain.split(".")[0] ?? domain;
+  return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +351,18 @@ export async function computeRollups() {
   }
   const existingHandoffDeals = new Set((handoffs ?? []).map((h) => h.deal_hubspot_id));
 
+  // Signup dates (0003). Fetched separately + tolerantly so a not-yet-applied
+  // migration can't break the rollup.
+  const signedUpByCompany = new Map<string, string>();
+  {
+    const { data: su } = await sb.from("companies")
+      .select("hubspot_id, signed_up_at")
+      .not("signed_up_at", "is", null);
+    for (const r of su ?? []) {
+      if (r.signed_up_at) signedUpByCompany.set(r.hubspot_id, r.signed_up_at);
+    }
+  }
+
   const segRule = (segment: FirmSegment | null): SegmentRule => {
     const cfg = settings.segmentConfig[segment ?? "small"] ?? settings.segmentConfig.small;
     return {
@@ -280,7 +375,8 @@ export async function computeRollups() {
   for (const company of companies ?? []) {
     const firmCases = casesByCompany.get(company.hubspot_id) ?? [];
     const companyDeals = dealsByCompany.get(company.hubspot_id) ?? [];
-    const isCustomer = firmCases.length > 0 ||
+    const signedUp = signedUpByCompany.has(company.hubspot_id);
+    const isCustomer = firmCases.length > 0 || signedUp ||
       companyDeals.some((d) => d.stage === "closedwon" || d.activation_stage);
     if (!isCustomer) continue;
     stats.firms += 1;
@@ -335,6 +431,7 @@ export async function computeRollups() {
       openIssueCount,
       hasDeliveredCaseWithoutExpertReviewOffered: deliveredWithoutOffer,
       hasActiveOpp,
+      signedUp,
       now,
     });
 

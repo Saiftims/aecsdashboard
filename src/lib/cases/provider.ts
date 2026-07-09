@@ -90,8 +90,10 @@ export class SilentWitnessProvider implements CaseDataProvider {
 // ---------------------------------------------------------------------------
 
 /** Internal/test accounts to exclude from ingestion (email or acc id). */
-export const TEST_EMAIL_DOMAINS = ["silentwitness.ai"];
-export const TEST_EMAILS = ["diegodf@gmail.com"];
+export const TEST_EMAIL_DOMAINS = ["silentwitness.ai", "das.es"];
+export const TEST_EMAILS = [
+  "diegodf@gmail.com", "saif.altimims@gmail.com", "sheikhrobertomanagement@gmail.com",
+];
 export const TEST_ACCOUNT_IDS = [
   "acc_3f97023cbf544874b818a721bbab946a", // saif+7 (JJ test cases)
   "acc_288f6554fd2e4e0d850a734d25f2f799", // newton (internal)
@@ -99,17 +101,29 @@ export const TEST_ACCOUNT_IDS = [
   "acc_d9a5094383384e00a5aafb15225d5f78", // diegodf (dev)
 ];
 
+/** Local-part prefixes (before @) that mark internal/dev gmail accounts,
+ * incl. plus-addressing like diegodf+30@, diego+asda@, saif+1@. */
+const TEST_LOCAL_PREFIXES = ["saif+", "saif.", "diego+", "diegodf+", "demo", "test"];
+
 export function isTestCaseActor(email: string | null, accountId: string | null): boolean {
   const e = (email ?? "").trim().toLowerCase();
   if (e) {
     if (TEST_EMAILS.includes(e)) return true;
-    if (e.startsWith("saif+") || e === "saif@silentwitness.ai") return true;
-    const dom = e.split("@")[1] ?? "";
+    if (e === "saif@silentwitness.ai") return true;
+    const [local = "", dom = ""] = e.split("@");
     if (TEST_EMAIL_DOMAINS.includes(dom)) return true;
+    if (TEST_LOCAL_PREFIXES.some((p) => local.startsWith(p))) return true;
   }
   if (accountId && TEST_ACCOUNT_IDS.includes(accountId)) return true;
   return false;
 }
+
+/** Free/consumer email providers - not a firm domain, so never auto-create a
+ * HubSpot company from them. */
+export const FREE_EMAIL_DOMAINS = new Set([
+  "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+  "aol.com", "proton.me", "protonmail.com", "live.com", "msn.com", "me.com",
+]);
 
 export interface PostHogCase {
   caseId: string;
@@ -119,6 +133,13 @@ export interface PostHogCase {
   completedAt: string | null;
   deliveredAt: string | null;
   analysisType: string | null;
+}
+
+export interface PostHogSignup {
+  accountId: string;
+  email: string | null;
+  signedUpAt: string | null;
+  subscribedAt: string | null;
 }
 
 export class PostHogProvider {
@@ -165,25 +186,51 @@ export class PostHogProvider {
       group by properties.caseId
       limit 5000`;
     const rows = await this.query(hogql);
-    // HogQL minIf() returns epoch 0 (1970) when no matching event exists for a
-    // caseId (e.g. delivered/downloaded but never a case_created). Treat any
-    // pre-2015 / unparseable timestamp as missing so it can't corrupt health.
-    const iso = (v: string | null) => {
-      if (!v) return null;
-      const t = new Date(v);
-      if (Number.isNaN(t.getTime()) || t.getUTCFullYear() < 2015) return null;
-      return t.toISOString();
-    };
     return rows.map((r) => ({
       caseId: String(r[0]),
       accountId: r[1] ? String(r[1]) : null,
       creatorEmail: r[2] ? String(r[2]).toLowerCase() : null,
       analysisType: r[3] ? String(r[3]) : null,
-      submittedAt: iso(r[4] as string | null),
-      completedAt: iso(r[5] as string | null),
-      deliveredAt: iso(r[6] as string | null),
+      submittedAt: safeIso(r[4] as string | null),
+      completedAt: safeIso(r[5] as string | null),
+      deliveredAt: safeIso(r[6] as string | null),
     }));
   }
+
+  /** One row per account that completed signup, with first signup + first
+   * subscription timestamps. Anonymous (no group) rows are dropped. */
+  async listSignups(sinceDays = 400): Promise<PostHogSignup[]> {
+    const hogql = `
+      select
+        properties.$group_0 as account_id,
+        max(person.properties.email) as email,
+        minIf(timestamp, event = 'signup_completed') as signed_up_at,
+        minIf(timestamp, event = 'subscription_created') as subscribed_at
+      from events
+      where event in ('signup_completed','subscription_created')
+        and properties.$group_0 is not null
+        and timestamp > now() - interval ${sinceDays} day
+      group by properties.$group_0
+      limit 5000`;
+    const rows = await this.query(hogql);
+    return rows.map((r) => ({
+      accountId: String(r[0]),
+      email: r[1] ? String(r[1]).toLowerCase() : null,
+      signedUpAt: safeIso(r[2] as string | null),
+      subscribedAt: safeIso(r[3] as string | null),
+    })).filter((s) => s.signedUpAt || s.subscribedAt);
+  }
+}
+
+// HogQL minIf() returns epoch 0 (1970) when no matching event exists for the
+// group (e.g. a case delivered but never case_created, or subscribed w/o a
+// captured signup). Treat any pre-2015 / unparseable timestamp as missing so
+// it can't corrupt health or last-activity math.
+function safeIso(v: string | null): string | null {
+  if (!v) return null;
+  const t = new Date(v);
+  if (Number.isNaN(t.getTime()) || t.getUTCFullYear() < 2015) return null;
+  return t.toISOString();
 }
 
 export function toCaseRecord(c: SwCase): CaseRecord {

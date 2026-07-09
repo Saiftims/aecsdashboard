@@ -60,6 +60,9 @@ export interface CompanyRow {
   open_issue_count: number;
   next_cs_action: string | null;
   next_cs_action_due_date: string | null;
+  signed_up_at: string | null;
+  subscribed_at: string | null;
+  signup_account_id: string | null;
 }
 
 export interface ActivityRow {
@@ -704,9 +707,10 @@ export async function csDashboard(segment: CsSegment = "all") {
     sb.from("handoffs").select("*"),
   ]);
 
-  // customer universe = firms with cases OR a closed-won/activation deal
+  // customer universe = firms with cases OR a signup OR a closed-won/activation deal
   const customerIds = new Set<string>();
   for (const c of cases ?? []) if (c.company_hubspot_id) customerIds.add(c.company_hubspot_id);
+  for (const c of companies) if (c.signed_up_at) customerIds.add(c.hubspot_id);
   for (const d of deals) {
     if ((d.stage === SALES_STAGES.closedWon || d.activation_stage) && d.company_hubspot_id) {
       customerIds.add(d.company_hubspot_id);
@@ -743,8 +747,15 @@ export async function csDashboard(segment: CsSegment = "all") {
   }
   const attainmentVals = customers.map((c) => c.target_attainment_percent).filter((v): v is number => v != null);
 
+  // Signed up (app account) but no case submitted yet - activation cohort.
+  const signedUpNoCase = customers.filter(
+    (c) => c.signed_up_at && !c.first_case_at,
+  );
+
   const metrics = {
     activatedFirms: activatedFirms.length,
+    signedUpNoCase: signedUpNoCase.length,
+    subscribedFirms: customers.filter((c) => c.subscribed_at).length,
     healthyFirms: health("healthy").length,
     activeBelowTarget: health("active_below_target").length,
     atRiskFirms: health("at_risk").length,
@@ -813,6 +824,13 @@ export async function csDashboard(segment: CsSegment = "all") {
       if (cd > 14) pushCo(4, "No first case after 14 days", c, `Committed ${cd}d ago, no case`);
       else if (cd > 7) pushCo(3, "No first case after 7 days", c, `Committed ${cd}d ago, no case`);
     }
+  }
+  // 3. signed up (app account) but no case + no sales commitment - activate them
+  for (const c of customers) {
+    if (!c.signed_up_at || c.first_case_at || c.first_case_commitment_date) continue;
+    const sd = daysSince(c.signed_up_at);
+    pushCo(3, "Signed up, no case yet",
+      c, `Signed up ${sd ?? "?"}d ago${c.subscribed_at ? " · subscribed" : ""} - drive first case`);
   }
   // 5. delivered cases with expert review not offered
   for (const c of casesForCust) {

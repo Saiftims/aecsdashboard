@@ -82,6 +82,9 @@ export interface AccountHealthInput {
   openIssueCount: number;
   hasDeliveredCaseWithoutExpertReviewOffered: boolean;
   hasActiveOpp: boolean;
+  /** Created an app account (PostHog signup) - used to surface the
+   * "signed up but no case yet" activation cohort. */
+  signedUp?: boolean;
   now?: Date;
 }
 
@@ -140,10 +143,13 @@ export function computeAccountHealth(i: AccountHealthInput): AccountHealthResult
   if (activated)
     return { status: "activated", category: "green", reasons: ["First case completed"] };
 
-  // 6) Awaiting first case
+  // 6) Awaiting first case (committed in sales, OR signed up in-app) with none yet
   if (i.firstCaseCommitmentDate && !i.firstCaseSubmittedDate)
     return { status: "awaiting_first_case", category: "yellow",
       reasons: ["Committed, no case submitted yet"] };
+  if (i.signedUp && !i.firstCaseSubmittedDate)
+    return { status: "awaiting_first_case", category: "yellow",
+      reasons: ["Signed up, no case submitted yet"] };
 
   // 7) New handoff
   return { status: "new_handoff", category: "neutral",

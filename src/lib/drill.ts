@@ -255,6 +255,12 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
     label: "Churned firms",
     rows: (ctx) => ctx.companies.filter((c) => c.account_health === "churned").map((c) => companyRow(c)),
   },
+  cs_signed_up_no_case: {
+    label: "Signed up, no case yet",
+    rows: (ctx) => ctx.companies
+      .filter((c) => c.signed_up_at && !c.first_case_at)
+      .map((c) => companyRow(c, c.subscribed_at ? "Subscribed" : "Signed up")),
+  },
   cs_expert_missing: {
     label: "Delivered cases missing expert review",
     rows: (ctx) => ctx.companies
