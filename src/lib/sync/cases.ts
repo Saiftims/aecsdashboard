@@ -336,7 +336,7 @@ export async function computeRollups() {
       cases_lifetime: usage.casesLifetime,
       cases_7d: usage.cases7d,
       cases_30d: usage.cases30d,
-      cases_45d: usage.cases45d,
+      cases_last_45d: usage.cases45d,
       cases_60d: usage.cases60d,
       cases_90d: usage.cases90d,
       cases_this_month: usage.casesThisMonth,

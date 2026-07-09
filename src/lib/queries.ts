@@ -55,7 +55,7 @@ export interface CompanyRow {
   first_case_completed_date: string | null;
   second_case_submitted_date: string | null;
   cases_this_month: number;
-  cases_45d: number;
+  cases_last_45d: number;
   target_attainment_percent: number | null;
   open_issue_count: number;
   next_cs_action: string | null;
