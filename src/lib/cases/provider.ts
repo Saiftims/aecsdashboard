@@ -165,7 +165,15 @@ export class PostHogProvider {
       group by properties.caseId
       limit 5000`;
     const rows = await this.query(hogql);
-    const iso = (v: string | null) => (v ? new Date(v).toISOString() : null);
+    // HogQL minIf() returns epoch 0 (1970) when no matching event exists for a
+    // caseId (e.g. delivered/downloaded but never a case_created). Treat any
+    // pre-2015 / unparseable timestamp as missing so it can't corrupt health.
+    const iso = (v: string | null) => {
+      if (!v) return null;
+      const t = new Date(v);
+      if (Number.isNaN(t.getTime()) || t.getUTCFullYear() < 2015) return null;
+      return t.toISOString();
+    };
     return rows.map((r) => ({
       caseId: String(r[0]),
       accountId: r[1] ? String(r[1]) : null,

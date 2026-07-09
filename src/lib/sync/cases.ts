@@ -126,8 +126,11 @@ export async function syncCases() {
     }
     if (companyId) stats.mapped += 1; else stats.unmapped += 1;
 
+    // Fall back to completed/delivered when there's no valid submitted date
+    // (a case can appear via report events without a case_created event).
+    const submittedAt = pc.submittedAt ?? pc.completedAt ?? pc.deliveredAt;
     const dates = {
-      submitted_date: pc.submittedAt,
+      submitted_date: submittedAt,
       completed_date: pc.completedAt,
       delivered_date: pc.deliveredAt,
     };
@@ -139,8 +142,8 @@ export async function syncCases() {
         company_hubspot_id: companyId,
         case_name: `Case ${pc.caseId.replace(/^case_/, "").slice(0, 8)}`,
         case_status: derivedStatus(dates),
-        submitted_date: pc.submittedAt,
-        submitted_at: pc.submittedAt,
+        submitted_date: submittedAt,
+        submitted_at: submittedAt,
         completed_date: pc.completedAt,
         delivered_date: pc.deliveredAt,
         delivered_at: pc.deliveredAt,
@@ -161,6 +164,16 @@ export async function syncCases() {
         delivered_at: pc.deliveredAt,
         updated_at: new Date().toISOString(),
       };
+      // Repair a previously-stored bad/epoch submitted date.
+      const existingSubmitted = existing.submitted_date
+        ? new Date(existing.submitted_date) : null;
+      const existingBad = !existingSubmitted ||
+        Number.isNaN(existingSubmitted.getTime()) ||
+        existingSubmitted.getUTCFullYear() < 2015;
+      if (submittedAt && existingBad) {
+        row.submitted_date = submittedAt;
+        row.submitted_at = submittedAt;
+      }
       if (!["issue_open", "cancelled"].includes(existing.case_status ?? "")) {
         row.case_status = derivedStatus(dates);
       }
