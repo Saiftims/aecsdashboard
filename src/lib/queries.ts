@@ -801,6 +801,14 @@ export async function csDashboard(segment: CsSegment = "all") {
       href: `/firms/${c.hubspot_id}`,
     });
   const byId = new Map(customers.map((c) => [c.hubspot_id, c]));
+  // Name resolution across ALL firms + deals (handoffs may reference a firm
+  // outside the current customer/segment set - never show a raw HubSpot id).
+  const firmNameById = new Map(companies.map((c) => [c.hubspot_id, c.name ?? c.domain ?? null]));
+  const dealNameById = new Map(deals.map((d) => [d.hubspot_id, d.name ?? null]));
+  const handoffTitle = (h: { company_hubspot_id: string | null; deal_hubspot_id: string | null }) =>
+    (h.company_hubspot_id && firmNameById.get(h.company_hubspot_id)) ||
+    (h.deal_hubspot_id && dealNameById.get(h.deal_hubspot_id)) ||
+    h.company_hubspot_id || h.deal_hubspot_id || "Unknown firm";
 
   // 1. open customer issues
   for (const c of customers) if ((c.open_issue_count ?? 0) > 0) pushCo(1, "Open customer issues", c, `${c.open_issue_count} open issue(s)`);
@@ -812,7 +820,7 @@ export async function csDashboard(segment: CsSegment = "all") {
     const hrs = h.handoff_created_date ? Math.round((now.getTime() - new Date(h.handoff_created_date).getTime()) / 3600000) : 0;
     queue.push({
       priority: 2, bucket: "New handoffs to accept", companyId: h.company_hubspot_id ?? undefined,
-      title: co?.name ?? h.company_hubspot_id ?? h.deal_hubspot_id,
+      title: handoffTitle(h),
       detail: hrs > 24 ? `SLA overdue (${hrs}h, target 24h)` : `Pending ${hrs}h`,
       href: h.company_hubspot_id ? `/firms/${h.company_hubspot_id}` : "#",
     });

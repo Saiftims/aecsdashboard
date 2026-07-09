@@ -340,7 +340,7 @@ export async function computeRollups() {
       sb.from("companies").select("hubspot_id, name, domain, properties, monthly_case_target, firm_segment, first_case_commitment_date, actual_revenue"),
       sb.from("cases").select("case_id, company_hubspot_id, case_status, submitted_date, completed_date, delivered_date, revenue_amount, expert_review_offered, expert_review_task_created, case_name, issue_flag"),
       sb.from("deals").select("hubspot_id, name, company_hubspot_id, stage, activation_stage, owner_id, closed_at, hs_created_at, properties"),
-      sb.from("handoffs").select("deal_hubspot_id"),
+      sb.from("handoffs").select("company_hubspot_id"),
     ]);
 
   const casesByCompany = new Map<string, CaseRow[]>();
@@ -353,7 +353,7 @@ export async function computeRollups() {
     if (!d.company_hubspot_id) continue;
     dealsByCompany.set(d.company_hubspot_id, [...(dealsByCompany.get(d.company_hubspot_id) ?? []), d]);
   }
-  const existingHandoffDeals = new Set((handoffs ?? []).map((h) => h.deal_hubspot_id));
+  const existingHandoffCompanies = new Set((handoffs ?? []).map((h) => h.company_hubspot_id));
 
   // Signup dates (0003). Fetched separately + tolerantly so a not-yet-applied
   // migration can't break the rollup.
@@ -507,30 +507,37 @@ export async function computeRollups() {
         stats.expertTasks += 1;
       }
     }
+
+    // ---- AE/product -> CS handoff (account-based) ----
+    // Fires on a REAL activation signal: first actual case, or app signup.
+    // NOT on the "First Case Committed" sales stage (that's only a promise).
+    if (!existingHandoffCompanies.has(company.hubspot_id)) {
+      const signupAt = signedUpByCompany.get(company.hubspot_id) ?? null;
+      const triggerType = usage.firstCaseAt ? "first_case" : signupAt ? "signup" : null;
+      const triggerDate = usage.firstCaseAt ?? signupAt;
+      if (triggerType && triggerDate) {
+        // Baseline pre-existing accounts as already accepted; only firms that
+        // became real in the last 3 days surface as a new handoff to accept.
+        const isNew = nowMs - new Date(triggerDate).getTime() < 3 * DAY;
+        const deal = companyDeals.find((d) => d.stage === "closedwon") ?? companyDeals[0];
+        const props = (deal?.properties ?? {}) as Record<string, string | null>;
+        await sb.from("handoffs").insert({
+          company_hubspot_id: company.hubspot_id,
+          trigger_type: triggerType,
+          deal_hubspot_id: (deal?.hubspot_id as string | undefined) ?? null,
+          handoff_created_date: triggerDate,
+          handoff_owner: (deal?.owner_id as string | null) ?? null,
+          handoff_status: isNew ? "pending" : "accepted",
+          handoff_accepted_date: isNew ? null : new Date().toISOString(),
+          source: props.sw_lead_source ?? (triggerType === "signup" ? "app_signup" : null),
+          next_step: props.sw_next_step ?? null,
+        }).then(() => undefined, () => undefined);
+        existingHandoffCompanies.add(company.hubspot_id);
+        stats.handoffs += 1;
+      }
+    }
   }
 
-  // ---- AE -> CS handoff upsert (First Case Committed or Closed Won) ----
-  for (const d of deals ?? []) {
-    const committed = d.stage === SALES_STAGES.firstCaseCommitted || d.stage === "closedwon";
-    if (!committed || existingHandoffDeals.has(d.hubspot_id)) continue;
-    const props = (d.properties ?? {}) as Record<string, string | null>;
-    await sb.from("handoffs").insert({
-      deal_hubspot_id: d.hubspot_id,
-      company_hubspot_id: d.company_hubspot_id,
-      handoff_created_date: d.closed_at ?? d.hs_created_at ?? new Date().toISOString(),
-      handoff_owner: d.owner_id as string | null,
-      handoff_status: props.sw_handoff_accepted_by_cs === "true" ? "accepted" : "pending",
-      handoff_accepted_date: props.sw_handoff_accepted_by_cs === "true" ? new Date().toISOString() : null,
-      source: props.sw_lead_source ?? null,
-      pain_point: props.sw_primary_objection ?? null,
-      next_step: props.sw_next_step ?? null,
-    }).then(() => undefined, () => undefined);
-    await hsUpdateProperties("deals", d.hubspot_id, {
-      sw_handoff_status: props.sw_handoff_accepted_by_cs === "true" ? "accepted" : "pending",
-      sw_handoff_created_date: (d.closed_at ?? d.hs_created_at ?? new Date().toISOString()).slice(0, 10),
-    });
-    stats.handoffs += 1;
-  }
   void nowMs;
   return stats;
 }
