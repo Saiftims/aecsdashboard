@@ -751,10 +751,16 @@ export async function csDashboard(segment: CsSegment = "all") {
   const signedUpNoCase = customers.filter(
     (c) => c.signed_up_at && !c.first_case_at,
   );
+  // Submitted a case (via intake/manual) but never signed up in-app - the
+  // mirror cohort; nudge them to create an account.
+  const caseNoSignup = customers.filter(
+    (c) => c.first_case_at && !c.signed_up_at,
+  );
 
   const metrics = {
     activatedFirms: activatedFirms.length,
     signedUpNoCase: signedUpNoCase.length,
+    caseNoSignup: caseNoSignup.length,
     subscribedFirms: customers.filter((c) => c.subscribed_at).length,
     healthyFirms: health("healthy").length,
     activeBelowTarget: health("active_below_target").length,
@@ -839,6 +845,12 @@ export async function csDashboard(segment: CsSegment = "all") {
     const sd = daysSince(c.signed_up_at);
     pushCo(3, "Signed up, no case yet",
       c, `Signed up ${sd ?? "?"}d ago${c.subscribed_at ? " · subscribed" : ""} - drive first case`);
+  }
+  // 3. submitted a case via intake but never signed up - invite to the app
+  for (const c of customers) {
+    if (!c.first_case_at || c.signed_up_at) continue;
+    pushCo(3, "Case submitted, no signup",
+      c, `${c.cases_lifetime} case(s) via intake, no app account - invite to sign up`);
   }
   // 5. delivered cases with expert review not offered
   for (const c of casesForCust) {

@@ -63,14 +63,21 @@ export default async function CsPage({
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Accounts</h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-          <Stat label="Signed up · no case" value={metrics.signedUpNoCase} tone={metrics.signedUpNoCase ? "warn" : "good"} href="/drill/cs_signed_up_no_case" />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
           <Stat label="Activated firms" value={metrics.activatedFirms} tone="good" href="/drill/cs_activated" />
           <Stat label="Healthy" value={metrics.healthyFirms} tone="good" href="/drill/cs_healthy" />
           <Stat label="Active below target" value={metrics.activeBelowTarget} tone="warn" href="/drill/cs_below_target" />
           <Stat label="At risk" value={metrics.atRiskFirms} tone={metrics.atRiskFirms ? "bad" : "good"} href="/drill/cs_at_risk" />
           <Stat label="Churned" value={metrics.churnedFirms} tone={metrics.churnedFirms ? "bad" : "good"} href="/drill/cs_churned" />
           <Stat label="Reactivation" value={metrics.reactivationInProgress} />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Activation gaps</h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <Stat label="Signed up · no case" value={metrics.signedUpNoCase} tone={metrics.signedUpNoCase ? "warn" : "good"} href="/drill/cs_signed_up_no_case" />
+          <Stat label="Case (intake) · no signup" value={metrics.caseNoSignup} tone={metrics.caseNoSignup ? "warn" : "good"} href="/drill/cs_case_no_signup" />
         </div>
       </section>
 

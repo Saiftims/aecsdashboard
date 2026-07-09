@@ -261,6 +261,12 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
       .filter((c) => c.signed_up_at && !c.first_case_at)
       .map((c) => companyRow(c, c.subscribed_at ? "Subscribed" : "Signed up")),
   },
+  cs_case_no_signup: {
+    label: "Case submitted (intake), no signup",
+    rows: (ctx) => ctx.companies
+      .filter((c) => c.first_case_at && !c.signed_up_at)
+      .map((c) => companyRow(c, `${c.cases_lifetime} case(s), no app account`)),
+  },
   cs_expert_missing: {
     label: "Delivered cases missing expert review",
     rows: (ctx) => ctx.companies
