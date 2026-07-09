@@ -7,6 +7,17 @@ import { currentAppUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+const FUNNEL_HREF: Record<string, string> = {
+  "Leads": "/drill/funnel_leads",
+  "Contacted": "/drill/funnel_contacted",
+  "Connected": "/drill/funnel_connected",
+  "Demo Scheduled": "/drill/funnel_demo_scheduled",
+  "Demo Completed": "/drill/funnel_demo_completed",
+  "First Case Identified": "/drill/funnel_first_case_identified",
+  "First Case Committed": "/drill/funnel_first_case_committed",
+  "Closed Won": "/drill/funnel_closed_won",
+};
+
 export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
@@ -72,6 +83,7 @@ export default async function ActivityPage() {
               value={f.count}
               sub={f.convFromPrev === null ? "top of funnel" : `${f.convFromPrev}% from prev · ${f.convFromTop}% of leads`}
               tone={f.label === "Closed Won" ? "good" : undefined}
+              href={FUNNEL_HREF[f.label]}
             />
           ))}
           <Stat
@@ -79,6 +91,7 @@ export default async function ActivityPage() {
             value={`$${Math.round(revenue).toLocaleString()}`}
             tone="good"
             sub="actual, from this week's cohort"
+            href="/drill/funnel_revenue"
           />
         </div>
       </section>

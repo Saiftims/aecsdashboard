@@ -102,6 +102,33 @@ function activityRows(ctx: Ctx, filter: (a: ActivityRow) => boolean): DrillRow[]
 const stageMetric = (stageId: string) => (ctx: Ctx) =>
   ctx.deals.filter((d) => d.stage === stageId).map((d) => dealRow(ctx, d));
 
+// ---- 7-day funnel cohort drill-downs --------------------------------------
+const FUNNEL_RANK: Record<string, number> = {
+  [SALES_STAGES.mql]: 1,
+  [SALES_STAGES.attemptingContact]: 2,
+  [SALES_STAGES.connected]: 3,
+  [SALES_STAGES.qualified]: 4,
+  [SALES_STAGES.demoScheduled]: 5,
+  [SALES_STAGES.demoCompleted]: 6,
+  [SALES_STAGES.firstCaseIdentified]: 7,
+  [SALES_STAGES.firstCaseCommitted]: 8,
+  [SALES_STAGES.closedWon]: 9,
+  [SALES_STAGES.closedLost]: 1,
+  [SALES_STAGES.nurture]: 1,
+};
+
+function cohort(ctx: Ctx): DealRow[] {
+  const weekAgo = subDays(ctx.now, 7);
+  return ctx.deals.filter(
+    (d) => d.hs_created_at && new Date(d.hs_created_at) >= weekAgo,
+  );
+}
+
+const funnelReached = (rank: number, label: string) => (ctx: Ctx) =>
+  cohort(ctx)
+    .filter((d) => (FUNNEL_RANK[d.stage ?? ""] ?? 0) >= rank)
+    .map((d) => dealRow(ctx, d, `${d.stage_label} · reached ${label}`));
+
 const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }> = {
   leads_assigned: {
     label: "Leads assigned",
@@ -178,6 +205,32 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
         })
         .map((d) => dealRow(ctx, d, "No recent touch")),
   },
+  // ---- 7-day funnel cohort (this week's new leads) ----
+  funnel_leads: {
+    label: "Leads created this week",
+    rows: (ctx) => cohort(ctx).map((d) => dealRow(ctx, d)),
+  },
+  funnel_contacted: {
+    label: "Contacted (this week's leads)",
+    rows: (ctx) => cohort(ctx).filter((d) => ctx.lastTouch(d) !== null)
+      .map((d) => dealRow(ctx, d, "touched")),
+  },
+  funnel_connected: { label: "Connected (this week's leads)", rows: funnelReached(3, "Connected") },
+  funnel_demo_scheduled: { label: "Demo Scheduled (this week's leads)", rows: funnelReached(5, "Demo Scheduled") },
+  funnel_demo_completed: { label: "Demo Completed (this week's leads)", rows: funnelReached(6, "Demo Completed") },
+  funnel_first_case_identified: { label: "First Case Identified (this week's leads)", rows: funnelReached(7, "First Case Identified") },
+  funnel_first_case_committed: { label: "First Case Committed (this week's leads)", rows: funnelReached(8, "First Case Committed") },
+  funnel_closed_won: {
+    label: "Closed Won (this week's leads)",
+    rows: (ctx) => cohort(ctx).filter((d) => d.stage === SALES_STAGES.closedWon)
+      .map((d) => dealRow(ctx, d, "Closed Won")),
+  },
+  funnel_revenue: {
+    label: "Revenue won this week",
+    rows: (ctx) => cohort(ctx).filter((d) => d.stage === SALES_STAGES.closedWon)
+      .map((d) => dealRow(ctx, d, `$${Math.round(Number(d.amount ?? 0)).toLocaleString()}`)),
+  },
+
   // ---- CS ----
   activation: {
     label: "Activation accounts",
