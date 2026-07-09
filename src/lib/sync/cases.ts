@@ -203,14 +203,18 @@ export async function syncCases() {
       .some((t) => Math.abs(t - created) <= 3 * DAY);
     const caseId = `intake_${d.hubspot_id}`;
     if (near || existingById.has(caseId)) continue;
+    // A closed-won intake deal is a finished, invoiced case -> mark completed so
+    // the firm counts as an activated customer (not stuck pre-first-case).
+    const done = d.stage === SALES_STAGES.closedWon;
     inserts.push({
       case_id: caseId,
       sw_id: caseId,
       company_hubspot_id: d.company_hubspot_id,
       case_name: d.name,
-      case_status: "submitted",
+      case_status: done ? "completed" : "submitted",
       submitted_date: d.hs_created_at,
       submitted_at: d.hs_created_at,
+      ...(done ? { completed_date: d.hs_created_at } : {}),
       source: "hubspot_intake",
       revenue_amount: 250,
       updated_at: new Date().toISOString(),
