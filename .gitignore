@@ -46,3 +46,5 @@ next-env.d.ts
 supabase/.temp/
 
 _verify.mjs
+_*.mjs
+.env.vercel

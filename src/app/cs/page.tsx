@@ -79,9 +79,9 @@ export default async function CsPage({
           <Stat label="Cases this month" value={metrics.casesThisMonth} />
           <Stat label="Revenue this month" value={money(metrics.revenueThisMonth)} tone="good" />
           <Stat label="Monthly active firms" value={`${metrics.monthlyActiveFirms}/${metrics.totalCustomers}`} />
-          <Stat label="Target attainment (avg)" value={metrics.targetAttainmentAvg === null ? "-" : `${metrics.targetAttainmentAvg}%`} />
-          <Stat label="2nd-case conversion" value={metrics.secondCaseConversionRate === null ? "-" : `${metrics.secondCaseConversionRate}%`} />
-          <Stat label="Avg days to first case" value={metrics.avgDaysToFirstCase === null ? "-" : `${metrics.avgDaysToFirstCase}d`} />
+          <Stat label="Target attainment (avg)" value={metrics.targetAttainmentAvg == null ? "-" : `${metrics.targetAttainmentAvg}%`} />
+          <Stat label="2nd-case conversion" value={metrics.secondCaseConversionRate == null ? "-" : `${metrics.secondCaseConversionRate}%`} />
+          <Stat label="Avg days to first case" value={metrics.avgDaysToFirstCase == null ? "-" : `${metrics.avgDaysToFirstCase}d`} />
         </div>
       </section>
 
@@ -105,9 +105,9 @@ export default async function CsPage({
               <Link key="f" href={`/firms/${r.companyId}`} className="font-medium hover:underline">{r.firm}</Link>,
               r.segment ? r.segment.replace("_", " ") : "-",
               r.monthlyTarget ?? "-",
-              String(r.casesThisMonth),
-              String(r.cases30d),
-              r.attainment === null ? "-" : `${r.attainment}%`,
+              String(r.casesThisMonth ?? 0),
+              String(r.cases30d ?? 0),
+              r.attainment == null ? "-" : `${r.attainment}%`,
               r.lastCaseDate ? new Date(r.lastCaseDate).toLocaleDateString() : "-",
               r.daysSinceLastCase ?? "-",
               <Badge key="h" tone={HEALTH_TONE[r.health ?? ""] ?? "default"}>{healthLabel(r.health)}</Badge>,
