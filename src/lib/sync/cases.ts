@@ -333,7 +333,7 @@ export async function computeRollups() {
   const settings = await loadSettings();
   const now = new Date();
   const nowMs = now.getTime();
-  const stats = { firms: 0, writebacks: 0, expertTasks: 0, handoffs: 0 };
+  const stats = { firms: 0, writebacks: 0, expertTasks: 0, handoffs: 0, dealsClosed: 0 };
 
   const [{ data: companies }, { data: cases }, { data: deals }, { data: handoffs }] =
     await Promise.all([
@@ -505,6 +505,29 @@ export async function computeRollups() {
       if (res.ok || res.skipped) {
         await sb.from("cases").update({ expert_review_task_created: true }).eq("case_id", c.case_id);
         stats.expertTasks += 1;
+      }
+    }
+
+    // ---- auto-advance sales deal to Closed Won on first real case ----
+    // A firm that has submitted a case is a won customer; its sales deal must
+    // not sit in an open stage. Close date = first case date. Idempotent (only
+    // touches OPEN-stage deals). Supabase is updated too so the dashboard
+    // reflects it without waiting for HubSpot's list-API to re-index.
+    if (usage.firstCaseAt) {
+      for (const d of companyDeals) {
+        if (!OPEN_SALES_STAGES.has(d.stage as string)) continue;
+        const dealId = d.hubspot_id as string;
+        const closeIso = usage.firstCaseAt;
+        const wb = await hsUpdateProperties("deals", dealId, {
+          dealstage: SALES_STAGES.closedWon,
+          closedate: closeIso,
+        });
+        if (wb.ok || wb.skipped) {
+          await sb.from("deals").update({
+            stage: SALES_STAGES.closedWon, stage_label: "Closed Won", closed_at: closeIso,
+          }).eq("hubspot_id", dealId).then(() => undefined, () => undefined);
+          stats.dealsClosed += 1;
+        }
       }
     }
 
