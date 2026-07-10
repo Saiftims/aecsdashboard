@@ -84,8 +84,8 @@ export default async function CsPage({
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Usage & revenue</h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-          <Stat label="Cases this month" value={metrics.casesThisMonth} href="/drill/cs_cases_this_month" />
-          <Stat label="Revenue this month" value={money(metrics.revenueThisMonth)} tone="good" href="/drill/cs_cases_this_month" />
+          <Stat label="Cases this month" value={metrics.casesThisMonth} href="/drill/cs_cases_month" />
+          <Stat label="Revenue this month" value={money(metrics.revenueThisMonth)} tone="good" href="/drill/cs_cases_month" />
           <Stat label="Monthly active firms" value={`${metrics.monthlyActiveFirms}/${metrics.totalCustomers}`} href="/drill/cs_active_firms" />
           <Stat label="Target attainment (avg)" value={metrics.targetAttainmentAvg == null ? "-" : `${metrics.targetAttainmentAvg}%`} />
           <Stat label="2nd-case conversion" value={metrics.secondCaseConversionRate == null ? "-" : `${metrics.secondCaseConversionRate}%`} />

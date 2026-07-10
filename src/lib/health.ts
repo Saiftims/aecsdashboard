@@ -143,14 +143,6 @@ export function computeAccountHealth(i: AccountHealthInput): AccountHealthResult
   if (activated)
     return { status: "activated", category: "green", reasons: ["First case completed"] };
 
-  // 5b) Has submitted case(s) but none completed yet - actively working their
-  // first case(s). They're a live customer, not a pending handoff.
-  if (i.firstCaseSubmittedDate)
-    return { status: "active_below_target", category: "yellow",
-      reasons: [i.casesThisMonth > 0
-        ? `${i.casesThisMonth} case(s) this month, in progress`
-        : "Case(s) submitted, in progress"] };
-
   // 6) Awaiting first case (committed in sales, OR signed up in-app) with none yet
   if (i.firstCaseCommitmentDate && !i.firstCaseSubmittedDate)
     return { status: "awaiting_first_case", category: "yellow",
