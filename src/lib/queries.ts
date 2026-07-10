@@ -741,7 +741,10 @@ export async function csDashboard(segment: CsSegment = "all") {
     }
   }
   let customers = companies.filter((c) => customerIds.has(c.hubspot_id));
-  if (segment !== "all") customers = customers.filter((c) => c.firm_segment === segment);
+  // Firms without an explicit segment default to "small" (their effective rule
+  // set), so a "Small" filter must include them - otherwise unsegmented firms
+  // vanish under every segment tab.
+  if (segment !== "all") customers = customers.filter((c) => (c.firm_segment ?? "small") === segment);
   const custIds = new Set(customers.map((c) => c.hubspot_id));
 
   const casesForCust = (cases ?? []).filter((c) => c.company_hubspot_id && custIds.has(c.company_hubspot_id));
