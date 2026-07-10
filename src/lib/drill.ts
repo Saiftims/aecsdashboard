@@ -267,6 +267,20 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
       .filter((c) => c.first_case_at && !c.signed_up_at)
       .map((c) => companyRow(c, `${c.cases_lifetime} case(s), no app account`)),
   },
+  cs_active_firms: {
+    label: "Monthly active firms (case in last 30 days)",
+    rows: (ctx) => ctx.companies
+      .filter((c) => (c.cases_30d ?? 0) > 0)
+      .sort((a, b) => (b.cases_30d ?? 0) - (a.cases_30d ?? 0))
+      .map((c) => companyRow(c, `${c.cases_30d} case(s) in 30d`)),
+  },
+  cs_cases_this_month: {
+    label: "Firms with a case this month",
+    rows: (ctx) => ctx.companies
+      .filter((c) => (c.cases_this_month ?? 0) > 0)
+      .sort((a, b) => (b.cases_this_month ?? 0) - (a.cases_this_month ?? 0))
+      .map((c) => companyRow(c, `${c.cases_this_month} case(s) this month`)),
+  },
   cs_expert_missing: {
     label: "Delivered cases missing expert review",
     rows: (ctx) => ctx.companies
