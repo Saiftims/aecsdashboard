@@ -36,7 +36,7 @@ export default async function ExecutivePage() {
           <Stat label="First-case commitments" value={kpis.firstCaseCommitted} href="/drill/first_case_commitments" />
           <Stat label="New firms this month" value={kpis.newFirmsThisMonth} tone="good" href="/drill/firms_closed" />
           <Stat label="Pipeline value (est)" value={fmtMoney(kpis.pipelineValue)} href="/drill/leads_assigned" />
-          <Stat label="Revenue closed (month)" value={fmtMoney(kpis.revenueClosedThisMonth)} href="/drill/firms_closed" />
+          <Stat label="Revenue (month)" value={fmtMoney(kpis.estRevenueThisMonth)} sub="cases this month x price" href="/drill/cs_cases_month" />
         </div>
       </section>
 
@@ -48,16 +48,13 @@ export default async function ExecutivePage() {
           <Stat label="Repeat users" value={kpis.repeatUsers} href="/drill/activation_repeat_user" />
           <Stat label="Healthy accounts" value={kpis.healthyAccounts} tone="good" href="/firms?health=green" />
           <Stat label="At risk" value={kpis.atRiskAccounts} tone={kpis.atRiskAccounts ? "bad" : "good"} href="/drill/activation_at_risk" />
-          <Stat label="Cases this month" value={kpis.casesThisMonth} />
+          <Stat label="Cases this month" value={kpis.casesThisMonth} href="/drill/cs_cases_month" />
           <Stat
-            label="Est. case revenue (month)"
-            value={fmtMoney(kpis.estRevenueThisMonth)}
-            sub="estimated: cases x default price"
-          />
-          <Stat
-            label="Actual revenue (month)"
-            value={kpis.actualRevenueThisMonth === null ? "n/a" : fmtMoney(kpis.actualRevenueThisMonth)}
-            sub="no invoice source connected"
+            label="New customers (month)"
+            value={kpis.newCustomersThisMonth}
+            tone="good"
+            sub="first case this month"
+            href="/drill/new_customers_month"
           />
           <Stat label="Avg cases / active firm" value={kpis.avgCasesPerActiveFirm} />
         </div>

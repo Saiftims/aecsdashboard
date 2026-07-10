@@ -22,10 +22,10 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const { settings, activityTotals, daily, funnel, revenue, cohortSize } = await activityReport(
-    user.role === "ae" ? user.hubspot_owner_id : null,
-  );
+  const { settings, activityTotals, daily, funnel, revenue, cohortSize, casesThisWeek, newCustomers, dealsWon } =
+    await activityReport(user.role === "ae" ? user.hubspot_owner_id : null);
   const scope = user.role === "ae" ? "your" : "team";
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
   return (
     <div className="space-y-6">
@@ -36,6 +36,18 @@ export default async function ActivityPage() {
           funnel. Days are in the dashboard timezone.
         </p>
       </div>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Results (7 days)
+        </h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Stat label="New customers" value={newCustomers} tone="good" sub="first case this week" href="/drill/new_customers_7d" />
+          <Stat label="Cases won" value={casesThisWeek} tone="good" sub="cases submitted this week" href="/drill/cases_7d" />
+          <Stat label="Revenue" value={money(revenue)} tone="good" sub={`${casesThisWeek} cases x $${settings.defaultCasePrice}`} href="/drill/cases_7d" />
+          <Stat label="Deals signed" value={dealsWon} sub="closed-won this week" href="/drill/funnel_closed_won" />
+        </div>
+      </section>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
@@ -86,13 +98,6 @@ export default async function ActivityPage() {
               href={FUNNEL_HREF[f.label]}
             />
           ))}
-          <Stat
-            label="Revenue (won this week)"
-            value={`$${Math.round(revenue).toLocaleString()}`}
-            tone="good"
-            sub="actual, from this week's cohort"
-            href="/drill/funnel_revenue"
-          />
         </div>
       </section>
 

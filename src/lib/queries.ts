@@ -298,6 +298,9 @@ export async function execOverview() {
   );
 
   const activeFirms = companies.filter((c) => c.cases_30d > 0);
+  const newCustomersThisMonth = companies.filter(
+    (c) => c.first_case_at && new Date(c.first_case_at) >= monthStart,
+  ).length;
 
   return {
     settings,
@@ -313,6 +316,7 @@ export async function execOverview() {
       qualifiedOpen: deals.filter((d) => d.stage === SALES_STAGES.qualified).length,
       firstCaseCommitted: deals.filter((d) => d.stage === SALES_STAGES.firstCaseCommitted).length,
       newFirmsThisMonth: wonThisMonth.length,
+      newCustomersThisMonth,
       pipelineValue,
       revenueClosedThisMonth: wonThisMonth.reduce((s, d) => s + (d.amount ?? 0), 0),
       totalCustomerFirms: customers.length,
@@ -571,10 +575,11 @@ export interface FunnelStep {
 }
 
 export async function activityReport(ownerId?: string | null) {
-  const { settings, deals, activities } = await fetchCore();
+  const { settings, deals, companies, activities } = await fetchCore();
   const now = new Date();
   const tz = settings.dashboardTimezone;
   const weekAgo = subDays(now, 7);
+  const weekAgoMs = weekAgo.getTime();
   const nowMs = now.getTime();
   const mine = <T extends { owner_id: string | null }>(x: T) =>
     !ownerId || x.owner_id === ownerId;
@@ -642,11 +647,30 @@ export async function activityReport(ownerId?: string | null) {
     convFromTop: i === 0 ? null : Math.round((s.count / top) * 100),
   }));
 
-  const revenue = cohort
-    .filter((d) => d.stage === SALES_STAGES.closedWon)
-    .reduce((sum, d) => sum + (d.amount ?? 0), 0);
+  // ---- real results this week (firm/case-level, team-wide) ------------------
+  // Revenue = cases submitted in the window x their price ($250/case) - NOT deal
+  // "amount" (rarely set). New customers = firms whose FIRST case landed this
+  // week (they started generating revenue). These are firm-level, so they are
+  // team-wide regardless of the AE activity scope above.
+  const inWeek = (iso: string | null) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return t >= weekAgoMs && t <= nowMs;
+  };
+  const { data: caseRows } = await supabaseService()
+    .from("cases").select("company_hubspot_id, submitted_date, revenue_amount");
+  const casesThisWeek = (caseRows ?? []).filter((c) => inWeek(c.submitted_date));
+  const revenue = casesThisWeek.reduce(
+    (s, c) => s + (Number(c.revenue_amount) || settings.defaultCasePrice), 0);
+  const newCustomers = companies.filter((c) => inWeek(c.first_case_at)).length;
+  // Deals actually signed (closed-won) this week, by close date.
+  const dealsWon = deals.filter(
+    (d) => d.stage === SALES_STAGES.closedWon && inWeek(d.closed_at)).length;
 
-  return { settings, activityTotals, daily, funnel, revenue, cohortSize: cohort.length };
+  return {
+    settings, activityTotals, daily, funnel, cohortSize: cohort.length,
+    revenue, casesThisWeek: casesThisWeek.length, newCustomers, dealsWon,
+  };
 }
 
 function countByStage(deals: DealRow[]) {

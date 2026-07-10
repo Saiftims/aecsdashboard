@@ -279,6 +279,28 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
       .filter((c) => (c.cases_this_month ?? 0) > 0)
       .map((c) => companyRow(c, `${c.cases_this_month} case(s) this month`)),
   },
+  new_customers_7d: {
+    label: "New customers this week (first case in last 7 days)",
+    rows: (ctx) => ctx.companies
+      .filter((c) => c.first_case_at &&
+        (ctx.now.getTime() - new Date(c.first_case_at).getTime()) <= 7 * 86400000)
+      .map((c) => companyRow(c, "first case this week")),
+  },
+  new_customers_month: {
+    label: "New customers this month (first case this month)",
+    rows: (ctx) => {
+      const ms = new Date(ctx.now.getFullYear(), ctx.now.getMonth(), 1).getTime();
+      return ctx.companies
+        .filter((c) => c.first_case_at && new Date(c.first_case_at).getTime() >= ms)
+        .map((c) => companyRow(c, "first case this month"));
+    },
+  },
+  cases_7d: {
+    label: "Firms with a case in the last 7 days",
+    rows: (ctx) => ctx.companies
+      .filter((c) => (c.cases_7d ?? 0) > 0)
+      .map((c) => companyRow(c, `${c.cases_7d} case(s) in 7d`)),
+  },
   cs_expert_missing: {
     label: "Delivered cases missing expert review",
     rows: (ctx) => ctx.companies
