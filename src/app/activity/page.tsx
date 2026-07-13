@@ -177,7 +177,9 @@ export default async function ActivityPage() {
           <Table
             headers={["First-case cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
             rows={retention.cohorts.map((c) => [
-              c.label,
+              <Link key="c" href={`/drill/cohort_${c.key}`} className="font-medium text-blue-600 hover:underline">
+                {c.label}
+              </Link>,
               String(c.firms),
               ...c.retention.map((r) => (r === null ? "—" : `${r}%`)),
             ])}

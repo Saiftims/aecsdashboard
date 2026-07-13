@@ -355,10 +355,30 @@ function activationMetric(stage: string) {
   };
 }
 
+/** Firms in a first-case cohort (key = "YYYY-MM"). */
+function cohortMetric(key: string): { label: string; rows: (ctx: Ctx) => DrillRow[] } | null {
+  if (!/^\d{4}-\d{2}$/.test(key)) return null;
+  const label = new Date(`${key}-01T00:00:00Z`)
+    .toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return {
+    label: `First-case cohort — ${label}`,
+    rows: (ctx) => ctx.companies
+      .filter((c) => {
+        if (!c.first_case_at) return false;
+        const d = new Date(c.first_case_at);
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}` === key;
+      })
+      .sort((a, b) => (b.cases_lifetime ?? 0) - (a.cases_lifetime ?? 0))
+      .map((c) => companyRow(c, `${c.cases_lifetime ?? 0} lifetime case(s) · first ${c.first_case_at ? new Date(c.first_case_at).toLocaleDateString() : "?"}`)),
+  };
+}
+
 export async function drill(metric: string, ownerId?: string | null): Promise<DrillResult | null> {
   const def = metric.startsWith("activation_")
     ? activationMetric(metric.slice("activation_".length))
-    : METRICS[metric];
+    : metric.startsWith("cohort_")
+      ? cohortMetric(metric.slice("cohort_".length))
+      : METRICS[metric];
   if (!def) return null;
 
   const { settings, deals, companies, contacts, activities } = await fetchCore();
