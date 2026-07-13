@@ -1,10 +1,17 @@
 /** HubSpot -> Supabase cache sync (idempotent upserts keyed by HubSpot id).
  * Incremental via the search API (hs_lastmodifieddate); full for backfills. */
 import {
-  HubSpotError, hsListAll, hsListModifiedSince, type HsObject,
+  HubSpotError, hsListAll, hsListModifiedSince, hsRequest, type HsObject,
 } from "@/lib/hubspot/client";
 import { SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
+import { env } from "@/lib/env";
 import { supabaseService } from "@/lib/supabase/server";
+
+/** Interview/hiring candidates that a connected HubSpot integration keeps
+ * re-creating as deals (they default into "Demo Scheduled" and flood the
+ * pipeline). Self-heal: never ingest them, and delete them from HubSpot on
+ * sight so they can't return regardless of the upstream integration. */
+const BLOCKED_DEAL_NAME = /laura\s*saint\s*clair|nathan\s*nale/i;
 
 const COMPANY_PROPS = [
   "name", "domain", "hubspot_owner_id",
@@ -134,7 +141,17 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   }
 
   // ---- deals ----
-  const deals = await fetchObjects("deals", DEAL_PROPS, ["companies", "contacts"]);
+  const allDeals = await fetchObjects("deals", DEAL_PROPS, ["companies", "contacts"]);
+  // Self-heal: drop blocked interview deals and delete them from HubSpot so the
+  // upstream integration can't keep resurrecting them into the pipeline.
+  const blockedDeals = allDeals.filter((d) => BLOCKED_DEAL_NAME.test(d.properties.dealname ?? ""));
+  const deals = allDeals.filter((d) => !BLOCKED_DEAL_NAME.test(d.properties.dealname ?? ""));
+  if (env.hubspotWritesEnabled()) {
+    for (const d of blockedDeals) {
+      await hsRequest("DELETE", `/crm/v3/objects/deals/${d.id}`).catch(() => undefined);
+    }
+  }
+  if (blockedDeals.length) stats.blockedDealsPurged = blockedDeals.length;
   stats.deals = deals.length;
   fetchedIds.deals = deals.map((d) => d.id);
   if (deals.length) {
