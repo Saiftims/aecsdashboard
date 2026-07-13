@@ -688,6 +688,7 @@ export interface RetentionReport {
   funnel: FunnelStep[];
   cohorts: CohortRow[];
   monthCols: number;
+  monthlyCases: { month: string; count: number }[];
   frequency: {
     activatedFirms: number;
     totalCases: number;
@@ -730,6 +731,22 @@ export async function retentionReport(): Promise<RetentionReport> {
   }
   const firms = [...byFirm.values()].map((a) => a.sort((x, y) => x - y));
   const activated = firms.length;
+
+  // monthly case volume (all cases with a date), ascending
+  const monthCount = new Map<string, number>();
+  for (const c of caseRows ?? []) {
+    if (!c.submitted_date) continue;
+    const d = new Date(c.submitted_date);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    monthCount.set(key, (monthCount.get(key) ?? 0) + 1);
+  }
+  const monthlyCases = [...monthCount.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, count]) => ({
+      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+      count,
+    }));
 
   const has2 = firms.filter((f) => f.length >= 2).length;
   const has3 = firms.filter((f) => f.length >= 3).length;
@@ -787,7 +804,7 @@ export async function retentionReport(): Promise<RetentionReport> {
   const round1 = (n: number) => Math.round(n * 10) / 10;
 
   return {
-    funnel, cohorts, monthCols,
+    funnel, cohorts, monthCols, monthlyCases,
     frequency: {
       activatedFirms: activated,
       totalCases,

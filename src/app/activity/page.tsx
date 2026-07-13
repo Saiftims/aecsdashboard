@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { DailyActivityChart, FunnelChart, RetentionChart } from "@/components/charts";
+import { DailyActivityChart, FunnelChart, MonthlyBarChart, RetentionChart } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
 import { activityReport, retentionReport } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
@@ -117,6 +117,21 @@ export default async function ActivityPage() {
           ])}
         />
       </Card>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Monthly case volume
+        </h2>
+        <Card>
+          <CardHeader
+            title="Total cases submitted per month"
+            action={<span className="text-xs text-zinc-500">{retention.monthlyCases.reduce((s, m) => s + m.count, 0)} cases all-time</span>}
+          />
+          <div className="p-4">
+            <MonthlyBarChart data={retention.monthlyCases} />
+          </div>
+        </Card>
+      </section>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
