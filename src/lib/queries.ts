@@ -673,6 +673,138 @@ export async function activityReport(ownerId?: string | null) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Retention: activation->2nd->3rd->30/60/90-day funnel, first-case cohorts,
+// and usage-frequency metrics. All firm/case-level and team-wide.
+// ---------------------------------------------------------------------------
+export interface CohortRow {
+  key: string;            // "2026-04"
+  label: string;          // "April 2026"
+  firms: number;
+  retention: (number | null)[]; // Month 0..N (% retained), null if not elapsed
+}
+
+export interface RetentionReport {
+  funnel: FunnelStep[];
+  cohorts: CohortRow[];
+  monthCols: number;
+  frequency: {
+    activatedFirms: number;
+    totalCases: number;
+    casesPerActivatedFirm: number;
+    activeFirms30d: number;
+    casesPerActiveFirm: number;
+    medianCasesPerActiveFirm: number;
+    top3ConcentrationPct: number | null;
+    zeroCasesThisMonth: number;
+    oneCaseOnly: number;
+    twoPlusCases: number;
+    threePlusCases: number;
+    activeTwoPlusConsecutiveMonths: number;
+  };
+}
+
+const DAY_MS = 86400000;
+
+export async function retentionReport(): Promise<RetentionReport> {
+  const sb = supabaseService();
+  const now = new Date();
+  const nowMs = now.getTime();
+  const monthIdx = (t: number) => {
+    const d = new Date(t);
+    return d.getUTCFullYear() * 12 + d.getUTCMonth();
+  };
+  const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
+
+  const { data: caseRows } = await sb.from("cases")
+    .select("company_hubspot_id, submitted_date")
+    .not("company_hubspot_id", "is", null);
+
+  // firm -> ascending submitted timestamps
+  const byFirm = new Map<string, number[]>();
+  for (const c of caseRows ?? []) {
+    if (!c.submitted_date) continue;
+    const t = new Date(c.submitted_date).getTime();
+    if (Number.isNaN(t)) continue;
+    byFirm.set(c.company_hubspot_id!, [...(byFirm.get(c.company_hubspot_id!) ?? []), t]);
+  }
+  const firms = [...byFirm.values()].map((a) => a.sort((x, y) => x - y));
+  const activated = firms.length;
+
+  const has2 = firms.filter((f) => f.length >= 2).length;
+  const has3 = firms.filter((f) => f.length >= 3).length;
+  // windowed retention: an ADDITIONAL case in days [lo,hi) after the first case
+  const win = (lo: number, hi: number) =>
+    firms.filter((f) => f.some((t, i) => i > 0 && t - f[0] >= lo * DAY_MS && t - f[0] < hi * DAY_MS)).length;
+  const ret30 = win(0, 30), ret60 = win(30, 60), ret90 = win(60, 90);
+
+  const step = (label: string, count: number, prev: number | null): FunnelStep => ({
+    label, count,
+    convFromPrev: prev === null ? null : prev ? Math.round((count / prev) * 100) : null,
+    convFromTop: activated ? Math.round((count / activated) * 100) : null,
+  });
+  const funnel: FunnelStep[] = [
+    step("Submitted 1st case", activated, null),
+    step("Submitted 2nd case", has2, activated),
+    step("Submitted 3rd case", has3, has2),
+    step("Active in 30-day window", ret30, activated),
+    step("Active in 60-day window", ret60, ret30),
+    step("Active in 90-day window", ret90, ret60),
+  ];
+
+  // ---- first-case cohorts (calendar month) ----
+  const cohortMap = new Map<string, { first: number; active: Set<number> }[]>();
+  for (const f of firms) {
+    const d = new Date(f[0]);
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const entry = { first: monthIdx(f[0]), active: new Set(f.map(monthIdx)) };
+    cohortMap.set(key, [...(cohortMap.get(key) ?? []), entry]);
+  }
+  const monthCols = 4; // Month 0..3
+  const cohorts: CohortRow[] = [...cohortMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, list]) => {
+    const retention: (number | null)[] = [];
+    for (let m = 0; m < monthCols; m++) {
+      const target = list[0].first + m;
+      if (target > nowIdx) { retention.push(null); continue; } // month not reached yet
+      const cnt = list.filter((x) => x.active.has(x.first + m)).length;
+      retention.push(Math.round((cnt / list.length) * 100));
+    }
+    const label = new Date(`${key}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    return { key, label, firms: list.length, retention };
+  });
+
+  // ---- usage-frequency metrics ----
+  const totalCases = firms.reduce((s, f) => s + f.length, 0);
+  const active30 = firms.filter((f) => f.some((t) => nowMs - t <= 30 * DAY_MS));
+  const perActive = active30.map((f) => f.filter((t) => nowMs - t <= 30 * DAY_MS).length);
+  const casesLast30 = perActive.reduce((s, n) => s + n, 0);
+  const lifetimeDesc = firms.map((f) => f.length).sort((a, b) => b - a);
+  const top3 = lifetimeDesc.slice(0, 3).reduce((a, b) => a + b, 0);
+  const consecutive = firms.filter((f) => {
+    const idxs = [...new Set(f.map(monthIdx))].sort((a, b) => a - b);
+    return idxs.some((v, i) => i > 0 && v - idxs[i - 1] === 1);
+  }).length;
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+
+  return {
+    funnel, cohorts, monthCols,
+    frequency: {
+      activatedFirms: activated,
+      totalCases,
+      casesPerActivatedFirm: activated ? round1(totalCases / activated) : 0,
+      activeFirms30d: active30.length,
+      casesPerActiveFirm: active30.length ? round1(casesLast30 / active30.length) : 0,
+      medianCasesPerActiveFirm: median(perActive) ?? 0,
+      top3ConcentrationPct: totalCases ? Math.round((top3 / totalCases) * 100) : null,
+      zeroCasesThisMonth: firms.filter((f) => !f.some((t) => monthIdx(t) === nowIdx)).length,
+      oneCaseOnly: firms.filter((f) => f.length === 1).length,
+      twoPlusCases: has2,
+      threePlusCases: has3,
+      activeTwoPlusConsecutiveMonths: consecutive,
+    },
+  };
+}
+
 function countByStage(deals: DealRow[]) {
   const out: Record<string, number> = {};
   for (const d of deals) {
