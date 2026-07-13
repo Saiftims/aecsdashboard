@@ -624,14 +624,18 @@ export async function activityReport(ownerId?: string | null) {
   const cohort = deals.filter(
     (d) => mine(d) && d.hs_created_at && new Date(d.hs_created_at) >= weekAgo,
   );
-  const lastTouch = buildLastTouchLookup(activities, now);
   const rank = (d: DealRow) => STAGE_RANK[d.stage ?? ""] ?? 0;
   const reached = (r: number) => cohort.filter((d) => rank(d) >= r).length;
 
+  // Funnel is stage-progression based end-to-end (each step = deals that
+  // REACHED at least that stage), so it is monotonically non-increasing.
+  // Mixing a touch-based "Contacted" with stage-based steps previously made the
+  // funnel non-monotonic (e.g. Contacted < Connected -> >100% conversion).
   const steps: { label: string; count: number }[] = [
     { label: "Leads", count: cohort.length },
-    { label: "Contacted", count: cohort.filter((d) => lastTouch(d) !== null).length },
+    { label: "Contacted", count: reached(2) },
     { label: "Connected", count: reached(3) },
+    { label: "Qualified", count: reached(4) },
     { label: "Demo Scheduled", count: reached(5) },
     { label: "Demo Completed", count: reached(6) },
     { label: "First Case Identified", count: reached(7) },
