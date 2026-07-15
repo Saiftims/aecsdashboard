@@ -24,6 +24,7 @@ const HEALTH_TONE = {
   healthy: "green",
   watch: "yellow",
   at_risk: "red",
+  not_using_product: "yellow",
 } as const;
 
 export default async function ProductPage() {
@@ -44,9 +45,10 @@ export default async function ProductPage() {
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
-        Product telemetry only. Form/CSV intake cases are intentionally excluded.
-        PostHog&apos;s <code>case_created</code> event is known to under-report some app
-        cases, so workflow totals are a telemetry floor.
+        Product telemetry is joined to all reconciled cases. Form/CSV intakes are
+        shown separately and firms using intake without creating product cases are
+        flagged “not using product.” PostHog&apos;s <code>case_created</code> event is
+        known to under-report, so the tracked funnel remains a telemetry floor.
       </div>
 
       <section>
@@ -78,8 +80,23 @@ export default async function ProductPage() {
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
           Workflow performance · 30 days
         </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Stat label="Case starts" value={data.workflow.caseStarts} />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+          <Stat
+            label="Tracked case starts"
+            value={data.workflow.caseStarts}
+            sub="PostHog case_created"
+          />
+          <Stat
+            label="Product cases"
+            value={data.workflow.productCases30d}
+            tone="good"
+            sub="reconciled · 30d"
+          />
+          <Stat
+            label="Form / CSV intakes"
+            value={data.workflow.intakeCases30d}
+            sub="reconciled · 30d"
+          />
           <Stat
             label="Case completion rate"
             value={percent(data.workflow.caseCompletionRate)}
@@ -142,8 +159,9 @@ export default async function ProductPage() {
           />
           <Table
             headers={[
-              "Firm", "Last active", "Active users", "Sessions", "Cases started",
-              "Cases submitted", "Reports viewed", "Health",
+              "Firm", "Last product activity", "Active users", "Sessions",
+              "Tracked starts", "Product cases", "Form intakes", "Total cases",
+              "Reports viewed", "Health",
             ]}
             rows={data.firms.map((firm) => [
               firm.companyId ? (
@@ -157,11 +175,15 @@ export default async function ProductPage() {
               ) : (
                 <span key="firm" className="font-medium">{firm.firm}</span>
               ),
-              new Date(firm.lastActive).toLocaleDateString(),
+              firm.lastActive
+                ? new Date(firm.lastActive).toLocaleDateString()
+                : <span key="inactive" className="text-zinc-400">No product activity</span>,
               String(firm.activeUsers),
               String(firm.sessions30d),
               String(firm.casesStarted),
-              String(firm.casesSubmitted),
+              String(firm.productCases30d),
+              String(firm.intakeCases30d),
+              String(firm.totalCases30d),
               String(firm.reportsViewed),
               <span key="health" title={firm.healthReason}>
                 <Badge tone={HEALTH_TONE[firm.health]}>
