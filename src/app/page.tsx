@@ -36,7 +36,17 @@ export default async function ExecutivePage() {
           <Stat label="First-case commitments" value={kpis.firstCaseCommitted} href="/drill/first_case_commitments" />
           <Stat label="New firms this month" value={kpis.newFirmsThisMonth} tone="good" href="/drill/firms_closed" />
           <Stat label="Pipeline value (est)" value={fmtMoney(kpis.pipelineValue)} href="/drill/leads_assigned" />
-          <Stat label="Revenue (month)" value={fmtMoney(kpis.estRevenueThisMonth)} sub="cases this month x price" href="/drill/cs_cases_month" />
+          <Stat
+            label="Revenue (month)"
+            value={fmtMoney(kpis.estRevenueThisMonth)}
+            tone="good"
+            sub={`${fmtMoney(kpis.mrr)} subscription + ${fmtMoney(kpis.transactionalRevenueThisMonth)} per-case`}
+          />
+          <Stat
+            label="MRR (subscriptions)"
+            value={fmtMoney(kpis.mrr)}
+            sub={`${kpis.subscriptionFirms} firm(s) on monthly plans`}
+          />
         </div>
       </section>
 

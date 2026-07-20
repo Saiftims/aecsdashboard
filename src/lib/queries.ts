@@ -63,6 +63,36 @@ export interface CompanyRow {
   signed_up_at: string | null;
   subscribed_at: string | null;
   signup_account_id: string | null;
+  // Subscription billing (0005)
+  billing_type: string | null;              // transactional | subscription
+  subscription_monthly_amount: number | null;
+}
+
+/** A firm's active monthly recurring revenue, or 0 if transactional. */
+export function firmMrr(c: { billing_type?: string | null; subscription_monthly_amount?: number | null }): number {
+  return c.billing_type === "subscription" ? Number(c.subscription_monthly_amount) || 0 : 0;
+}
+
+/** Monthly revenue split: subscription firms bill their flat MRR (their per-case
+ * cases are ignored); everyone else bills per case. `monthCases` must carry
+ * company_hubspot_id + revenue_amount for cases submitted this month. */
+export function monthlyRevenue(
+  companies: { hubspot_id: string; billing_type?: string | null; subscription_monthly_amount?: number | null }[],
+  monthCases: { company_hubspot_id: string | null; revenue_amount: number | null }[],
+  price: number,
+): { mrr: number; transactional: number; total: number; subscriptionFirms: number } {
+  const subIds = new Set<string>();
+  let mrr = 0;
+  for (const c of companies) {
+    const amt = firmMrr(c);
+    if (amt > 0) { subIds.add(c.hubspot_id); mrr += amt; }
+  }
+  let transactional = 0;
+  for (const mc of monthCases) {
+    if (mc.company_hubspot_id && subIds.has(mc.company_hubspot_id)) continue;
+    transactional += Number(mc.revenue_amount) || price;
+  }
+  return { mrr, transactional, total: mrr + transactional, subscriptionFirms: subIds.size };
 }
 
 export interface ActivityRow {
@@ -285,9 +315,14 @@ export async function execOverview() {
   ];
 
   const { data: monthCases } = await supabaseService()
-    .from("cases").select("sw_id, submitted_at")
+    .from("cases").select("sw_id, submitted_at, company_hubspot_id, revenue_amount")
     .gte("submitted_at", monthStart.toISOString());
   const casesThisMonth = monthCases?.length ?? 0;
+  const monthRevenue = monthlyRevenue(
+    companies,
+    (monthCases ?? []) as { company_hubspot_id: string | null; revenue_amount: number | null }[],
+    settings.defaultCasePrice,
+  );
 
   const pipelineValue = sales
     .filter(isOpenSalesDeal)
@@ -325,7 +360,10 @@ export async function execOverview() {
       healthyAccounts: byActivation("healthy_account"),
       atRiskAccounts: byActivation("at_risk"),
       casesThisMonth,
-      estRevenueThisMonth: casesThisMonth * settings.defaultCasePrice,
+      estRevenueThisMonth: monthRevenue.total,
+      mrr: monthRevenue.mrr,
+      transactionalRevenueThisMonth: monthRevenue.transactional,
+      subscriptionFirms: monthRevenue.subscriptionFirms,
       actualRevenueThisMonth: null as number | null, // no invoice source yet
       avgCasesPerActiveFirm: activeFirms.length
         ? Math.round((activeFirms.reduce((s, c) => s + c.cases_30d, 0) / activeFirms.length) * 10) / 10
@@ -948,7 +986,8 @@ export async function csDashboard(segment: CsSegment = "all") {
     churnedFirms: health("churned").length,
     reactivationInProgress: deals.filter((d) => d.activation_stage === "reactivation_in_progress").length,
     casesThisMonth: monthCases.length,
-    revenueThisMonth: monthCases.reduce((s, c) => s + (Number(c.revenue_amount) || settings.defaultCasePrice), 0),
+    revenueThisMonth: monthlyRevenue(customers, monthCases, settings.defaultCasePrice).total,
+    mrr: monthlyRevenue(customers, monthCases, settings.defaultCasePrice).mrr,
     expertReviewsOffered: casesForCust.filter((c) => c.expert_review_offered).length,
     expertReviewsBooked: casesForCust.filter((c) => c.expert_review_booked).length,
     expertReviewsCompleted: casesForCust.filter((c) => c.expert_review_completed).length,
