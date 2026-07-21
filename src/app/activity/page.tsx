@@ -45,7 +45,8 @@ export default async function ActivityPage() {
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
           Results (7 days)
         </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <Stat label="New leads" value={cohortSize} tone="good" sub="deals created this week" href="/drill/funnel_leads" />
           <Stat label="New customers" value={newCustomers} tone="good" sub="first case this week" href="/drill/new_customers_7d" />
           <Stat label="Cases won" value={casesThisWeek} tone="good" sub="cases submitted this week" href="/drill/cases_7d" />
           <Stat label="Revenue" value={money(revenue)} tone="good" sub={`${casesThisWeek} cases x $${settings.defaultCasePrice}`} href="/drill/cases_7d" />

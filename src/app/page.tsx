@@ -23,6 +23,7 @@ export default async function ExecutivePage() {
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Sales</h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <Stat label="New leads (7d)" value={kpis.newLeads7d} tone="good" href="/drill/funnel_leads" />
           <Stat label="New MQLs (30d)" value={kpis.newMqls30d} />
           <Stat
             label="Median speed-to-lead"

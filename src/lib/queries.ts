@@ -279,9 +279,13 @@ export async function execOverview() {
   const monthStart = startOfMonth(now);
   const sales = deals.filter((d) => !d.is_activation || isOpenSalesDeal(d));
   const last30 = subDays(now, 30);
+  const last7 = subDays(now, 7);
 
   const newMqls30d = deals.filter(
     (d) => d.hs_created_at && new Date(d.hs_created_at) >= last30,
+  ).length;
+  const newLeads7d = deals.filter(
+    (d) => d.hs_created_at && new Date(d.hs_created_at) >= last7,
   ).length;
 
   const speedSamples = deals
@@ -341,6 +345,7 @@ export async function execOverview() {
     settings,
     kpis: {
       newMqls30d,
+      newLeads7d,
       medianSpeedToLeadHours: median(speedSamples),
       contactRate: pct(funnel[1].count, funnel[0].count),
       demoBookingRate: pct(funnel[4].count, funnel[0].count),
