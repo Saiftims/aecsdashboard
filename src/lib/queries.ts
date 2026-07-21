@@ -304,10 +304,17 @@ export async function execOverview() {
 
   const activation = deals.filter((d) => d.activation_stage);
   const byActivation = (s: ActivationStage) => activation.filter((d) => d.activation_stage === s).length;
-  const customers = companies.filter((c) => c.cases_lifetime > 0 || activation.some((d) => d.company_hubspot_id === c.hubspot_id));
-  const activated = activation.filter((d) =>
-    ["activated", "repeat_user", "healthy_account"].includes(d.activation_stage ?? ""),
-  ).length;
+  // Customer universe = firms with a case OR a signup OR a closed-won/activation
+  // deal (aligned with the CS dashboard).
+  const customers = companies.filter(
+    (c) => c.cases_lifetime > 0 || c.signed_up_at
+      || activation.some((d) => d.company_hubspot_id === c.hubspot_id),
+  );
+  const activated = customers.filter((c) => c.first_case_completed_date).length;
+  // Real account-health distribution (same source as the CS board).
+  const health = (h: string) => customers.filter((c) => c.account_health === h).length;
+  const totalLifetimeCases = customers.reduce((s, c) => s + (c.cases_lifetime || 0), 0);
+  const firmsWithCases = customers.filter((c) => (c.cases_lifetime || 0) > 0).length;
 
   const postSaleFunnel = [
     { label: "Closed Won", count: deals.filter((d) => d.stage === SALES_STAGES.closedWon).length },
@@ -362,8 +369,15 @@ export async function execOverview() {
       totalCustomerFirms: customers.length,
       activatedFirms: activated,
       repeatUsers: companies.filter((c) => c.cases_lifetime >= 2).length,
-      healthyAccounts: byActivation("healthy_account"),
-      atRiskAccounts: byActivation("at_risk"),
+      // Real account-health distribution (matches the CS board).
+      healthyAccounts: health("healthy"),
+      activeBelowTarget: health("active_below_target"),
+      atRiskAccounts: health("at_risk"),
+      churnedAccounts: health("churned"),
+      awaitingFirstCase: health("awaiting_first_case"),
+      totalCases: totalLifetimeCases,
+      casesPerFirm: firmsWithCases
+        ? Math.round((totalLifetimeCases / firmsWithCases) * 10) / 10 : 0,
       casesThisMonth,
       estRevenueThisMonth: monthRevenue.total,
       mrr: monthRevenue.mrr,

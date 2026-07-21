@@ -55,11 +55,6 @@ export default async function ExecutivePage() {
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Customers & Usage</h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Stat label="Customer firms" value={kpis.totalCustomerFirms} href="/firms" />
-          <Stat label="Activated" value={kpis.activatedFirms} tone="good" href="/drill/activation_activated" />
-          <Stat label="Repeat users" value={kpis.repeatUsers} href="/drill/activation_repeat_user" />
-          <Stat label="Healthy accounts" value={kpis.healthyAccounts} tone="good" href="/firms?health=green" />
-          <Stat label="At risk" value={kpis.atRiskAccounts} tone={kpis.atRiskAccounts ? "bad" : "good"} href="/drill/activation_at_risk" />
-          <Stat label="Cases this month" value={kpis.casesThisMonth} href="/drill/cs_cases_month" />
           <Stat
             label="New customers (month)"
             value={kpis.newCustomersThisMonth}
@@ -67,7 +62,14 @@ export default async function ExecutivePage() {
             sub="first case this month"
             href="/drill/new_customers_month"
           />
-          <Stat label="Avg cases / active firm" value={kpis.avgCasesPerActiveFirm} />
+          <Stat label="Total cases" value={kpis.totalCases} sub="lifetime, all firms" />
+          <Stat label="Cases / firm" value={kpis.casesPerFirm} sub="firms with ≥1 case" />
+          <Stat label="Cases this month" value={kpis.casesThisMonth} href="/drill/cs_cases_month" />
+          <Stat label="Healthy" value={kpis.healthyAccounts} tone="good" href="/drill/cs_healthy" />
+          <Stat label="Active below target" value={kpis.activeBelowTarget} tone="warn" href="/drill/cs_below_target" />
+          <Stat label="At risk" value={kpis.atRiskAccounts} tone={kpis.atRiskAccounts ? "bad" : "good"} href="/drill/cs_at_risk" />
+          <Stat label="Churned" value={kpis.churnedAccounts} tone={kpis.churnedAccounts ? "bad" : "good"} href="/drill/cs_churned" />
+          <Stat label="Avg cases / active firm" value={kpis.avgCasesPerActiveFirm} sub="last 30 days" />
         </div>
       </section>
 
