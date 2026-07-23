@@ -150,6 +150,18 @@ export interface PostHogCase {
   analysisType: string | null;
 }
 
+/** A completed intake-form submission (IntakeForm.tsx -> handleSubmit). These
+ * events carry no caseId, so each completed submission == one case, keyed by
+ * the PostHog event uuid. Firm is resolved via the account group ($group_0). */
+export interface PostHogIntake {
+  eventId: string;
+  accountId: string | null;
+  email: string | null;
+  submittedAt: string | null;
+  mode: string | null;
+  fileCount: number | null;
+}
+
 export interface PostHogSignup {
   accountId: string;
   email: string | null;
@@ -232,6 +244,31 @@ export class PostHogProvider {
         deliveredAt: delivered,
       };
     });
+  }
+
+  /** One row per completed intake submission. No caseId exists on these events,
+   * so each completed submission is treated as one case, keyed by event uuid.
+   * `mode = 'internal'` (SW-internal/QA submissions) is returned but filtered
+   * downstream alongside the test-actor exclusion. */
+  async listIntakeSubmissions(sinceDays = 400): Promise<PostHogIntake[]> {
+    const hogql = `
+      select uuid, properties.$group_0 as account_id,
+             person.properties.email as email, timestamp,
+             properties.mode as mode, properties.fileCount as file_count
+      from events
+      where event = 'intake_submission_completed'
+        and timestamp > now() - interval ${sinceDays} day
+      order by timestamp desc
+      limit 5000`;
+    const rows = await this.query(hogql);
+    return rows.map((r) => ({
+      eventId: String(r[0]),
+      accountId: r[1] ? String(r[1]) : null,
+      email: r[2] ? String(r[2]).toLowerCase() : null,
+      submittedAt: safeIso(r[3] as string | null),
+      mode: r[4] ? String(r[4]).toLowerCase() : null,
+      fileCount: r[5] != null ? Number(r[5]) : null,
+    }));
   }
 
   /** One row per account that completed signup, with first signup + first

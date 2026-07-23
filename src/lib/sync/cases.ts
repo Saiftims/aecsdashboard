@@ -8,7 +8,7 @@
  */
 import {
   PostHogProvider, TEST_ACCOUNT_IDS, TEST_EMAILS, isTestCaseActor,
-  FREE_EMAIL_DOMAINS, type PostHogCase, type PostHogSignup,
+  FREE_EMAIL_DOMAINS, type PostHogCase, type PostHogIntake, type PostHogSignup,
 } from "@/lib/cases/provider";
 import { env } from "@/lib/env";
 import {
@@ -63,8 +63,8 @@ function derivedStatus(c: { submitted_date: string | null; completed_date: strin
 export async function syncCases() {
   const sb = supabaseService();
   const stats = {
-    posthog: 0, mapped: 0, unmapped: 0, intake: 0, bootstrapped: 0, purgedTest: 0,
-    signups: 0, signupsMapped: 0, signupsCreated: 0,
+    posthog: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, bootstrapped: 0,
+    purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0,
   };
 
   // Purge any previously-ingested test/internal cases (idempotent cleanup).
@@ -98,8 +98,9 @@ export async function syncCases() {
   }
   const existingById = new Map((existingCases ?? []).map((c) => [c.case_id, c]));
 
-  // ---- PostHog cases + signups ----
+  // ---- PostHog cases + intake submissions + signups ----
   let phCases: PostHogCase[] = [];
+  let phIntakes: PostHogIntake[] = [];
   let phSignups: PostHogSignup[] = [];
   if (env.posthogKey() && env.posthogProjectId()) {
     try {
@@ -107,6 +108,7 @@ export async function syncCases() {
         env.posthogKey(), env.posthogProjectId(), env.posthogHost(),
       );
       phCases = await provider.listAllCases();
+      phIntakes = await provider.listIntakeSubmissions();
       phSignups = await provider.listSignups();
     } catch (e) {
       console.error("PostHog fetch failed:", e instanceof Error ? e.message : e);
@@ -203,6 +205,51 @@ export async function syncCases() {
     const cid = (pc.accountId && byAccount.get(pc.accountId)) || null;
     if (cid) phByCompany.set(cid, [...(phByCompany.get(cid) ?? []), new Date(pc.submittedAt).getTime()]);
   }
+  // ---- PostHog intake-form submissions (no caseId on these events) ----
+  // Each completed submission == one case, keyed by the event uuid. Firm is
+  // resolved via account group, then email domain (bootstrapping the mapping).
+  // Excludes test actors and SW-internal (mode='internal') submissions, and
+  // de-dupes against a caseId-based PostHog case for the same firm within 2d.
+  for (const it of phIntakes) {
+    if (isTestCaseActor(it.email, it.accountId)) continue;
+    if ((it.mode ?? "") === "internal") continue;
+    const caseId = `intake_evt_${it.eventId}`;
+    if (existingById.has(caseId)) continue;
+    let companyId: string | null = (it.accountId && byAccount.get(it.accountId)) || null;
+    if (!companyId) {
+      const dom = emailDomain(it.email);
+      const co = dom ? byDomain.get(dom) : undefined;
+      if (co) {
+        companyId = co.hubspot_id;
+        if (it.accountId && !byAccount.has(it.accountId)) {
+          byAccount.set(it.accountId, companyId);
+          bootstrapMappings.push({ sw_account_id: it.accountId, hubspot_company_id: companyId, confirmed: false });
+        }
+      }
+    }
+    // dedupe: skip if a caseId-based PostHog case already exists for this firm
+    // within 2 days (same physical case captured via both paths).
+    const ts = it.submittedAt ? new Date(it.submittedAt).getTime() : null;
+    const near = companyId && ts !== null &&
+      (phByCompany.get(companyId) ?? []).some((t) => Math.abs(t - ts) <= 2 * DAY);
+    if (near) continue;
+    inserts.push({
+      case_id: caseId,
+      sw_id: caseId,
+      company_hubspot_id: companyId,
+      case_name: "Intake submission",
+      case_status: "submitted",
+      submitted_date: it.submittedAt,
+      submitted_at: it.submittedAt,
+      source: "posthog_intake",
+      posthog_account_id: it.accountId,
+      creator_email: it.email,
+      revenue_amount: 250,
+      updated_at: new Date().toISOString(),
+    });
+    stats.intakeEvents += 1;
+  }
+
   for (const d of deals ?? []) {
     const name = (d.name ?? "").toLowerCase();
     if (!name.includes("intake") || !d.company_hubspot_id || !d.hs_created_at) continue;
