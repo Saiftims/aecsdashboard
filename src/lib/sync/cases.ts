@@ -413,8 +413,15 @@ export async function computeRollups() {
       { now, pricePerCase: settings.defaultCasePrice },
     );
 
-    const completedDates = firmCases.map((c) => c.completed_date).filter(Boolean) as string[];
-    const firstCaseCompletedDate = completedDates.sort()[0] ?? null;
+    // A delivered case is by definition completed; fall back to delivered_date
+    // (and the submit date for rows flagged completed/delivered) so a firm with
+    // delivered-but-not-explicitly-"completed" cases still counts as activated.
+    const completedDates = firmCases
+      .map((c) => c.completed_date ?? c.delivered_date
+        ?? (["completed", "delivered"].includes(c.case_status ?? "") ? c.submitted_date : null))
+      .filter(Boolean)
+      .sort() as string[];
+    const firstCaseCompletedDate = completedDates[0] ?? null;
     const commitmentDate = company.first_case_commitment_date ??
       (company.properties?.sw_first_case_commitment_date as string | null) ?? null;
     const openIssueCount = firmCases.filter(
