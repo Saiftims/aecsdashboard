@@ -17,7 +17,7 @@ const COMPANY_PROPS = [
   "name", "domain", "hubspot_owner_id",
   "sw_internal_firm_id", "sw_customer_status", "sw_cs_owner_id", "sw_ae_owner_id",
   "sw_estimated_monthly_case_volume", "sw_active_champion", "sw_onboarding_status",
-  "sw_expansion_potential", "sw_at_risk_reason",
+  "sw_expansion_potential", "sw_at_risk_reason", "sw_health_override",
   "address", "city", "state", "zip", "country",
 ];
 

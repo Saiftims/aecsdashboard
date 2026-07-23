@@ -12,7 +12,7 @@ import {
 } from "@/lib/cases/provider";
 import { env } from "@/lib/env";
 import {
-  computeAccountHealth, type FirmSegment, type SegmentRule,
+  computeAccountHealth, type AccountHealthStatus, type FirmSegment, type SegmentRule,
 } from "@/lib/health";
 import { hsCreateObject, hsUpdateProperties, ASSOC } from "@/lib/hubspot/client";
 import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
@@ -40,6 +40,15 @@ function emailDomain(email: string | null): string | null {
   if (!email) return null;
   const d = email.split("@")[1];
   return d ? d.toLowerCase() : null;
+}
+
+const HEALTH_STATUSES = new Set([
+  "churned", "at_risk", "healthy", "active_below_target",
+  "activated", "awaiting_first_case", "new_handoff",
+]);
+function normalizeHealthOverride(v: string | null): AccountHealthStatus | null {
+  const s = (v ?? "").trim().toLowerCase();
+  return HEALTH_STATUSES.has(s) ? (s as AccountHealthStatus) : null;
 }
 
 function derivedStatus(c: { submitted_date: string | null; completed_date: string | null; delivered_date: string | null }): string {
@@ -436,6 +445,8 @@ export async function computeRollups() {
       hasDeliveredCaseWithoutExpertReviewOffered: deliveredWithoutOffer,
       hasActiveOpp,
       signedUp,
+      healthOverride: normalizeHealthOverride(
+        company.properties?.sw_health_override as string | null),
       now,
     });
 

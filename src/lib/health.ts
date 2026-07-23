@@ -82,6 +82,9 @@ export interface AccountHealthInput {
   openIssueCount: number;
   hasDeliveredCaseWithoutExpertReviewOffered: boolean;
   hasActiveOpp: boolean;
+  /** Owner-set manual status override (e.g. known churn). When present it wins
+   * over the computed status. Source: HubSpot sw_health_override. */
+  healthOverride?: AccountHealthStatus | null;
   /** Created an app account (PostHog signup) - used to surface the
    * "signed up but no case yet" activation cohort. */
   signedUp?: boolean;
@@ -99,8 +102,36 @@ function daysSince(iso: string | null, now: Date): number | null {
   return Math.floor((now.getTime() - new Date(iso).getTime()) / 86400000);
 }
 
+const CATEGORY_FOR: Record<AccountHealthStatus, "green" | "yellow" | "red" | "neutral"> = {
+  churned: "red", at_risk: "red", healthy: "green", activated: "green",
+  active_below_target: "yellow", awaiting_first_case: "yellow", new_handoff: "neutral",
+};
+
 export function computeAccountHealth(i: AccountHealthInput): AccountHealthResult {
   const now = i.now ?? new Date();
+
+  // 0) Owner manual override always wins (e.g. a known churn the automated
+  //    inactivity threshold hasn't reached yet).
+  if (i.healthOverride) {
+    return {
+      status: i.healthOverride,
+      category: CATEGORY_FOR[i.healthOverride],
+      reasons: [`Manual override: ${i.healthOverride.replace(/_/g, " ")}`],
+    };
+  }
+
+  const result = computeBaseHealth(i, now);
+
+  // Expert-review is a soft follow-up flag, NOT an at-risk driver. Surface it
+  // on any active account so CS can chase it, without downgrading health.
+  if (i.hasDeliveredCaseWithoutExpertReviewOffered
+      && !["churned", "at_risk"].includes(result.status)) {
+    result.reasons = [...result.reasons, "Expert review not yet offered (follow-up)"];
+  }
+  return result;
+}
+
+function computeBaseHealth(i: AccountHealthInput, now: Date): AccountHealthResult {
   const activated = Boolean(i.firstCaseCompletedDate);
   const commitSince = daysSince(i.firstCaseCommitmentDate, now);
   const firstCompletedSince = daysSince(i.firstCaseCompletedDate, now);
@@ -125,8 +156,8 @@ export function computeAccountHealth(i: AccountHealthInput): AccountHealthResult
   if (activated && i.cases30d < i.rule.atRiskFloor30d)
     reasons.push(`Only ${i.cases30d} case(s) in 30d (floor ${i.rule.atRiskFloor30d} for ${i.segment})`);
   if (i.openIssueCount > 0) reasons.push(`${i.openIssueCount} open issue(s)`);
-  if (i.hasDeliveredCaseWithoutExpertReviewOffered)
-    reasons.push("Delivered case without expert review offered");
+  // NOTE: "delivered without expert review" is intentionally NOT an at-risk
+  // trigger - it's surfaced as a soft follow-up flag in computeAccountHealth.
   if (reasons.length) return { status: "at_risk", category: "red", reasons };
 
   // 3) Healthy
