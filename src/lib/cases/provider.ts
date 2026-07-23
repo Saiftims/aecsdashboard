@@ -125,6 +125,21 @@ export const FREE_EMAIL_DOMAINS = new Set([
   "aol.com", "proton.me", "protonmail.com", "live.com", "msn.com", "me.com",
 ]);
 
+// Events that carry a real case's caseId. Kept broad on purpose: the app emits
+// a caseId across the whole case lifecycle, and many cases never fire
+// case_created. Anything here proves a case exists.
+export const CASE_START_EVENTS = [
+  "case_created", "case_creation_opened", "file_uploaded",
+  "results_calculation_started", "biomechanics_data_saved",
+  "intake_submission_completed", "evidence_classification_status",
+];
+export const CASE_DELIVER_EVENTS = ["report_downloaded", "invoice_downloaded"];
+export const CASE_EVENTS = [
+  ...CASE_START_EVENTS,
+  "report_generation_completed",
+  ...CASE_DELIVER_EVENTS,
+];
+
 export interface PostHogCase {
   caseId: string;
   accountId: string | null;
@@ -168,33 +183,55 @@ export class PostHogProvider {
     return data.results ?? [];
   }
 
-  /** One row per caseId with submitted/completed/delivered timestamps. */
+  /** One row per caseId with submitted/completed/delivered timestamps.
+   *
+   * A case is any caseId that appears on ANY case-bearing event - not just
+   * case_created. The app frequently emits a caseId only on downstream events
+   * (file_uploaded, results_calculation_started, biomechanics_data_saved,
+   * invoice_downloaded, ...) without ever firing case_created, so keying on
+   * case_created alone silently drops real (often already-billed) cases.
+   *   submitted = first "case exists / work started" event
+   *   completed = report_generation_completed
+   *   delivered = report_downloaded OR invoice_downloaded (invoice == billed)
+   */
   async listAllCases(sinceDays = 400): Promise<PostHogCase[]> {
+    const START = CASE_START_EVENTS.map((e) => `'${e}'`).join(",");
+    const DELIVER = CASE_DELIVER_EVENTS.map((e) => `'${e}'`).join(",");
+    const ALL = CASE_EVENTS.map((e) => `'${e}'`).join(",");
     const hogql = `
       select
         properties.caseId as case_id,
         max(properties.$group_0) as account_id,
         max(person.properties.email) as email,
         max(properties.analysisType) as analysis_type,
-        minIf(timestamp, event = 'case_created') as submitted_at,
+        minIf(timestamp, event in (${START})) as submitted_at,
         minIf(timestamp, event = 'report_generation_completed') as completed_at,
-        minIf(timestamp, event = 'report_downloaded') as delivered_at
+        minIf(timestamp, event in (${DELIVER})) as delivered_at,
+        min(timestamp) as first_seen
       from events
-      where event in ('case_created','report_generation_completed','report_downloaded')
+      where event in (${ALL})
         and timestamp > now() - interval ${sinceDays} day
         and properties.caseId is not null
       group by properties.caseId
       limit 5000`;
     const rows = await this.query(hogql);
-    return rows.map((r) => ({
-      caseId: String(r[0]),
-      accountId: r[1] ? String(r[1]) : null,
-      creatorEmail: r[2] ? String(r[2]).toLowerCase() : null,
-      analysisType: r[3] ? String(r[3]) : null,
-      submittedAt: safeIso(r[4] as string | null),
-      completedAt: safeIso(r[5] as string | null),
-      deliveredAt: safeIso(r[6] as string | null),
-    }));
+    return rows.map((r) => {
+      const submitted = safeIso(r[4] as string | null);
+      const completed = safeIso(r[5] as string | null);
+      const delivered = safeIso(r[6] as string | null);
+      const firstSeen = safeIso(r[7] as string | null);
+      return {
+        caseId: String(r[0]),
+        accountId: r[1] ? String(r[1]) : null,
+        creatorEmail: r[2] ? String(r[2]).toLowerCase() : null,
+        analysisType: r[3] ? String(r[3]) : null,
+        // Guarantee a submitted date: fall back to the earliest signal we saw
+        // (e.g. a case known only from invoice_downloaded).
+        submittedAt: submitted ?? completed ?? delivered ?? firstSeen,
+        completedAt: completed,
+        deliveredAt: delivered,
+      };
+    });
   }
 
   /** One row per account that completed signup, with first signup + first
