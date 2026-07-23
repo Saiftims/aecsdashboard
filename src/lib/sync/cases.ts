@@ -63,8 +63,8 @@ function derivedStatus(c: { submitted_date: string | null; completed_date: strin
 export async function syncCases() {
   const sb = supabaseService();
   const stats = {
-    posthog: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, bootstrapped: 0,
-    purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0,
+    posthog: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, dedupedIntake: 0,
+    bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0,
   };
 
   // Purge any previously-ingested test/internal cases (idempotent cleanup).
@@ -85,7 +85,7 @@ export async function syncCases() {
   const { data: deals } = await sb
     .from("deals")
     .select("hubspot_id, name, company_hubspot_id, stage, hs_created_at, properties");
-  const { data: existingCases } = await sb.from("cases").select("case_id, case_status, company_hubspot_id, submitted_date");
+  const { data: existingCases } = await sb.from("cases").select("case_id, case_status, company_hubspot_id, submitted_date, source");
 
   const byDomain = new Map<string, CompanyLite>();
   const byAccount = new Map<string, string>(); // acc -> hubspot_company_id
@@ -97,6 +97,35 @@ export async function syncCases() {
     if (m.sw_account_id && m.hubspot_company_id) byAccount.set(m.sw_account_id, m.hubspot_company_id);
   }
   const existingById = new Map((existingCases ?? []).map((c) => [c.case_id, c]));
+
+  // Intake-vs-in-app dedupe: a case submitted via the intake form is often ALSO
+  // re-created in-app on the firm's production account, producing a PostHog case
+  // for the same physical matter. PostHog case events carry no name, so we match
+  // 1:1 by firm + date proximity: each intake submission "absorbs" at most one
+  // in-app case within +/-4 days, and that in-app duplicate is skipped.
+  const intakeByCompany = new Map<string, { t: number; used: boolean }[]>();
+  for (const c of existingCases ?? []) {
+    if (c.source !== "intake_form" || !c.company_hubspot_id || !c.submitted_date) continue;
+    const t = new Date(c.submitted_date).getTime();
+    if (Number.isNaN(t)) continue;
+    intakeByCompany.set(c.company_hubspot_id,
+      [...(intakeByCompany.get(c.company_hubspot_id) ?? []), { t, used: false }]);
+  }
+  const intakeDuplicate = (companyId: string | null, submittedAt: string | null): boolean => {
+    if (!companyId || !submittedAt) return false;
+    const t = new Date(submittedAt).getTime();
+    if (Number.isNaN(t)) return false;
+    const slots = intakeByCompany.get(companyId);
+    if (!slots) return false;
+    let best: { t: number; used: boolean } | null = null, bestDiff = Infinity;
+    for (const s of slots) {
+      if (s.used) continue;
+      const diff = Math.abs(s.t - t);
+      if (diff <= 4 * DAY && diff < bestDiff) { best = s; bestDiff = diff; }
+    }
+    if (best) { best.used = true; return true; }
+    return false;
+  };
 
   // ---- PostHog cases + intake submissions + signups ----
   let phCases: PostHogCase[] = [];
@@ -145,6 +174,15 @@ export async function syncCases() {
     // Fall back to completed/delivered when there's no valid submitted date
     // (a case can appear via report events without a case_created event).
     const submittedAt = pc.submittedAt ?? pc.completedAt ?? pc.deliveredAt;
+
+    // Skip in-app cases that duplicate an intake submission for the same firm
+    // (same physical matter entered via intake AND re-created in-app). Only
+    // skip NEW ones; never delete a case a human/CS already curated.
+    if (!existingById.has(pc.caseId) && intakeDuplicate(companyId, submittedAt)) {
+      stats.dedupedIntake += 1;
+      continue;
+    }
+
     const dates = {
       submitted_date: submittedAt,
       completed_date: pc.completedAt,
