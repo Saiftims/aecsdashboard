@@ -265,10 +265,15 @@ export async function syncCases() {
         }
       }
     }
+    // Skip submissions we can't attribute to a firm (anonymous public-portal
+    // intakes carry no account/email). An unmapped intake can't be tied to a
+    // customer and would inflate revenue/volume as a phantom row - and it's
+    // almost always the same case the firm also has in-app.
+    if (!companyId) continue;
     // dedupe: skip if a caseId-based PostHog case already exists for this firm
     // within 2 days (same physical case captured via both paths).
     const ts = it.submittedAt ? new Date(it.submittedAt).getTime() : null;
-    const near = companyId && ts !== null &&
+    const near = ts !== null &&
       (phByCompany.get(companyId) ?? []).some((t) => Math.abs(t - ts) <= 2 * DAY);
     if (near) continue;
     inserts.push({
