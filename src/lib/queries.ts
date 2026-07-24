@@ -723,7 +723,30 @@ export async function activityReport(ownerId?: string | null) {
   const casesThisWeek = (caseRows ?? []).filter((c) => inWeek(c.submitted_date));
   const revenue = casesThisWeek.reduce(
     (s, c) => s + (Number(c.revenue_amount) || settings.defaultCasePrice), 0);
-  const newCustomers = companies.filter((c) => inWeek(c.first_case_at)).length;
+  // New customers = firms that BECAME a customer this week by ANY onset signal
+  // (first case, app signup, subscription, or closed-won) - not just first case.
+  // A firm signing up / subscribing without a case yet still counts.
+  const earliestWonByCompany = new Map<string, number>();
+  for (const d of deals) {
+    if (d.stage !== SALES_STAGES.closedWon || !d.closed_at || !d.company_hubspot_id) continue;
+    const t = new Date(d.closed_at).getTime();
+    const prev = earliestWonByCompany.get(d.company_hubspot_id);
+    if (prev == null || t < prev) earliestWonByCompany.set(d.company_hubspot_id, t);
+  }
+  const customerOnsetMs = (c: CompanyRow): number | null => {
+    const ts: number[] = [];
+    for (const iso of [c.first_case_at, c.signed_up_at, c.subscribed_at]) {
+      if (iso) { const t = new Date(iso).getTime(); if (!Number.isNaN(t)) ts.push(t); }
+    }
+    const won = earliestWonByCompany.get(c.hubspot_id);
+    if (won != null) ts.push(won);
+    return ts.length ? Math.min(...ts) : null;
+  };
+  const newCustomerFirms = companies.filter((c) => {
+    const onset = customerOnsetMs(c);
+    return onset != null && onset >= weekAgoMs && onset <= nowMs;
+  });
+  const newCustomers = newCustomerFirms.length;
   // Deals actually signed (closed-won) this week, by close date.
   const dealsWon = deals.filter(
     (d) => d.stage === SALES_STAGES.closedWon && inWeek(d.closed_at)).length;

@@ -280,11 +280,32 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
       .map((c) => companyRow(c, `${c.cases_this_month} case(s) this month`)),
   },
   new_customers_7d: {
-    label: "New customers this week (first case in last 7 days)",
-    rows: (ctx) => ctx.companies
-      .filter((c) => c.first_case_at &&
-        (ctx.now.getTime() - new Date(c.first_case_at).getTime()) <= 7 * 86400000)
-      .map((c) => companyRow(c, "first case this week")),
+    label: "New customers this week (first case, signup, subscription, or closed-won)",
+    rows: (ctx) => {
+      const weekAgo = ctx.now.getTime() - 7 * 86400000;
+      const wonBy = new Map<string, number>();
+      for (const d of ctx.deals) {
+        if (d.stage !== SALES_STAGES.closedWon || !d.closed_at || !d.company_hubspot_id) continue;
+        const t = new Date(d.closed_at).getTime();
+        const p = wonBy.get(d.company_hubspot_id);
+        if (p == null || t < p) wonBy.set(d.company_hubspot_id, t);
+      }
+      const onset = (c: CompanyRow): { ms: number; via: string } | null => {
+        const sigs: { ms: number; via: string }[] = [];
+        if (c.first_case_at) sigs.push({ ms: new Date(c.first_case_at).getTime(), via: "first case" });
+        if (c.signed_up_at) sigs.push({ ms: new Date(c.signed_up_at).getTime(), via: "signup" });
+        if (c.subscribed_at) sigs.push({ ms: new Date(c.subscribed_at).getTime(), via: "subscription" });
+        const won = wonBy.get(c.hubspot_id);
+        if (won != null) sigs.push({ ms: won, via: "closed-won" });
+        sigs.sort((a, b) => a.ms - b.ms);
+        return sigs[0] ?? null;
+      };
+      return ctx.companies
+        .map((c) => ({ c, o: onset(c) }))
+        .filter(({ o }) => o != null && o.ms >= weekAgo && o.ms <= ctx.now.getTime())
+        .sort((a, b) => b.o!.ms - a.o!.ms)
+        .map(({ c, o }) => companyRow(c, `became a customer via ${o!.via} on ${new Date(o!.ms).toISOString().slice(0, 10)}`));
+    },
   },
   new_customers_month: {
     label: "New customers this month (first case this month)",
