@@ -392,12 +392,17 @@ export async function syncCases() {
   }
 
   for (const [companyId, s] of signupByCompany) {
-    await sb.from("companies").update({
+    // Never overwrite a known subscription date with null: a firm can be marked
+    // a subscriber manually (billing_type/subscription) without PostHog ever
+    // emitting subscription_created.
+    const row: Record<string, unknown> = {
       signed_up_at: s.signedUpAt,
-      subscribed_at: s.subscribedAt,
       signup_account_id: s.accountId,
       updated_at: new Date().toISOString(),
-    }).eq("hubspot_id", companyId).then(() => undefined, () => undefined);
+    };
+    if (s.subscribedAt) row.subscribed_at = s.subscribedAt;
+    await sb.from("companies").update(row).eq("hubspot_id", companyId)
+      .then(() => undefined, () => undefined);
   }
   void companyName;
 
