@@ -104,21 +104,28 @@ export async function syncCases() {
   // events carry no matter name, so we match 1:1 by firm + date proximity: each
   // stand-in "absorbs" at most one discovered case, which is then skipped.
   //
-  // The window depends on how trustworthy the stand-in's date is. Intake
-  // submissions carry a real submission timestamp; a manually added row carries
-  // whatever date the person entering it estimated, which can be weeks off the
-  // real case (Sunset West's placeholder was 20 days out).
-  const STAND_IN_WINDOW: Record<string, number> = {
-    intake_form: 4 * DAY, hubspot_intake: 4 * DAY, manual: 30 * DAY, app: 30 * DAY,
+  // The window depends on how trustworthy the stand-in's date is, and is
+  // asymmetric for hand-entered rows. Intake submissions carry a real submission
+  // timestamp, so a tight window either side is right. A manually added row
+  // carries whatever date the person entering it estimated, which can be weeks
+  // late (Sunset West's placeholder was 20 days after the real case) - but it
+  // cannot stand in for a case that had not happened yet when it was typed, so
+  // it must not reach far forward and swallow a genuinely new case.
+  const STAND_IN_WINDOW: Record<string, { before: number; after: number }> = {
+    intake_form: { before: 4 * DAY, after: 4 * DAY },
+    hubspot_intake: { before: 4 * DAY, after: 4 * DAY },
+    manual: { before: 30 * DAY, after: 4 * DAY },
+    app: { before: 30 * DAY, after: 4 * DAY },
   };
-  const standInByCompany = new Map<string, { t: number; used: boolean; window: number }[]>();
+  interface StandIn { t: number; used: boolean; before: number; after: number }
+  const standInByCompany = new Map<string, StandIn[]>();
   for (const c of existingCases ?? []) {
     const window = STAND_IN_WINDOW[c.source ?? ""];
     if (!window || !c.company_hubspot_id || !c.submitted_date) continue;
     const t = new Date(c.submitted_date).getTime();
     if (Number.isNaN(t)) continue;
     standInByCompany.set(c.company_hubspot_id,
-      [...(standInByCompany.get(c.company_hubspot_id) ?? []), { t, used: false, window }]);
+      [...(standInByCompany.get(c.company_hubspot_id) ?? []), { t, used: false, ...window }]);
   }
   const absorbedByStandIn = (companyId: string | null, submittedAt: string | null): boolean => {
     if (!companyId || !submittedAt) return false;
@@ -126,11 +133,14 @@ export async function syncCases() {
     if (Number.isNaN(t)) return false;
     const slots = standInByCompany.get(companyId);
     if (!slots) return false;
-    let best: { t: number; used: boolean } | null = null, bestDiff = Infinity;
+    let best: StandIn | null = null, bestDiff = Infinity;
     for (const s of slots) {
       if (s.used) continue;
+      // s.t is the stand-in's date, t the real case's: reach back s.before and
+      // forward s.after from the stand-in.
+      const limit = t <= s.t ? s.before : s.after;
       const diff = Math.abs(s.t - t);
-      if (diff <= s.window && diff < bestDiff) { best = s; bestDiff = diff; }
+      if (diff <= limit && diff < bestDiff) { best = s; bestDiff = diff; }
     }
     if (best) { best.used = true; return true; }
     return false;
