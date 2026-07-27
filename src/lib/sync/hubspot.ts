@@ -7,11 +7,15 @@ import { SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
 import { env } from "@/lib/env";
 import { supabaseService } from "@/lib/supabase/server";
 
-/** Interview/hiring candidates that a connected HubSpot integration keeps
- * re-creating as deals (they default into "Demo Scheduled" and flood the
+/** Interview/hiring candidates and staff that a connected HubSpot integration
+ * keeps re-creating as deals (they default into "Demo Scheduled" and flood the
  * pipeline). Self-heal: never ingest them, and delete them from HubSpot on
- * sight so they can't return regardless of the upstream integration. */
-const BLOCKED_DEAL_NAME = /laura\s*saint\s*clair|nathan\s*nale/i;
+ * sight so they can't return regardless of the upstream integration.
+ *
+ * Keep in sync with `config.BLOCKED_DEAL_NAMES` in the Python agent - both
+ * sides delete independently, and a name missing here still reaches the cache
+ * even when the agent removes it from HubSpot. */
+const BLOCKED_DEAL_NAME = /laura\s*saint\s*clair|nathan\s*nale|chris\s*sanz/i;
 
 const COMPANY_PROPS = [
   "name", "domain", "hubspot_owner_id",
