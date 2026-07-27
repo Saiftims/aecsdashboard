@@ -63,7 +63,7 @@ function derivedStatus(c: { submitted_date: string | null; completed_date: strin
 export async function syncCases() {
   const sb = supabaseService();
   const stats = {
-    posthog: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, dedupedIntake: 0,
+    posthog: 0, fromUrls: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, dedupedIntake: 0,
     bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0,
   };
 
@@ -139,6 +139,16 @@ export async function syncCases() {
       phCases = await provider.listAllCases();
       phIntakes = await provider.listIntakeSubmissions();
       phSignups = await provider.listSignups();
+      // Recover cases that emit no caseId-bearing event (in-app intake
+      // submissions), whose id is only visible in the /cases/<id> URL. Event
+      // data wins where both exist - it carries completed/delivered timestamps.
+      const seen = new Set(phCases.map((c) => c.caseId));
+      for (const uc of await provider.listCasesFromUrls()) {
+        if (!seen.has(uc.caseId)) {
+          phCases.push(uc);
+          stats.fromUrls += 1;
+        }
+      }
     } catch (e) {
       console.error("PostHog fetch failed:", e instanceof Error ? e.message : e);
     }
@@ -246,8 +256,12 @@ export async function syncCases() {
   // ---- PostHog intake-form submissions (no caseId on these events) ----
   // Each completed submission == one case, keyed by the event uuid. Firm is
   // resolved via account group, then email domain (bootstrapping the mapping).
-  // Excludes test actors and SW-internal (mode='internal') submissions, and
-  // de-dupes against a caseId-based PostHog case for the same firm within 2d.
+  // Excludes test actors, and de-dupes against a caseId-based PostHog case for
+  // the same firm within 2d.
+  // mode='internal' means a signed-in firm user submitting in-app (NOT Silent
+  // Witness staff - see listIntakeSubmissions). Those create a real case that
+  // listCasesFromUrls() ingests under its true id, so they are skipped here
+  // rather than duplicated as an intake_evt_ row.
   for (const it of phIntakes) {
     if (isTestCaseActor(it.email, it.accountId)) continue;
     if ((it.mode ?? "") === "internal") continue;

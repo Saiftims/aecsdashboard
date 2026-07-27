@@ -246,10 +246,53 @@ export class PostHogProvider {
     });
   }
 
+  /** Cases whose id only ever appears in a `/cases/<id>` URL.
+   *
+   * A case created through the in-app intake form emits
+   * intake_submission_completed with NO caseId property, and may never emit any
+   * other case-bearing event - so listAllCases() cannot see it even though the
+   * case is real and billable. The id is present in the URL of every page the
+   * firm opens for it, which is the only reliable recovery path.
+   *
+   * `submittedAt` is the first time the case URL was seen; for a case opened
+   * straight after submission that is its creation time.
+   */
+  async listCasesFromUrls(sinceDays = 400): Promise<PostHogCase[]> {
+    const hogql = `
+      select
+        extract(toString(properties.$current_url),
+                'cases/(case_[0-9a-fA-F]{8,})') as case_id,
+        max(properties.$group_0) as account_id,
+        max(person.properties.email) as email,
+        min(timestamp) as first_seen
+      from events
+      where properties.$current_url like '%/cases/case_%'
+        and timestamp > now() - interval ${sinceDays} day
+      group by case_id
+      having case_id != ''
+      limit 5000`;
+    const rows = await this.query(hogql);
+    return rows.map((r) => ({
+      caseId: String(r[0]),
+      accountId: r[1] ? String(r[1]) : null,
+      creatorEmail: r[2] ? String(r[2]).toLowerCase() : null,
+      analysisType: null,
+      submittedAt: safeIso(r[3] as string | null),
+      completedAt: null,
+      deliveredAt: null,
+    }));
+  }
+
   /** One row per completed intake submission. No caseId exists on these events,
    * so each completed submission is treated as one case, keyed by event uuid.
-   * `mode = 'internal'` (SW-internal/QA submissions) is returned but filtered
-   * downstream alongside the test-actor exclusion. */
+   *
+   * NOTE `mode` is the SUBMITTER's context, not ours: 'internal' means a signed-in
+   * firm user submitting at app.silentwitness.ai/intake, 'public' means someone
+   * using a firm's branded intake portal (<firm>.intake.silentwitness.ai).
+   * Neither means Silent Witness staff - internal actors are excluded by email
+   * via isTestCaseActor(). In-app ('internal') submissions do create a real case,
+   * which is picked up by listCasesFromUrls() under its true case id, so they are
+   * skipped here to avoid a second phantom row for the same matter. */
   async listIntakeSubmissions(sinceDays = 400): Promise<PostHogIntake[]> {
     const hogql = `
       select uuid, properties.$group_0 as account_id,
