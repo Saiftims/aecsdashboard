@@ -264,6 +264,7 @@ export default async function FirmPage({
               <Row k="Champion" v={champion ? `${champion.first_name ?? ""} ${champion.last_name ?? ""}` : p.sw_active_champion ?? "-"} />
               <Row k="Decision-maker" v={decisionMaker ? `${decisionMaker.first_name ?? ""} ${decisionMaker.last_name ?? ""}` : "-"} />
               <Row k="Est. monthly volume" v={p.sw_estimated_monthly_case_volume ?? "-"} />
+              <Row k="Case volume tier" v={CASE_VOLUME_TIER_LABELS[String(p.sw_case_volume_tier ?? "")] ?? "-"} />
               <Row k="Expansion potential" v={p.sw_expansion_potential ?? "-"} />
               <Row k="Next step" v={mainDeal?.properties?.sw_next_step ?? "-"} />
               <Row k="Next-step date" v={mainDeal?.properties?.sw_next_step_date ?? "-"} />
@@ -317,6 +318,18 @@ function Row({ k, v }: { k: string; v: string }) {
     </div>
   );
 }
+
+/** Labels for the sw_case_volume_tier picklist, which HubSpot stores as the
+ * raw option value. Mirrors CASE_VOLUME_TIERS in hubspot_migration.py. */
+const CASE_VOLUME_TIER_LABELS: Record<string, string> = {
+  tier_1_10: "1-10 cases/mo",
+  tier_11_25: "11-25 cases/mo",
+  tier_26_50: "26-50 cases/mo",
+  tier_51_100: "51-100 cases/mo",
+  tier_101_200: "101-200 cases/mo",
+  tier_200_plus: "200+ cases/mo",
+  unknown: "Unknown",
+};
 
 function stripHtml(s: string): string {
   return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();

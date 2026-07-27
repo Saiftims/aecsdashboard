@@ -20,7 +20,8 @@ const BLOCKED_DEAL_NAME = /laura\s*saint\s*clair|nathan\s*nale|chris\s*sanz/i;
 const COMPANY_PROPS = [
   "name", "domain", "hubspot_owner_id",
   "sw_internal_firm_id", "sw_customer_status", "sw_cs_owner_id", "sw_ae_owner_id",
-  "sw_estimated_monthly_case_volume", "sw_active_champion", "sw_onboarding_status",
+  "sw_estimated_monthly_case_volume", "sw_case_volume_tier",
+  "sw_active_champion", "sw_onboarding_status",
   "sw_expansion_potential", "sw_at_risk_reason", "sw_health_override",
   "address", "city", "state", "zip", "country",
 ];
@@ -41,6 +42,7 @@ const DEAL_PROPS = [
   "createdate", "closedate", "hs_lastmodifieddate",
   "sw_lead_source", "sw_first_response_hours", "sw_qualification_status",
   "sw_demo_date", "sw_demo_completed", "sw_estimated_monthly_case_volume",
+  "sw_case_volume_tier",
   "sw_first_case_identified", "sw_first_case_target_date", "sw_first_case_committed",
   "sw_closed_lost_reason", "sw_primary_objection", "sw_competitor",
   "sw_handoff_completed", "sw_handoff_accepted_by_cs", "sw_next_step",
