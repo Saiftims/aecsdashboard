@@ -306,27 +306,40 @@ export class PostHogProvider {
     for (const [caseId, sightings] of byCase) {
       const ordered = [...sightings].sort(
         (a, b) => (a.at ?? "").localeCompare(b.at ?? ""));
-      // The owner is the identified person with the MOST activity on the case,
-      // not the first to load the page. Whoever builds a case racks up far more
-      // events than anyone who merely opens it, and "first seen" is decided by
-      // sub-second ordering that a stray pageview from another firm can win.
+      // The owner is the FIRST person to work the case: creating it (or
+      // submitting the intake form) puts you on its page before anyone else can
+      // see it. Two corrections to a naive "first seen":
       //
-      // Critically, we do NOT skip past an internal owner to a customer who
-      // viewed the case later: Silent Witness staff build demo cases that
-      // customers open afterwards, and skipping would credit a real firm with a
-      // case it never submitted. An internally-owned case is dropped downstream
-      // by isTestCaseActor().
-      const byEmail = new Map<string, { events: number; accounts: Map<string, number> }>();
+      // 1. Viewers with a trivial footprint are ignored. A real owner's session
+      //    produces many events; one or two is a stray pageview or a merged
+      //    PostHog identity, which can otherwise beat the true owner by seconds
+      //    and hand the case to an unrelated firm.
+      // 2. We do NOT skip past an internal owner to a customer who viewed the
+      //    case later. Silent Witness builds demo cases that customers open
+      //    afterwards, and skipping would credit a real firm with a case it never
+      //    submitted; such a case is dropped downstream by isTestCaseActor().
+      //
+      // Deliberately not "most active": Silent Witness analysts do the heavy work
+      // on a customer's case after submission, so the busiest person on a real
+      // case is often staff.
+      const byEmail = new Map<string, {
+        events: number; first: string | null; accounts: Map<string, number>;
+      }>();
       for (const s of ordered) {
         if (!s.email) continue; // anonymous: $identify hadn't resolved yet
-        const rec = byEmail.get(s.email) ?? { events: 0, accounts: new Map() };
+        const rec = byEmail.get(s.email)
+          ?? { events: 0, first: s.at, accounts: new Map() };
         rec.events += s.events;
         if (s.account) {
           rec.accounts.set(s.account, (rec.accounts.get(s.account) ?? 0) + s.events);
         }
         byEmail.set(s.email, rec);
       }
-      const owner = [...byEmail.entries()].sort((a, b) => b[1].events - a[1].events)[0];
+      const MIN_OWNER_EVENTS = 3;
+      const all = [...byEmail.entries()]
+        .sort((a, b) => (a[1].first ?? "").localeCompare(b[1].first ?? ""));
+      const substantial = all.filter(([, r]) => r.events >= MIN_OWNER_EVENTS);
+      const owner = (substantial.length ? substantial : all)[0];
       if (!owner) continue; // never seen by an identified user
       const [email, rec] = owner;
       const account = [...rec.accounts.entries()]
