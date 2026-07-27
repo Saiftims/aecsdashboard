@@ -93,6 +93,9 @@ export class SilentWitnessProvider implements CaseDataProvider {
 export const TEST_EMAIL_DOMAINS = ["silentwitness.ai", "das.es"];
 export const TEST_EMAILS = [
   "diegodf@gmail.com", "saif.altimims@gmail.com", "sheikhrobertomanagement@gmail.com",
+  // Silent Witness's own demo login - it signs into customer orgs, so it must
+  // never be treated as the creator of a real firm's case.
+  "silentwitnessdemo@gmail.com",
 ];
 export const TEST_ACCOUNT_IDS = [
   "acc_3f97023cbf544874b818a721bbab946a", // saif+7 (JJ test cases)
@@ -258,29 +261,88 @@ export class PostHogProvider {
    * straight after submission that is its creation time.
    */
   async listCasesFromUrls(sinceDays = 400): Promise<PostHogCase[]> {
+    // Staging is excluded: dev/QA work lives on app.staging.silentwitness.ai.
+    //
+    // One row per (case, account, viewer) with that viewer's first sighting,
+    // rather than an aggregate identity per case. Silent Witness staff open real
+    // customer cases to review them, and staff can be signed into a different
+    // org than the firm that owns the case, so max()/argMin() over the whole
+    // case hands back the wrong identity: either a reviewer (making
+    // isTestCaseActor discard a real billable case) or another firm's account
+    // (attributing the case to the wrong customer). Resolving per viewer lets us
+    // pick the EARLIEST non-internal one, which is the firm that created it.
     const hogql = `
       select
         extract(toString(properties.$current_url),
                 'cases/(case_[0-9a-fA-F]{8,})') as case_id,
-        max(properties.$group_0) as account_id,
-        max(person.properties.email) as email,
-        min(timestamp) as first_seen
+        properties.$group_0 as account_id,
+        person.properties.email as email,
+        min(timestamp) as first_seen,
+        count() as events
       from events
       where properties.$current_url like '%/cases/case_%'
+        and properties.$current_url not like '%staging%'
         and timestamp > now() - interval ${sinceDays} day
-      group by case_id
+      group by case_id, account_id, email
       having case_id != ''
-      limit 5000`;
+      limit 20000`;
     const rows = await this.query(hogql);
-    return rows.map((r) => ({
-      caseId: String(r[0]),
-      accountId: r[1] ? String(r[1]) : null,
-      creatorEmail: r[2] ? String(r[2]).toLowerCase() : null,
-      analysisType: null,
-      submittedAt: safeIso(r[3] as string | null),
-      completedAt: null,
-      deliveredAt: null,
-    }));
+
+    interface Sighting {
+      account: string | null; email: string | null; at: string | null; events: number;
+    }
+    const byCase = new Map<string, Sighting[]>();
+    for (const r of rows) {
+      const caseId = String(r[0]);
+      byCase.set(caseId, [...(byCase.get(caseId) ?? []), {
+        account: r[1] ? String(r[1]) : null,
+        email: r[2] ? String(r[2]).toLowerCase() : null,
+        at: safeIso(r[3] as string | null),
+        events: Number(r[4] ?? 0),
+      }]);
+    }
+
+    const out: PostHogCase[] = [];
+    for (const [caseId, sightings] of byCase) {
+      const ordered = [...sightings].sort(
+        (a, b) => (a.at ?? "").localeCompare(b.at ?? ""));
+      // The owner is the identified person with the MOST activity on the case,
+      // not the first to load the page. Whoever builds a case racks up far more
+      // events than anyone who merely opens it, and "first seen" is decided by
+      // sub-second ordering that a stray pageview from another firm can win.
+      //
+      // Critically, we do NOT skip past an internal owner to a customer who
+      // viewed the case later: Silent Witness staff build demo cases that
+      // customers open afterwards, and skipping would credit a real firm with a
+      // case it never submitted. An internally-owned case is dropped downstream
+      // by isTestCaseActor().
+      const byEmail = new Map<string, { events: number; accounts: Map<string, number> }>();
+      for (const s of ordered) {
+        if (!s.email) continue; // anonymous: $identify hadn't resolved yet
+        const rec = byEmail.get(s.email) ?? { events: 0, accounts: new Map() };
+        rec.events += s.events;
+        if (s.account) {
+          rec.accounts.set(s.account, (rec.accounts.get(s.account) ?? 0) + s.events);
+        }
+        byEmail.set(s.email, rec);
+      }
+      const owner = [...byEmail.entries()].sort((a, b) => b[1].events - a[1].events)[0];
+      if (!owner) continue; // never seen by an identified user
+      const [email, rec] = owner;
+      const account = [...rec.accounts.entries()]
+        .sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      out.push({
+        caseId,
+        accountId: account,
+        creatorEmail: email,
+        analysisType: null,
+        // Earliest sighting of the case page across everyone.
+        submittedAt: ordered[0]?.at ?? null,
+        completedAt: null,
+        deliveredAt: null,
+      });
+    }
+    return out;
   }
 
   /** One row per completed intake submission. No caseId exists on these events,

@@ -63,7 +63,7 @@ function derivedStatus(c: { submitted_date: string | null; completed_date: strin
 export async function syncCases() {
   const sb = supabaseService();
   const stats = {
-    posthog: 0, fromUrls: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, dedupedIntake: 0,
+    posthog: 0, fromUrls: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, dedupedStandIn: 0,
     bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0,
   };
 
@@ -98,30 +98,39 @@ export async function syncCases() {
   }
   const existingById = new Map((existingCases ?? []).map((c) => [c.case_id, c]));
 
-  // Intake-vs-in-app dedupe: a case submitted via the intake form is often ALSO
-  // re-created in-app on the firm's production account, producing a PostHog case
-  // for the same physical matter. PostHog case events carry no name, so we match
-  // 1:1 by firm + date proximity: each intake submission "absorbs" at most one
-  // in-app case within +/-4 days, and that in-app duplicate is skipped.
-  const intakeByCompany = new Map<string, { t: number; used: boolean }[]>();
+  // Stand-in dedupe: the same physical matter can already be in the table as a
+  // hand-entered row - an intake-form submission that was also re-created in-app,
+  // or a row a human added precisely BECAUSE tracking missed the real case. Case
+  // events carry no matter name, so we match 1:1 by firm + date proximity: each
+  // stand-in "absorbs" at most one discovered case, which is then skipped.
+  //
+  // The window depends on how trustworthy the stand-in's date is. Intake
+  // submissions carry a real submission timestamp; a manually added row carries
+  // whatever date the person entering it estimated, which can be weeks off the
+  // real case (Sunset West's placeholder was 20 days out).
+  const STAND_IN_WINDOW: Record<string, number> = {
+    intake_form: 4 * DAY, hubspot_intake: 4 * DAY, manual: 30 * DAY, app: 30 * DAY,
+  };
+  const standInByCompany = new Map<string, { t: number; used: boolean; window: number }[]>();
   for (const c of existingCases ?? []) {
-    if (c.source !== "intake_form" || !c.company_hubspot_id || !c.submitted_date) continue;
+    const window = STAND_IN_WINDOW[c.source ?? ""];
+    if (!window || !c.company_hubspot_id || !c.submitted_date) continue;
     const t = new Date(c.submitted_date).getTime();
     if (Number.isNaN(t)) continue;
-    intakeByCompany.set(c.company_hubspot_id,
-      [...(intakeByCompany.get(c.company_hubspot_id) ?? []), { t, used: false }]);
+    standInByCompany.set(c.company_hubspot_id,
+      [...(standInByCompany.get(c.company_hubspot_id) ?? []), { t, used: false, window }]);
   }
-  const intakeDuplicate = (companyId: string | null, submittedAt: string | null): boolean => {
+  const absorbedByStandIn = (companyId: string | null, submittedAt: string | null): boolean => {
     if (!companyId || !submittedAt) return false;
     const t = new Date(submittedAt).getTime();
     if (Number.isNaN(t)) return false;
-    const slots = intakeByCompany.get(companyId);
+    const slots = standInByCompany.get(companyId);
     if (!slots) return false;
     let best: { t: number; used: boolean } | null = null, bestDiff = Infinity;
     for (const s of slots) {
       if (s.used) continue;
       const diff = Math.abs(s.t - t);
-      if (diff <= 4 * DAY && diff < bestDiff) { best = s; bestDiff = diff; }
+      if (diff <= s.window && diff < bestDiff) { best = s; bestDiff = diff; }
     }
     if (best) { best.used = true; return true; }
     return false;
@@ -158,6 +167,10 @@ export async function syncCases() {
   const inserts: Record<string, unknown>[] = [];
   const updates: { case_id: string; row: Record<string, unknown> }[] = [];
 
+  // Oldest first: stand-in slots are single-use, so the pairing (and therefore
+  // which cases get skipped) must not depend on PostHog's row order.
+  phCases.sort((a, b) => (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""));
+
   for (const pc of phCases) {
     if (isTestCaseActor(pc.creatorEmail, pc.accountId)) continue;
     stats.posthog += 1;
@@ -185,11 +198,10 @@ export async function syncCases() {
     // (a case can appear via report events without a case_created event).
     const submittedAt = pc.submittedAt ?? pc.completedAt ?? pc.deliveredAt;
 
-    // Skip in-app cases that duplicate an intake submission for the same firm
-    // (same physical matter entered via intake AND re-created in-app). Only
+    // Skip discovered cases that a hand-entered row already stands in for. Only
     // skip NEW ones; never delete a case a human/CS already curated.
-    if (!existingById.has(pc.caseId) && intakeDuplicate(companyId, submittedAt)) {
-      stats.dedupedIntake += 1;
+    if (!existingById.has(pc.caseId) && absorbedByStandIn(companyId, submittedAt)) {
+      stats.dedupedStandIn += 1;
       continue;
     }
 
