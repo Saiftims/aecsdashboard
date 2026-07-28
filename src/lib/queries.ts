@@ -66,6 +66,9 @@ export interface CompanyRow {
   // Subscription billing (0005)
   billing_type: string | null;              // transactional | subscription
   subscription_monthly_amount: number | null;
+  /** Set when a subscription is cancelled (0006). Absent until that migration
+   * runs, so always read it defensively. */
+  subscription_ended_at?: string | null;
 }
 
 /** A firm's active monthly recurring revenue, or 0 if transactional. */
@@ -903,6 +906,181 @@ export async function retentionReport(): Promise<RetentionReport> {
       threePlusCases: has3,
       activeTwoPlusConsecutiveMonths: consecutive,
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Revenue retention: the same cohort idea as above but in dollars, so a firm
+// that keeps paying but submits fewer cases is visible. Two views: one line per
+// first-revenue month, and subscription vs transactional indexed to 100% so the
+// two billing models can be compared despite very different firm sizes.
+// ---------------------------------------------------------------------------
+export interface RevenueCohortRow {
+  key: string;                    // "2026-05"
+  label: string;                  // "May 2026"
+  firms: number;
+  baseRevenue: number;            // month 0 dollars
+  revenue: (number | null)[];     // dollars per month since first revenue
+  retention: (number | null)[];   // % of month 0, null if month not elapsed
+}
+
+export interface BillingRetentionPoint {
+  month: number;
+  firms: number;                  // firms old enough to have reached this month
+  base: number | null;            // their month-0 dollars
+  revenue: number | null;         // their dollars this month
+  pct: number | null;
+}
+
+export interface BillingRetentionCurve {
+  key: "subscription" | "transactional";
+  label: string;
+  firms: number;
+  points: BillingRetentionPoint[];
+}
+
+export interface RevenueRetentionReport {
+  cohorts: RevenueCohortRow[];
+  monthCols: number;
+  curves: BillingRetentionCurve[];
+  subscriptionFirms: number;
+  transactionalFirms: number;
+  mrr: number;
+  /** True while the current calendar month is still running - its dollars are
+   * incomplete and every curve ending there reads low. */
+  partialMonth: boolean;
+  partialMonthLabel: string;
+}
+
+type RevFirm = {
+  id: string;
+  billing: "subscription" | "transactional";
+  rev: Map<number, number>;       // month index -> dollars
+  first: number;                  // first month index with revenue
+};
+
+export async function revenueRetentionReport(): Promise<RevenueRetentionReport> {
+  const sb = supabaseService();
+  const settings = await loadSettings();
+  const price = settings.defaultCasePrice;
+  const now = new Date();
+  const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
+  const idxOf = (iso: string | null | undefined): number | null => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d.getUTCFullYear() * 12 + d.getUTCMonth();
+  };
+  const monthKey = (i: number) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`;
+  const monthLabel = (i: number) => new Date(`${monthKey(i)}-01T00:00:00Z`)
+    .toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+
+  const [{ data: companies }, { data: caseRows }] = await Promise.all([
+    // select(*) on purpose: subscription_ended_at only exists after migration
+    // 0006 and naming a missing column would 400 the whole page.
+    sb.from("companies").select("*"),
+    sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount")
+      .not("company_hubspot_id", "is", null),
+  ]);
+
+  const caseRev = new Map<string, Map<number, number>>();
+  for (const c of caseRows ?? []) {
+    const m = idxOf(c.submitted_date);
+    if (m === null || !c.company_hubspot_id) continue;
+    const f = caseRev.get(c.company_hubspot_id) ?? new Map<number, number>();
+    f.set(m, (f.get(m) ?? 0) + (Number(c.revenue_amount) || price));
+    caseRev.set(c.company_hubspot_id, f);
+  }
+
+  const firms: RevFirm[] = [];
+  for (const co of (companies ?? []) as CompanyRow[]) {
+    const cases = caseRev.get(co.hubspot_id) ?? new Map<number, number>();
+    const amount = firmMrr(co);
+    let rev: Map<number, number>;
+    let billing: "subscription" | "transactional";
+    if (amount > 0) {
+      // A subscription bills the same every month it is live. No cancellation
+      // date recorded = still live: the flat fee runs to today.
+      const start = idxOf(co.subscribed_at) ??
+        (cases.size ? Math.min(...cases.keys()) : null);
+      if (start === null) continue;
+      const end = Math.min(idxOf(co.subscription_ended_at) ?? nowIdx, nowIdx);
+      rev = new Map<number, number>();
+      // Months before the plan started were still billed per case.
+      for (const [m, v] of cases) if (m < start) rev.set(m, v);
+      for (let m = start; m <= end; m++) rev.set(m, amount);
+      billing = "subscription";
+    } else {
+      if (!cases.size) continue;
+      rev = cases;
+      billing = "transactional";
+    }
+    if (!rev.size) continue;
+    firms.push({ id: co.hubspot_id, billing, rev, first: Math.min(...rev.keys()) });
+  }
+
+  const monthCols = 4; // Month 0..3, matching the logo-retention cohorts
+  const sumAt = (list: RevFirm[], at: (f: RevFirm) => number) =>
+    list.reduce((s, f) => s + (f.rev.get(at(f)) ?? 0), 0);
+
+  const byStart = new Map<number, RevFirm[]>();
+  for (const f of firms) byStart.set(f.first, [...(byStart.get(f.first) ?? []), f]);
+
+  const cohorts: RevenueCohortRow[] = [...byStart.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([start, list]) => {
+      const base = sumAt(list, () => start);
+      const revenue: (number | null)[] = [];
+      const retention: (number | null)[] = [];
+      for (let m = 0; m < monthCols; m++) {
+        if (start + m > nowIdx) { revenue.push(null); retention.push(null); continue; }
+        const v = sumAt(list, () => start + m);
+        revenue.push(Math.round(v));
+        retention.push(base ? Math.round((v / base) * 100) : null);
+      }
+      return {
+        key: monthKey(start), label: monthLabel(start), firms: list.length,
+        baseRevenue: Math.round(base), revenue, retention,
+      };
+    });
+
+  // Each curve is indexed to its own month 0, which is the normalisation: a
+  // $750/mo firm and a one-case firm both start at 100%. Only firms that have
+  // actually reached month N count toward it, numerator AND denominator, or a
+  // young firm would drag the tail down just for being young.
+  const curves: BillingRetentionCurve[] = (["subscription", "transactional"] as const)
+    .map((kind) => {
+      const list = firms.filter((f) => f.billing === kind);
+      const points: BillingRetentionPoint[] = [];
+      for (let m = 0; m < monthCols; m++) {
+        const eligible = list.filter((f) => f.first + m <= nowIdx);
+        const base = sumAt(eligible, (f) => f.first);
+        const value = sumAt(eligible, (f) => f.first + m);
+        points.push({
+          month: m,
+          firms: eligible.length,
+          base: eligible.length ? Math.round(base) : null,
+          revenue: eligible.length ? Math.round(value) : null,
+          pct: base ? Math.round((value / base) * 100) : null,
+        });
+      }
+      return {
+        key: kind,
+        label: kind === "subscription" ? "Subscription" : "Transactional",
+        firms: list.length,
+        points,
+      };
+    });
+
+  const day = now.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  return {
+    cohorts, monthCols, curves,
+    subscriptionFirms: firms.filter((f) => f.billing === "subscription").length,
+    transactionalFirms: firms.filter((f) => f.billing === "transactional").length,
+    mrr: firms.filter((f) => f.billing === "subscription")
+      .reduce((s, f) => s + (f.rev.get(nowIdx) ?? 0), 0),
+    partialMonth: day < daysInMonth,
+    partialMonthLabel: `${monthLabel(nowIdx)} (day ${day} of ${daysInMonth})`,
   };
 }
 

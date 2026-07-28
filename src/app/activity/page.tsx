@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { DailyActivityChart, FunnelChart, MonthlyBarChart, RetentionChart } from "@/components/charts";
+import {
+  BillingRetentionChart, DailyActivityChart, FunnelChart, MonthlyBarChart,
+  RetentionChart, RevenueRetentionChart,
+} from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
-import { activityReport, retentionReport } from "@/lib/queries";
+import { activityReport, retentionReport, revenueRetentionReport } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -22,9 +25,10 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention] = await Promise.all([
+  const [report, retention, revRetention] = await Promise.all([
     activityReport(user.role === "ae" ? user.hubspot_owner_id : null),
     retentionReport(),
+    revenueRetentionReport(),
   ]);
   const { settings, activityTotals, daily, funnel, revenue, cohortSize, casesThisWeek, newCustomers, dealsWon } = report;
   const freq = retention.frequency;
@@ -189,6 +193,89 @@ export default async function ActivityPage() {
         <p className="mt-2 text-xs text-zinc-400">
           Each cohort = firms whose first case landed that month. Month N = % of the cohort that
           submitted a case N calendar months later. &ldquo;—&rdquo; = that month hasn&apos;t elapsed yet.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Revenue retention — dollars kept, by first-revenue month
+        </h2>
+        <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Stat label="Revenue firms" value={revRetention.subscriptionFirms + revRetention.transactionalFirms} sub="have billed at least once" />
+          <Stat label="On subscription" value={revRetention.subscriptionFirms} sub={`${money(revRetention.mrr)} / month`} tone="good" />
+          <Stat label="Transactional" value={revRetention.transactionalFirms} sub={`$${settings.defaultCasePrice} per case`} />
+          <Stat label="Cohorts tracked" value={revRetention.cohorts.length} sub="months with a first sale" />
+        </div>
+        <Card>
+          <CardHeader
+            title="Revenue retention curve (% of each cohort's month-0 dollars)"
+            action={revRetention.partialMonth ? (
+              <span className="text-xs text-amber-600">
+                {revRetention.partialMonthLabel} is still running — its dollars are incomplete
+              </span>
+            ) : null}
+          />
+          <div className="p-4">
+            <RevenueRetentionChart cohorts={revRetention.cohorts} monthCols={revRetention.monthCols} />
+          </div>
+        </Card>
+        <div className="mt-3">
+          <Table
+            headers={["First-revenue cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
+            rows={revRetention.cohorts.map((c) => [
+              c.label,
+              String(c.firms),
+              ...c.retention.map((r, i) =>
+                r === null || c.revenue[i] === null
+                  ? "—"
+                  : `${money(c.revenue[i]!)} · ${r}%`),
+            ])}
+          />
+        </div>
+        <p className="mt-2 text-xs text-zinc-400">
+          A cohort is the firms that first billed in that month. Month N = the dollars that cohort
+          billed N months later, as a share of what it billed in month 0 — above 100% means the
+          cohort grew. Subscription firms count their flat monthly fee; everyone else counts
+          cases × ${settings.defaultCasePrice}.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Subscription vs transactional — normalised to each model&apos;s month 0
+        </h2>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader title="Dollar retention by billing model" />
+            <div className="p-4">
+              <BillingRetentionChart curves={revRetention.curves} monthCols={revRetention.monthCols} />
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Underlying dollars" />
+            <Table
+              headers={["Model", "Month", "Firms this far in", "Their month-0 base", "Billed", "Retained"]}
+              rows={revRetention.curves.flatMap((c) =>
+                c.points.map((p) => [
+                  p.month === 0 ? `${c.label} (${c.firms})` : "",
+                  `Month ${p.month}`,
+                  String(p.firms),
+                  p.base === null ? "—" : money(p.base),
+                  p.revenue === null ? "—" : money(p.revenue),
+                  p.pct === null ? "—" : `${p.pct}%`,
+                ]),
+              )}
+            />
+          </Card>
+        </div>
+        <p className="mt-2 text-xs text-zinc-400">
+          Both models start at 100% of their own month-0 dollars, so a $750/month firm and a
+          one-case firm carry equal weight and only the <em>shape</em> is compared. Each month only
+          counts firms that have actually reached it, in both the numerator and the base, so young
+          firms don&apos;t drag the tail down.
+          {revRetention.partialMonth ? ` ${revRetention.partialMonthLabel} is incomplete, which pulls the transactional line down at whichever month lands on it.` : ""}
+          {" "}Subscriptions bill flat from their start month and we record no cancellation dates
+          yet, so that line holds at 100% by construction until a plan is actually cancelled.
         </p>
       </section>
 
