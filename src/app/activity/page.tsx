@@ -232,11 +232,26 @@ export default async function ActivityPage() {
             ])}
           />
         </div>
+        <div className="mt-3">
+          <Table
+            headers={["Cohort", "Still billing", "Stopped after month 0"]}
+            rows={revRetention.cohorts.map((c) => [
+              c.label,
+              c.members.filter((m) => !m.lapsed)
+                .map((m) => `${m.name} (${money(m.latest || m.base)})`).join(", ") || "—",
+              <span key="lapsed" className={c.members.some((m) => m.lapsed) ? "text-amber-600" : ""}>
+                {c.members.filter((m) => m.lapsed)
+                  .map((m) => `${m.name} (was ${money(m.base)})`).join(", ") || "—"}
+              </span>,
+            ])}
+          />
+        </div>
         <p className="mt-2 text-xs text-zinc-400">
           A cohort is the firms that first billed in that month. Month N = the dollars that cohort
           billed N months later, as a share of what it billed in month 0 — above 100% means the
           cohort grew. Subscription firms count their flat monthly fee; everyone else counts
-          cases × ${settings.defaultCasePrice}.
+          cases × ${settings.defaultCasePrice}. A curve that falls is a named firm that stopped,
+          listed above, not a data problem.
         </p>
       </section>
 

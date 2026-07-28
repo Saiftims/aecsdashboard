@@ -915,6 +915,13 @@ export async function retentionReport(): Promise<RetentionReport> {
 // first-revenue month, and subscription vs transactional indexed to 100% so the
 // two billing models can be compared despite very different firm sizes.
 // ---------------------------------------------------------------------------
+export interface RevenueCohortMember {
+  name: string;
+  base: number;                   // what they billed in month 0
+  latest: number;                 // what they billed in the latest elapsed month
+  lapsed: boolean;                // billed in month 0, nothing since
+}
+
 export interface RevenueCohortRow {
   key: string;                    // "2026-05"
   label: string;                  // "May 2026"
@@ -922,6 +929,9 @@ export interface RevenueCohortRow {
   baseRevenue: number;            // month 0 dollars
   revenue: (number | null)[];     // dollars per month since first revenue
   retention: (number | null)[];   // % of month 0, null if month not elapsed
+  /** Who is in the cohort - without this a fallen curve looks like a bug rather
+   * than a named firm that stopped. */
+  members: RevenueCohortMember[];
 }
 
 export interface BillingRetentionPoint {
@@ -954,6 +964,7 @@ export interface RevenueRetentionReport {
 
 type RevFirm = {
   id: string;
+  name: string;
   billing: "subscription" | "transactional";
   rev: Map<number, number>;       // month index -> dollars
   first: number;                  // first month index with revenue
@@ -1015,7 +1026,11 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
       billing = "transactional";
     }
     if (!rev.size) continue;
-    firms.push({ id: co.hubspot_id, billing, rev, first: Math.min(...rev.keys()) });
+    firms.push({
+      id: co.hubspot_id,
+      name: co.name ?? co.domain ?? co.hubspot_id,
+      billing, rev, first: Math.min(...rev.keys()),
+    });
   }
 
   const monthCols = 4; // Month 0..3, matching the logo-retention cohorts
@@ -1037,9 +1052,17 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
         revenue.push(Math.round(v));
         retention.push(base ? Math.round((v / base) * 100) : null);
       }
+      const latestMonth = Math.min(nowIdx, start + monthCols - 1);
+      const members: RevenueCohortMember[] = list
+        .map((f) => {
+          const memberBase = Math.round(f.rev.get(start) ?? 0);
+          const latest = Math.round(f.rev.get(latestMonth) ?? 0);
+          return { name: f.name, base: memberBase, latest, lapsed: latestMonth > start && latest === 0 };
+        })
+        .sort((a, b) => b.base - a.base);
       return {
         key: monthKey(start), label: monthLabel(start), firms: list.length,
-        baseRevenue: Math.round(base), revenue, retention,
+        baseRevenue: Math.round(base), revenue, retention, members,
       };
     });
 
