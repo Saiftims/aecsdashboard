@@ -97,6 +97,14 @@ export const TEST_EMAILS = [
   // never be treated as the creator of a real firm's case.
   "silentwitnessdemo@gmail.com",
 ];
+/** Individual cases the owner has confirmed were tests. Excluded by case ID, not
+ * by firm or email: these firms are real prospects whose NEXT case must still
+ * count, so banning the account would silently drop future revenue. */
+export const EXCLUDED_CASE_IDS = [
+  // Khorshidi Law kicking the tyres in May; never became a real matter.
+  "case_48bcbc8b1fdc4fd5bdf0453023495d6e",
+];
+
 export const TEST_ACCOUNT_IDS = [
   "acc_3f97023cbf544874b818a721bbab946a", // saif+7 (JJ test cases)
   "acc_288f6554fd2e4e0d850a734d25f2f799", // newton (internal)

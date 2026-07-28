@@ -7,7 +7,7 @@
  * mirrored to HubSpot.
  */
 import {
-  PostHogProvider, TEST_ACCOUNT_IDS, TEST_EMAILS, isTestCaseActor,
+  PostHogProvider, EXCLUDED_CASE_IDS, TEST_ACCOUNT_IDS, TEST_EMAILS, isTestCaseActor,
   FREE_EMAIL_DOMAINS, type PostHogCase, type PostHogIntake, type PostHogSignup,
 } from "@/lib/cases/provider";
 import { env } from "@/lib/env";
@@ -68,11 +68,14 @@ export async function syncCases() {
   };
 
   // Purge any previously-ingested test/internal cases (idempotent cleanup).
-  const purge = await sb.from("cases").delete({ count: "exact" })
-    .or(
-      `posthog_account_id.in.(${TEST_ACCOUNT_IDS.join(",")}),` +
-      `creator_email.in.(${TEST_EMAILS.join(",")})`,
-    );
+  const purgeOr = [
+    `posthog_account_id.in.(${TEST_ACCOUNT_IDS.join(",")})`,
+    `creator_email.in.(${TEST_EMAILS.join(",")})`,
+  ];
+  if (EXCLUDED_CASE_IDS.length) {
+    purgeOr.push(`case_id.in.(${EXCLUDED_CASE_IDS.join(",")})`);
+  }
+  const purge = await sb.from("cases").delete({ count: "exact" }).or(purgeOr.join(","));
   stats.purgedTest = purge.count ?? 0;
   // Also drop cases whose creator is an internal silentwitness.ai / saif+ user.
   await sb.from("cases").delete().like("creator_email", "%@silentwitness.ai");
@@ -183,6 +186,7 @@ export async function syncCases() {
 
   for (const pc of phCases) {
     if (isTestCaseActor(pc.creatorEmail, pc.accountId)) continue;
+    if (EXCLUDED_CASE_IDS.includes(pc.caseId)) continue;
     stats.posthog += 1;
 
     // firm match: account id -> else creator email domain (bootstrap mapping)
@@ -272,6 +276,7 @@ export async function syncCases() {
   const phByCompany = new Map<string, number[]>(); // company -> submitted epochs
   for (const pc of phCases) {
     if (isTestCaseActor(pc.creatorEmail, pc.accountId) || !pc.submittedAt) continue;
+    if (EXCLUDED_CASE_IDS.includes(pc.caseId)) continue;
     const cid = (pc.accountId && byAccount.get(pc.accountId)) || null;
     if (cid) phByCompany.set(cid, [...(phByCompany.get(cid) ?? []), new Date(pc.submittedAt).getTime()]);
   }
