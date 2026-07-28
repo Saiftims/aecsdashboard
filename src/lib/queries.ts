@@ -75,13 +75,29 @@ type PlanFields = {
   billing_type?: string | null;
   subscription_monthly_amount?: number | null;
   subscription_ended_at?: string | null;
+  properties?: Record<string, unknown> | null;
 };
 
 /** The plan a firm was put on, whether or not it is still running. Use this for
  * HISTORY - a cancelled subscriber still billed a flat fee while it ran, and
- * pricing their old months per case would invent revenue they never paid. */
+ * pricing their old months per case would invent revenue they never paid.
+ *
+ * HubSpot wins over the cached column, so pricing can be corrected in the CRM
+ * without a deploy. */
 export function firmPlanAmount(c: PlanFields): number {
+  const fromHubspot = Number(c.properties?.sw_subscription_monthly_amount);
+  if (fromHubspot > 0) return fromHubspot;
   return c.billing_type === "subscription" ? Number(c.subscription_monthly_amount) || 0 : 0;
+}
+
+/** When a plan stopped billing, or null while it is still live. Lives on the
+ * HubSpot company (`sw_subscription_end_date`) because Supabase DDL needs a
+ * human; the column is preferred if migration 0006 ever lands. */
+export function firmPlanEnd(c: PlanFields): Date | null {
+  const raw = c.subscription_ended_at ?? c.properties?.sw_subscription_end_date;
+  if (!raw || typeof raw !== "string") return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /** A firm's active monthly recurring revenue: 0 if transactional, and 0 once the
@@ -89,8 +105,8 @@ export function firmPlanAmount(c: PlanFields): number {
 export function firmMrr(c: PlanFields): number {
   const amount = firmPlanAmount(c);
   if (!amount) return 0;
-  const ended = c.subscription_ended_at ? new Date(c.subscription_ended_at) : null;
-  return ended && !Number.isNaN(ended.getTime()) && ended.getTime() <= Date.now() ? 0 : amount;
+  const ended = firmPlanEnd(c);
+  return ended && ended.getTime() <= Date.now() ? 0 : amount;
 }
 
 /** Monthly revenue split: subscription firms bill their flat MRR (their per-case
@@ -1154,7 +1170,11 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
       const start = idxOf(co.subscribed_at) ??
         (cases.size ? Math.min(...cases.keys()) : null);
       if (start === null) continue;
-      const end = Math.min(idxOf(co.subscription_ended_at) ?? nowIdx, nowIdx);
+      const planEnd = firmPlanEnd(co);
+      const end = Math.min(
+        planEnd ? planEnd.getUTCFullYear() * 12 + planEnd.getUTCMonth() : nowIdx,
+        nowIdx,
+      );
       rev = new Map<number, number>();
       // Months before the plan started were still billed per case.
       for (const [m, v] of cases) if (m < start) rev.set(m, v);
