@@ -4,8 +4,8 @@ import { differenceInDays, subDays } from "date-fns";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
-  hasFutureDemo, isOpenSalesDeal, isTaskSuperseded, revenueRetentionReport,
-  type ActivityRow, type CompanyRow, type DealRow, type RevenueCohortMember,
+  billingRetentionReport, hasFutureDemo, isOpenSalesDeal, isTaskSuperseded,
+  type ActivityRow, type CompanyRow, type DealRow, type RetentionMember,
 } from "@/lib/queries";
 
 export interface DrillRow {
@@ -394,60 +394,65 @@ function cohortMetric(key: string): { label: string; rows: (ctx: Ctx) => DrillRo
   };
 }
 
-/** Firms behind a revenue-retention chart: one cohort month, or one billing
- * model. Kept separate from the Ctx-based metrics because revenue needs the
- * cases table, which fetchCore() does not load. */
+/** Firms behind a billing-retention chart: one cohort month, or one billing
+ * model, in either dollars or cases. Kept separate from the Ctx-based metrics
+ * because it needs the cases table, which fetchCore() does not load. */
 async function revenueDrill(metric: string): Promise<DrillResult | null> {
-  const report = await revenueRetentionReport();
-  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
-  const row = (m: RevenueCohortMember): DrillRow => {
+  const report = await billingRetentionReport();
+  const dollars = metric.startsWith("rev");
+  const view = dollars ? report.revenue : report.usage;
+  const unit = (n: number) => dollars
+    ? `$${Math.round(n).toLocaleString()}`
+    : `${n} case${n === 1 ? "" : "s"}`;
+  const verb = dollars ? "billed" : "submitted";
+  const row = (m: RetentionMember): DrillRow => {
     const series = m.months
-      .map((v, i) => `M${i} ${v === null ? "—" : money(v)}`).join(" → ");
+      .map((v, i) => `M${i} ${v === null ? "—" : unit(v)}`).join(" → ");
     return {
       title: m.name,
       subtitle: [
         m.billing === "subscription" ? "subscription" : "per case",
-        `first billed ${m.cohortLabel}`,
+        `first ${verb} ${m.cohortLabel}`,
         series,
-        m.lapsed ? "STOPPED" : null,
+        m.lapsed ? (dollars ? "STOPPED PAYING" : "STOPPED USING") : null,
       ].filter(Boolean).join(" · "),
       companyId: m.id,
       when: `${m.cohortKey}-01T00:00:00Z`,
     };
   };
 
-  if (metric.startsWith("revcohort_")) {
-    const key = metric.slice("revcohort_".length);
-    const c = report.cohorts.find((x) => x.key === key);
+  const cohortPrefix = dollars ? "revcohort_" : "usecohort_";
+  if (metric.startsWith(cohortPrefix)) {
+    const key = metric.slice(cohortPrefix.length);
+    const c = view.cohorts.find((x) => x.key === key);
     if (!c) return null;
     const lapsed = c.members.filter((m) => m.lapsed).length;
     return {
-      label: `Revenue cohort — ${c.label} · ${c.firms} firm(s), ` +
-             `${money(c.baseRevenue)} in month 0` +
+      label: `${dollars ? "Revenue" : "Usage"} cohort — ${c.label} · ${c.firms} firm(s), ` +
+             `${unit(c.base)} in month 0` +
              (lapsed ? ` · ${lapsed} since stopped` : ""),
       rows: c.members.map(row),
     };
   }
 
-  const kind = metric.slice("revbilling_".length);
+  const kind = metric.slice((dollars ? "revbilling_" : "usebilling_").length);
   if (kind !== "subscription" && kind !== "transactional") return null;
-  const members = report.members.filter((m) => m.billing === kind);
+  const members = view.members.filter((m) => m.billing === kind);
   // Deliberately not a sum of each firm's "latest month": those months are
   // different calendar months, so adding them would be a meaningless total.
-  const tail = kind === "subscription"
-    ? `${money(report.mrr)}/month combined`
-    : `${members.filter((m) => m.lapsed).length} stopped billing`;
+  const stopped = members.filter((m) => m.lapsed).length;
+  const tail = dollars && kind === "subscription"
+    ? `${unit(report.mrr)}/month combined`
+    : `${stopped} stopped ${dollars ? "billing" : "submitting"}`;
   return {
     label: `${kind === "subscription" ? "Subscription" : "Transactional"} firms — ` +
-           `${members.length} · ${tail}`,
+           `${dollars ? "dollars" : "usage"} · ${members.length} · ${tail}`,
     rows: members.map(row),
   };
 }
 
 export async function drill(metric: string, ownerId?: string | null): Promise<DrillResult | null> {
-  if (metric.startsWith("revcohort_") || metric.startsWith("revbilling_")) {
-    return revenueDrill(metric);
-  }
+  if (/^(rev|use)(cohort|billing)_/.test(metric)) return revenueDrill(metric);
 
   const def = metric.startsWith("activation_")
     ? activationMetric(metric.slice("activation_".length))

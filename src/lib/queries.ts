@@ -927,74 +927,171 @@ export async function retentionReport(): Promise<RetentionReport> {
 }
 
 // ---------------------------------------------------------------------------
-// Revenue retention: the same cohort idea as above but in dollars, so a firm
-// that keeps paying but submits fewer cases is visible. Two views: one line per
-// first-revenue month, and subscription vs transactional indexed to 100% so the
-// two billing models can be compared despite very different firm sizes.
+// Billing retention: the same cohort idea as logo retention, but measuring what
+// each cohort is worth rather than how many firms survive. Two lenses over the
+// same firms - dollars kept, and cases submitted - each shown by cohort month
+// and by billing model indexed to 100% so models of very different size compare
+// on shape alone. Dollars alone flatter subscribers, who keep paying after they
+// stop using; usage alone hides that a busy transactional firm is worth more.
 // ---------------------------------------------------------------------------
-export interface RevenueCohortMember {
+export interface RetentionMember {
   id: string;
   name: string;
   billing: "subscription" | "transactional";
   cohortKey: string;              // "2026-05"
   cohortLabel: string;            // "May 2026"
-  base: number;                   // what they billed in month 0
-  latest: number;                 // what they billed in the latest elapsed month
-  lapsed: boolean;                // billed in month 0, nothing since
-  months: (number | null)[];      // dollars per month since their own month 0
+  base: number;                   // their month 0
+  latest: number;                 // the latest elapsed month
+  lapsed: boolean;                // counted in month 0, nothing since
+  months: (number | null)[];      // per month since their own month 0
 }
 
-export interface RevenueCohortRow {
+export interface RetentionCohortRow {
   key: string;                    // "2026-05"
   label: string;                  // "May 2026"
   firms: number;
-  baseRevenue: number;            // month 0 dollars
-  revenue: (number | null)[];     // dollars per month since first revenue
+  base: number;                   // month 0 total
+  values: (number | null)[];      // total per month since month 0
   retention: (number | null)[];   // % of month 0, null if month not elapsed
   /** Who is in the cohort - without this a fallen curve looks like a bug rather
    * than a named firm that stopped. */
-  members: RevenueCohortMember[];
+  members: RetentionMember[];
 }
 
-export interface BillingRetentionPoint {
+export interface RetentionCurvePoint {
   month: number;
   firms: number;                  // firms old enough to have reached this month
-  base: number | null;            // their month-0 dollars
-  revenue: number | null;         // their dollars this month
+  base: number | null;            // their month-0 total
+  value: number | null;           // their total this month
   pct: number | null;
 }
 
-export interface BillingRetentionCurve {
+export interface RetentionCurve {
   key: "subscription" | "transactional";
   label: string;
   firms: number;
-  points: BillingRetentionPoint[];
+  points: RetentionCurvePoint[];
 }
 
-export interface RevenueRetentionReport {
-  cohorts: RevenueCohortRow[];
+/** One retention lens (dollars, or cases) over the same firms. */
+export interface RetentionView {
+  cohorts: RetentionCohortRow[];
+  curves: RetentionCurve[];
+  /** Every firm in this lens, for the drill-downs behind the charts. */
+  members: RetentionMember[];
+}
+
+export interface BillingRetentionReport {
   monthCols: number;
-  curves: BillingRetentionCurve[];
-  /** Every billing firm, for the drill-downs behind the charts. */
-  members: RevenueCohortMember[];
+  /** Dollars kept - what we are paid. */
+  revenue: RetentionView;
+  /** Cases submitted - whether the product is actually being used. The two
+   * diverge for subscribers, who go on paying after they stop using. */
+  usage: RetentionView;
   subscriptionFirms: number;
   transactionalFirms: number;
+  usageFirms: number;
   mrr: number;
-  /** True while the current calendar month is still running - its dollars are
-   * incomplete and every curve ending there reads low. */
+  /** True while the current calendar month is still running - it is incomplete
+   * and every curve ending there reads low. */
   partialMonth: boolean;
   partialMonthLabel: string;
 }
 
-type RevFirm = {
+type SeriesFirm = {
   id: string;
   name: string;
   billing: "subscription" | "transactional";
-  rev: Map<number, number>;       // month index -> dollars
-  first: number;                  // first month index with revenue
+  series: Map<number, number>;    // month index -> dollars, or cases
+  first: number;                  // first month index with anything in it
 };
 
-export async function revenueRetentionReport(): Promise<RevenueRetentionReport> {
+/** Cohorts + billing-model curves for one lens. Identical maths for dollars and
+ * cases, so the two can never drift apart. */
+function buildRetentionView(
+  firms: SeriesFirm[],
+  monthCols: number,
+  nowIdx: number,
+  monthKey: (i: number) => string,
+  monthLabel: (i: number) => string,
+): RetentionView {
+  const sumAt = (list: SeriesFirm[], at: (f: SeriesFirm) => number) =>
+    list.reduce((s, f) => s + (f.series.get(at(f)) ?? 0), 0);
+
+  const memberOf = (f: SeriesFirm): RetentionMember => {
+    const latestMonth = Math.min(nowIdx, f.first + monthCols - 1);
+    const months: (number | null)[] = [];
+    for (let m = 0; m < monthCols; m++) {
+      months.push(f.first + m > nowIdx ? null : round2(f.series.get(f.first + m) ?? 0));
+    }
+    const latest = round2(f.series.get(latestMonth) ?? 0);
+    return {
+      id: f.id, name: f.name, billing: f.billing,
+      cohortKey: monthKey(f.first), cohortLabel: monthLabel(f.first),
+      base: round2(f.series.get(f.first) ?? 0), latest,
+      lapsed: latestMonth > f.first && latest === 0,
+      months,
+    };
+  };
+  const members = firms.map(memberOf).sort((a, b) => b.base - a.base);
+  const memberById = new Map(members.map((m) => [m.id, m]));
+
+  const byStart = new Map<number, SeriesFirm[]>();
+  for (const f of firms) byStart.set(f.first, [...(byStart.get(f.first) ?? []), f]);
+
+  const cohorts: RetentionCohortRow[] = [...byStart.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([start, list]) => {
+      const base = sumAt(list, () => start);
+      const values: (number | null)[] = [];
+      const retention: (number | null)[] = [];
+      for (let m = 0; m < monthCols; m++) {
+        if (start + m > nowIdx) { values.push(null); retention.push(null); continue; }
+        const v = sumAt(list, () => start + m);
+        values.push(round2(v));
+        retention.push(base ? Math.round((v / base) * 100) : null);
+      }
+      return {
+        key: monthKey(start), label: monthLabel(start), firms: list.length,
+        base: round2(base), values, retention,
+        members: list.map((f) => memberById.get(f.id)!).sort((a, b) => b.base - a.base),
+      };
+    });
+
+  // Each curve is indexed to its own month 0, which is the normalisation: a
+  // $750/mo firm and a one-case firm both start at 100%. Only firms that have
+  // actually reached month N count toward it, numerator AND denominator, or a
+  // young firm would drag the tail down just for being young.
+  const curves: RetentionCurve[] = (["subscription", "transactional"] as const)
+    .map((kind) => {
+      const list = firms.filter((f) => f.billing === kind);
+      const points: RetentionCurvePoint[] = [];
+      for (let m = 0; m < monthCols; m++) {
+        const eligible = list.filter((f) => f.first + m <= nowIdx);
+        const base = sumAt(eligible, (f) => f.first);
+        const value = sumAt(eligible, (f) => f.first + m);
+        points.push({
+          month: m,
+          firms: eligible.length,
+          base: eligible.length ? round2(base) : null,
+          value: eligible.length ? round2(value) : null,
+          pct: base ? Math.round((value / base) * 100) : null,
+        });
+      }
+      return {
+        key: kind,
+        label: kind === "subscription" ? "Subscription" : "Transactional",
+        firms: list.length,
+        points,
+      };
+    });
+
+  return { cohorts, curves, members };
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export async function billingRetentionReport(): Promise<BillingRetentionReport> {
   const sb = supabaseService();
   const settings = await loadSettings();
   const price = settings.defaultCasePrice;
@@ -1018,19 +1115,37 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
   ]);
 
   const caseRev = new Map<string, Map<number, number>>();
+  const caseCount = new Map<string, Map<number, number>>();
   for (const c of caseRows ?? []) {
     const m = idxOf(c.submitted_date);
     if (m === null || !c.company_hubspot_id) continue;
     const f = caseRev.get(c.company_hubspot_id) ?? new Map<number, number>();
     f.set(m, (f.get(m) ?? 0) + (Number(c.revenue_amount) || price));
     caseRev.set(c.company_hubspot_id, f);
+    const n = caseCount.get(c.company_hubspot_id) ?? new Map<number, number>();
+    n.set(m, (n.get(m) ?? 0) + 1);
+    caseCount.set(c.company_hubspot_id, n);
   }
 
-  const firms: RevFirm[] = [];
+  const firms: SeriesFirm[] = [];
+  const usage: SeriesFirm[] = [];
   for (const co of (companies ?? []) as CompanyRow[]) {
     const cases = caseRev.get(co.hubspot_id) ?? new Map<number, number>();
+    const name = co.name ?? co.domain ?? co.hubspot_id;
+    // Usage is billing-agnostic: cases are cases whether they were paid for per
+    // case or under a flat fee. A firm on a plan that has since been cancelled
+    // still belongs to the subscription curve - that IS the churn we want to see.
+    const onPlan = firmPlanAmount(co) > 0;
+    const counts = caseCount.get(co.hubspot_id);
+    if (counts?.size) {
+      usage.push({
+        id: co.hubspot_id, name,
+        billing: onPlan ? "subscription" : "transactional",
+        series: counts, first: Math.min(...counts.keys()),
+      });
+    }
     // Plan amount, not live MRR: a cancelled plan still billed while it ran.
-    const amount = firmPlanAmount(co);
+    const amount = onPlan ? firmPlanAmount(co) : 0;
     let rev: Map<number, number>;
     let billing: "subscription" | "transactional";
     if (amount > 0) {
@@ -1051,93 +1166,21 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
       billing = "transactional";
     }
     if (!rev.size) continue;
-    firms.push({
-      id: co.hubspot_id,
-      name: co.name ?? co.domain ?? co.hubspot_id,
-      billing, rev, first: Math.min(...rev.keys()),
-    });
+    firms.push({ id: co.hubspot_id, name, billing, series: rev, first: Math.min(...rev.keys()) });
   }
 
   const monthCols = 4; // Month 0..3, matching the logo-retention cohorts
-  const sumAt = (list: RevFirm[], at: (f: RevFirm) => number) =>
-    list.reduce((s, f) => s + (f.rev.get(at(f)) ?? 0), 0);
-
-  const memberOf = (f: RevFirm): RevenueCohortMember => {
-    const latestMonth = Math.min(nowIdx, f.first + monthCols - 1);
-    const months: (number | null)[] = [];
-    for (let m = 0; m < monthCols; m++) {
-      months.push(f.first + m > nowIdx ? null : Math.round(f.rev.get(f.first + m) ?? 0));
-    }
-    const latest = Math.round(f.rev.get(latestMonth) ?? 0);
-    return {
-      id: f.id, name: f.name, billing: f.billing,
-      cohortKey: monthKey(f.first), cohortLabel: monthLabel(f.first),
-      base: Math.round(f.rev.get(f.first) ?? 0), latest,
-      lapsed: latestMonth > f.first && latest === 0,
-      months,
-    };
-  };
-  const allMembers = firms.map(memberOf).sort((a, b) => b.base - a.base);
-  const memberById = new Map(allMembers.map((m) => [m.id, m]));
-
-  const byStart = new Map<number, RevFirm[]>();
-  for (const f of firms) byStart.set(f.first, [...(byStart.get(f.first) ?? []), f]);
-
-  const cohorts: RevenueCohortRow[] = [...byStart.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([start, list]) => {
-      const base = sumAt(list, () => start);
-      const revenue: (number | null)[] = [];
-      const retention: (number | null)[] = [];
-      for (let m = 0; m < monthCols; m++) {
-        if (start + m > nowIdx) { revenue.push(null); retention.push(null); continue; }
-        const v = sumAt(list, () => start + m);
-        revenue.push(Math.round(v));
-        retention.push(base ? Math.round((v / base) * 100) : null);
-      }
-      return {
-        key: monthKey(start), label: monthLabel(start), firms: list.length,
-        baseRevenue: Math.round(base), revenue, retention,
-        members: list.map((f) => memberById.get(f.id)!).sort((a, b) => b.base - a.base),
-      };
-    });
-
-  // Each curve is indexed to its own month 0, which is the normalisation: a
-  // $750/mo firm and a one-case firm both start at 100%. Only firms that have
-  // actually reached month N count toward it, numerator AND denominator, or a
-  // young firm would drag the tail down just for being young.
-  const curves: BillingRetentionCurve[] = (["subscription", "transactional"] as const)
-    .map((kind) => {
-      const list = firms.filter((f) => f.billing === kind);
-      const points: BillingRetentionPoint[] = [];
-      for (let m = 0; m < monthCols; m++) {
-        const eligible = list.filter((f) => f.first + m <= nowIdx);
-        const base = sumAt(eligible, (f) => f.first);
-        const value = sumAt(eligible, (f) => f.first + m);
-        points.push({
-          month: m,
-          firms: eligible.length,
-          base: eligible.length ? Math.round(base) : null,
-          revenue: eligible.length ? Math.round(value) : null,
-          pct: base ? Math.round((value / base) * 100) : null,
-        });
-      }
-      return {
-        key: kind,
-        label: kind === "subscription" ? "Subscription" : "Transactional",
-        firms: list.length,
-        points,
-      };
-    });
-
   const day = now.getUTCDate();
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
   return {
-    cohorts, monthCols, curves, members: allMembers,
+    monthCols,
+    revenue: buildRetentionView(firms, monthCols, nowIdx, monthKey, monthLabel),
+    usage: buildRetentionView(usage, monthCols, nowIdx, monthKey, monthLabel),
     subscriptionFirms: firms.filter((f) => f.billing === "subscription").length,
     transactionalFirms: firms.filter((f) => f.billing === "transactional").length,
+    usageFirms: usage.length,
     mrr: firms.filter((f) => f.billing === "subscription")
-      .reduce((s, f) => s + (f.rev.get(nowIdx) ?? 0), 0),
+      .reduce((s, f) => s + (f.series.get(nowIdx) ?? 0), 0),
     partialMonth: day < daysInMonth,
     partialMonthLabel: `${monthLabel(nowIdx)} (day ${day} of ${daysInMonth})`,
   };

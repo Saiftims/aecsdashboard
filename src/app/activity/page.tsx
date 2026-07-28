@@ -5,7 +5,7 @@ import {
   RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
-import { activityReport, retentionReport, revenueRetentionReport } from "@/lib/queries";
+import { activityReport, billingRetentionReport, retentionReport } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -25,11 +25,13 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention, revRetention] = await Promise.all([
+  const [report, retention, billing] = await Promise.all([
     activityReport(user.role === "ae" ? user.hubspot_owner_id : null),
     retentionReport(),
-    revenueRetentionReport(),
+    billingRetentionReport(),
   ]);
+  const revRetention = billing.revenue;
+  const useRetention = billing.usage;
   const { settings, activityTotals, daily, funnel, revenue, cohortSize, casesThisWeek, newCustomers, dealsWon } = report;
   const freq = retention.frequency;
   const scope = user.role === "ae" ? "your" : "team";
@@ -201,22 +203,22 @@ export default async function ActivityPage() {
           Revenue retention — dollars kept, by first-revenue month
         </h2>
         <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat label="Revenue firms" value={revRetention.subscriptionFirms + revRetention.transactionalFirms} sub="have billed at least once" />
-          <Stat label="On subscription" value={revRetention.subscriptionFirms} sub={`${money(revRetention.mrr)} / month`} tone="good" />
-          <Stat label="Transactional" value={revRetention.transactionalFirms} sub={`$${settings.defaultCasePrice} per case`} />
+          <Stat label="Revenue firms" value={billing.subscriptionFirms + billing.transactionalFirms} sub="have billed at least once" />
+          <Stat label="On subscription" value={billing.subscriptionFirms} sub={`${money(billing.mrr)} / month`} tone="good" />
+          <Stat label="Transactional" value={billing.transactionalFirms} sub={`$${settings.defaultCasePrice} per case`} />
           <Stat label="Cohorts tracked" value={revRetention.cohorts.length} sub="months with a first sale" />
         </div>
         <Card>
           <CardHeader
             title="Revenue retention curve (% of each cohort's month-0 dollars)"
-            action={revRetention.partialMonth ? (
+            action={billing.partialMonth ? (
               <span className="text-xs text-amber-600">
-                {revRetention.partialMonthLabel} is still running — its dollars are incomplete
+                {billing.partialMonthLabel} is still running — its dollars are incomplete
               </span>
             ) : null}
           />
           <div className="p-4">
-            <RevenueRetentionChart cohorts={revRetention.cohorts} monthCols={revRetention.monthCols} />
+            <RevenueRetentionChart cohorts={revRetention.cohorts} monthCols={billing.monthCols} />
           </div>
         </Card>
         <div className="mt-3">
@@ -228,9 +230,9 @@ export default async function ActivityPage() {
               </Link>,
               String(c.firms),
               ...c.retention.map((r, i) =>
-                r === null || c.revenue[i] === null
+                r === null || c.values[i] === null
                   ? "—"
-                  : `${money(c.revenue[i]!)} · ${r}%`),
+                  : `${money(c.values[i]!)} · ${r}%`),
             ])}
           />
         </div>
@@ -261,13 +263,85 @@ export default async function ActivityPage() {
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Usage retention — cases kept, by first-case month
+        </h2>
+        <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Stat label="Firms with usage" value={billing.usageFirms} sub="submitted at least one case" />
+          <Stat
+            label="Stopped submitting"
+            value={useRetention.members.filter((m) => m.lapsed).length}
+            sub="used in month 0, nothing since"
+            tone={useRetention.members.some((m) => m.lapsed) ? "warn" : "good"}
+          />
+          <Stat label="Still submitting" value={useRetention.members.filter((m) => !m.lapsed).length} tone="good" />
+          <Stat label="Cohorts tracked" value={useRetention.cohorts.length} sub="months with a first case" />
+        </div>
+        <Card>
+          <CardHeader
+            title="Usage retention curve (% of each cohort's month-0 cases)"
+            action={billing.partialMonth ? (
+              <span className="text-xs text-amber-600">
+                {billing.partialMonthLabel} is still running — its cases are incomplete
+              </span>
+            ) : null}
+          />
+          <div className="p-4">
+            <RevenueRetentionChart cohorts={useRetention.cohorts} monthCols={billing.monthCols} />
+          </div>
+        </Card>
+        <div className="mt-3">
+          <Table
+            headers={["First-case cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
+            rows={useRetention.cohorts.map((c) => [
+              <Link key="c" href={`/drill/usecohort_${c.key}`} className="font-medium text-blue-600 hover:underline">
+                {c.label}
+              </Link>,
+              String(c.firms),
+              ...c.retention.map((r, i) =>
+                r === null || c.values[i] === null
+                  ? "—"
+                  : `${c.values[i]} case${c.values[i] === 1 ? "" : "s"} · ${r}%`),
+            ])}
+          />
+        </div>
+        <div className="mt-3">
+          <Table
+            headers={["Cohort", "Still submitting", "Stopped after month 0"]}
+            rows={useRetention.cohorts.map((c) => [
+              <Link key="c" href={`/drill/usecohort_${c.key}`} className="text-blue-600 hover:underline">
+                {c.label}
+              </Link>,
+              c.members.filter((m) => !m.lapsed)
+                .map((m) => `${m.name} (${m.latest || m.base})`).join(", ") || "—",
+              <span key="lapsed" className={c.members.some((m) => m.lapsed) ? "text-amber-600" : ""}>
+                {c.members.filter((m) => m.lapsed)
+                  .map((m) => `${m.name} (was ${m.base})`).join(", ") || "—"}
+              </span>,
+            ])}
+          />
+        </div>
+        <p className="mt-2 text-xs text-zinc-400">
+          Same cohorts, counting cases instead of dollars, so a subscriber that keeps paying while
+          it stops using shows up here even though the revenue curve holds. Firms that have never
+          submitted a case are excluded entirely — there is no usage to retain.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
           Subscription vs transactional — normalised to each model&apos;s month 0
         </h2>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader title="Dollar retention by billing model" />
             <div className="p-4">
-              <BillingRetentionChart curves={revRetention.curves} monthCols={revRetention.monthCols} />
+              <BillingRetentionChart curves={revRetention.curves} monthCols={billing.monthCols} />
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Usage retention by billing model" />
+            <div className="p-4">
+              <BillingRetentionChart curves={useRetention.curves} monthCols={billing.monthCols} />
             </div>
           </Card>
           <Card>
@@ -284,7 +358,27 @@ export default async function ActivityPage() {
                   `Month ${p.month}`,
                   String(p.firms),
                   p.base === null ? "—" : money(p.base),
-                  p.revenue === null ? "—" : money(p.revenue),
+                  p.value === null ? "—" : money(p.value),
+                  p.pct === null ? "—" : `${p.pct}%`,
+                ]),
+              )}
+            />
+          </Card>
+          <Card>
+            <CardHeader title="Underlying cases" />
+            <Table
+              headers={["Model", "Month", "Firms this far in", "Their month-0 base", "Cases", "Retained"]}
+              rows={useRetention.curves.flatMap((c) =>
+                c.points.map((p) => [
+                  p.month === 0 ? (
+                    <Link key="m" href={`/drill/usebilling_${c.key}`} className="font-medium text-blue-600 hover:underline">
+                      {c.label} ({c.firms})
+                    </Link>
+                  ) : "",
+                  `Month ${p.month}`,
+                  String(p.firms),
+                  p.base === null ? "—" : String(p.base),
+                  p.value === null ? "—" : String(p.value),
                   p.pct === null ? "—" : `${p.pct}%`,
                 ]),
               )}
@@ -292,13 +386,13 @@ export default async function ActivityPage() {
           </Card>
         </div>
         <p className="mt-2 text-xs text-zinc-400">
-          Both models start at 100% of their own month-0 dollars, so a $750/month firm and a
-          one-case firm carry equal weight and only the <em>shape</em> is compared. Each month only
-          counts firms that have actually reached it, in both the numerator and the base, so young
-          firms don&apos;t drag the tail down.
-          {revRetention.partialMonth ? ` ${revRetention.partialMonthLabel} is incomplete, which pulls the transactional line down at whichever month lands on it.` : ""}
-          {" "}Subscriptions bill flat from their start month and we record no cancellation dates
-          yet, so that line holds at 100% by construction until a plan is actually cancelled.
+          Both models start at 100% of their own month 0, so a $750/month firm and a one-case firm
+          carry equal weight and only the <em>shape</em> is compared. Each month counts only firms
+          that have actually reached it, in the numerator and the base alike, so young firms
+          don&apos;t drag the tail down. Read the two charts together: dollars are what we are paid,
+          cases are whether the product is being used, and a subscription whose dollars hold while
+          its cases fall is the one about to cancel.
+          {billing.partialMonth ? ` ${billing.partialMonthLabel} is incomplete, which pulls whichever month lands on it down in both charts.` : ""}
         </p>
       </section>
 
