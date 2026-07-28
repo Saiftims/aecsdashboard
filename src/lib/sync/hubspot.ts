@@ -75,6 +75,19 @@ function assocIds(o: HsObject, kind: string): string[] {
   return (o.associations?.[kind]?.results ?? []).map((r) => r.id);
 }
 
+/** Whether an object's association list for `kind` is actually known.
+ *
+ * A full sync gets associations inline and HubSpot simply omits the key when an
+ * object has none, so absence means "none". An incremental sync fills them in
+ * afterwards and leaves the key off only when that lookup FAILED, so absence
+ * means "unknown" - and writing null then would erase a live link. Callers omit
+ * the column in that case so the cached value survives.
+ */
+function makeAssocKnown(mode: "full" | "incremental", sinceMs?: number) {
+  const inline = mode === "full" || !sinceMs;
+  return (o: HsObject, kind: string) => inline || o.associations?.[kind] !== undefined;
+}
+
 /** Parse structured markers from activity bodies written by the app's quick
  * logger, e.g. "[type:call][outcome:connected]". */
 function parseMarker(body: string | null, key: string): string | null {
@@ -101,10 +114,15 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   const stats: Record<string, number> = {};
   const fetchedIds: Record<string, string[]> = {};
 
+  // Associations must be requested in BOTH modes. The search API used for
+  // incremental syncs cannot return them, so they are batch-filled afterwards;
+  // without that, an incremental sync would upsert every touched row with a null
+  // company/contact link and erase associations that are still in HubSpot.
   const fetchObjects = async (object: string, props: string[], assoc?: string[]) =>
     mode === "full" || !sinceMs
       ? hsListAll(object, props, assoc)
-      : hsListModifiedSince(object, props, sinceMs);
+      : hsListModifiedSince(object, props, sinceMs, assoc);
+  const assocKnown = makeAssocKnown(mode, sinceMs);
 
   // ---- companies ----
   const companies = await fetchObjects("companies", COMPANY_PROPS);
@@ -136,7 +154,8 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
         email: c.properties.email,
         first_name: c.properties.firstname,
         last_name: c.properties.lastname,
-        company_hubspot_id: assocIds(c, "companies")[0] ?? null,
+        ...(assocKnown(c, "companies")
+          ? { company_hubspot_id: assocIds(c, "companies")[0] ?? null } : {}),
         owner_id: c.properties.hubspot_owner_id,
         lifecycle_stage: c.properties.lifecyclestage,
         properties: c.properties,
@@ -172,8 +191,10 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
         is_activation: Boolean(d.properties.sw_activation_stage),
         owner_id: d.properties.hubspot_owner_id,
         amount: d.properties.amount ? Number(d.properties.amount) : null,
-        company_hubspot_id: assocIds(d, "companies")[0] ?? null,
-        primary_contact_id: assocIds(d, "contacts")[0] ?? null,
+        ...(assocKnown(d, "companies")
+          ? { company_hubspot_id: assocIds(d, "companies")[0] ?? null } : {}),
+        ...(assocKnown(d, "contacts")
+          ? { primary_contact_id: assocIds(d, "contacts")[0] ?? null } : {}),
         properties: d.properties,
         hs_created_at: d.properties.createdate,
         hs_updated_at: d.properties.hs_lastmodifieddate,

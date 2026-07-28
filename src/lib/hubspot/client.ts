@@ -84,11 +84,51 @@ export async function hsListAll(
   return out;
 }
 
-/** Incremental: objects modified since `sinceMs` (epoch millis), via search API. */
+/** Association ids for many objects at once (v4 batch read).
+ *
+ * `ok` reports whether HubSpot actually answered. Callers must not treat a
+ * failed lookup as "this object has no associations", or they will erase links
+ * that are still in the CRM.
+ */
+export async function hsAssociationsBatch(
+  fromObject: string,
+  toObject: string,
+  ids: string[],
+): Promise<{ map: Map<string, string[]>; ok: boolean }> {
+  const map = new Map<string, string[]>();
+  let ok = true;
+  for (let i = 0; i < ids.length; i += 100) {
+    const inputs = ids.slice(i, i + 100).map((id) => ({ id }));
+    try {
+      const data = await hsRequest<{
+        results?: { from?: { id?: string | number }; to?: { toObjectId: string | number }[] }[];
+      }>("POST", `/crm/v4/associations/${fromObject}/${toObject}/batch/read`, { inputs });
+      for (const r of data.results ?? []) {
+        const from = r.from?.id;
+        if (from === undefined) continue;
+        map.set(String(from), (r.to ?? []).map((t) => String(t.toObjectId)));
+      }
+    } catch (e) {
+      ok = false;
+      console.error(`hsAssociationsBatch ${fromObject}->${toObject}:`,
+        e instanceof Error ? e.message : e);
+    }
+  }
+  return { map, ok };
+}
+
+/** Incremental: objects modified since `sinceMs` (epoch millis), via search API.
+ *
+ * The search endpoint cannot return associations, so when `associations` are
+ * requested they are filled in afterwards via the v4 batch read and attached in
+ * the same shape `hsListAll` produces. Without this, an incremental sync reports
+ * every object as having no associations at all.
+ */
 export async function hsListModifiedSince(
   object: string,
   properties: string[],
   sinceMs: number,
+  associations?: string[],
 ): Promise<HsObject[]> {
   const out: HsObject[] = [];
   let after: string | undefined;
@@ -112,6 +152,21 @@ export async function hsListModifiedSince(
     after = page.paging?.next?.after;
     // HubSpot search caps at 10k results; incremental windows keep us far below.
   } while (after);
+
+  if (associations?.length && out.length) {
+    const ids = out.map((o) => o.id);
+    for (const kind of associations) {
+      const { map, ok } = await hsAssociationsBatch(object, kind, ids);
+      if (!ok) continue; // leave undefined rather than claim "no associations"
+      for (const o of out) {
+        const linked = map.get(o.id) ?? [];
+        o.associations = {
+          ...(o.associations ?? {}),
+          [kind]: { results: linked.map((id) => ({ id })) },
+        };
+      }
+    }
+  }
   return out;
 }
 
