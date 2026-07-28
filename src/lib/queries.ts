@@ -91,8 +91,8 @@ export function firmPlanAmount(c: PlanFields): number {
 }
 
 /** When a plan stopped billing, or null while it is still live. Lives on the
- * HubSpot company (`sw_subscription_end_date`) because Supabase DDL needs a
- * human; the column is preferred if migration 0006 ever lands. */
+ * HubSpot company as `sw_subscription_end_date` so CS can cancel a plan without
+ * a deploy; a Supabase column of the same name overrides it if one is ever added. */
 export function firmPlanEnd(c: PlanFields): Date | null {
   const raw = c.subscription_ended_at ?? c.properties?.sw_subscription_end_date;
   if (!raw || typeof raw !== "string") return null;
