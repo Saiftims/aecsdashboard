@@ -71,9 +71,26 @@ export interface CompanyRow {
   subscription_ended_at?: string | null;
 }
 
-/** A firm's active monthly recurring revenue, or 0 if transactional. */
-export function firmMrr(c: { billing_type?: string | null; subscription_monthly_amount?: number | null }): number {
+type PlanFields = {
+  billing_type?: string | null;
+  subscription_monthly_amount?: number | null;
+  subscription_ended_at?: string | null;
+};
+
+/** The plan a firm was put on, whether or not it is still running. Use this for
+ * HISTORY - a cancelled subscriber still billed a flat fee while it ran, and
+ * pricing their old months per case would invent revenue they never paid. */
+export function firmPlanAmount(c: PlanFields): number {
   return c.billing_type === "subscription" ? Number(c.subscription_monthly_amount) || 0 : 0;
+}
+
+/** A firm's active monthly recurring revenue: 0 if transactional, and 0 once the
+ * plan has been cancelled. Use this for anything describing revenue NOW. */
+export function firmMrr(c: PlanFields): number {
+  const amount = firmPlanAmount(c);
+  if (!amount) return 0;
+  const ended = c.subscription_ended_at ? new Date(c.subscription_ended_at) : null;
+  return ended && !Number.isNaN(ended.getTime()) && ended.getTime() <= Date.now() ? 0 : amount;
 }
 
 /** Monthly revenue split: subscription firms bill their flat MRR (their per-case
@@ -1012,7 +1029,8 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
   const firms: RevFirm[] = [];
   for (const co of (companies ?? []) as CompanyRow[]) {
     const cases = caseRev.get(co.hubspot_id) ?? new Map<number, number>();
-    const amount = firmMrr(co);
+    // Plan amount, not live MRR: a cancelled plan still billed while it ran.
+    const amount = firmPlanAmount(co);
     let rev: Map<number, number>;
     let billing: "subscription" | "transactional";
     if (amount > 0) {
