@@ -659,12 +659,23 @@ export async function computeRollups() {
 
     // ---- auto-advance sales deal to Closed Won on first real case ----
     // A firm that has submitted a case is a won customer; its sales deal must
-    // not sit in an open stage. Close date = first case date. Idempotent (only
-    // touches OPEN-stage deals). Supabase is updated too so the dashboard
-    // reflects it without waiting for HubSpot's list-API to re-index.
+    // not sit in an open stage. Close date = first case date. Supabase is updated
+    // too so the dashboard reflects it without waiting for HubSpot's list-API to
+    // re-index.
+    // At most ONE deal per firm is ever auto-closed, and only a deal that already
+    // existed when the case landed. A deal opened after that is a re-engagement or
+    // duplicate: back-dating it to an old first case would double-count the win and
+    // silently bury a live demo.
     if (usage.firstCaseAt) {
-      for (const d of companyDeals) {
-        if (!OPEN_SALES_STAGES.has(d.stage as string)) continue;
+      const alreadyWon = companyDeals.some((d) => d.stage === SALES_STAGES.closedWon);
+      const firstCaseMs = new Date(usage.firstCaseAt).getTime();
+      const eligible = alreadyWon ? [] : companyDeals
+        .filter((d) => OPEN_SALES_STAGES.has(d.stage as string))
+        .filter((d) => !d.hs_created_at ||
+                       new Date(d.hs_created_at as string).getTime() <= firstCaseMs + DAY)
+        .sort((a, b) => String(a.hs_created_at ?? "").localeCompare(String(b.hs_created_at ?? "")));
+      const d = eligible[0];
+      if (d) {
         const dealId = d.hubspot_id as string;
         const closeIso = usage.firstCaseAt;
         const wb = await hsUpdateProperties("deals", dealId, {
