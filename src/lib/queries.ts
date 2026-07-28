@@ -916,10 +916,15 @@ export async function retentionReport(): Promise<RetentionReport> {
 // two billing models can be compared despite very different firm sizes.
 // ---------------------------------------------------------------------------
 export interface RevenueCohortMember {
+  id: string;
   name: string;
+  billing: "subscription" | "transactional";
+  cohortKey: string;              // "2026-05"
+  cohortLabel: string;            // "May 2026"
   base: number;                   // what they billed in month 0
   latest: number;                 // what they billed in the latest elapsed month
   lapsed: boolean;                // billed in month 0, nothing since
+  months: (number | null)[];      // dollars per month since their own month 0
 }
 
 export interface RevenueCohortRow {
@@ -953,6 +958,8 @@ export interface RevenueRetentionReport {
   cohorts: RevenueCohortRow[];
   monthCols: number;
   curves: BillingRetentionCurve[];
+  /** Every billing firm, for the drill-downs behind the charts. */
+  members: RevenueCohortMember[];
   subscriptionFirms: number;
   transactionalFirms: number;
   mrr: number;
@@ -1037,6 +1044,24 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
   const sumAt = (list: RevFirm[], at: (f: RevFirm) => number) =>
     list.reduce((s, f) => s + (f.rev.get(at(f)) ?? 0), 0);
 
+  const memberOf = (f: RevFirm): RevenueCohortMember => {
+    const latestMonth = Math.min(nowIdx, f.first + monthCols - 1);
+    const months: (number | null)[] = [];
+    for (let m = 0; m < monthCols; m++) {
+      months.push(f.first + m > nowIdx ? null : Math.round(f.rev.get(f.first + m) ?? 0));
+    }
+    const latest = Math.round(f.rev.get(latestMonth) ?? 0);
+    return {
+      id: f.id, name: f.name, billing: f.billing,
+      cohortKey: monthKey(f.first), cohortLabel: monthLabel(f.first),
+      base: Math.round(f.rev.get(f.first) ?? 0), latest,
+      lapsed: latestMonth > f.first && latest === 0,
+      months,
+    };
+  };
+  const allMembers = firms.map(memberOf).sort((a, b) => b.base - a.base);
+  const memberById = new Map(allMembers.map((m) => [m.id, m]));
+
   const byStart = new Map<number, RevFirm[]>();
   for (const f of firms) byStart.set(f.first, [...(byStart.get(f.first) ?? []), f]);
 
@@ -1052,17 +1077,10 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
         revenue.push(Math.round(v));
         retention.push(base ? Math.round((v / base) * 100) : null);
       }
-      const latestMonth = Math.min(nowIdx, start + monthCols - 1);
-      const members: RevenueCohortMember[] = list
-        .map((f) => {
-          const memberBase = Math.round(f.rev.get(start) ?? 0);
-          const latest = Math.round(f.rev.get(latestMonth) ?? 0);
-          return { name: f.name, base: memberBase, latest, lapsed: latestMonth > start && latest === 0 };
-        })
-        .sort((a, b) => b.base - a.base);
       return {
         key: monthKey(start), label: monthLabel(start), firms: list.length,
-        baseRevenue: Math.round(base), revenue, retention, members,
+        baseRevenue: Math.round(base), revenue, retention,
+        members: list.map((f) => memberById.get(f.id)!).sort((a, b) => b.base - a.base),
       };
     });
 
@@ -1097,7 +1115,7 @@ export async function revenueRetentionReport(): Promise<RevenueRetentionReport> 
   const day = now.getUTCDate();
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
   return {
-    cohorts, monthCols, curves,
+    cohorts, monthCols, curves, members: allMembers,
     subscriptionFirms: firms.filter((f) => f.billing === "subscription").length,
     transactionalFirms: firms.filter((f) => f.billing === "transactional").length,
     mrr: firms.filter((f) => f.billing === "subscription")

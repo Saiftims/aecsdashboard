@@ -4,8 +4,8 @@ import { differenceInDays, subDays } from "date-fns";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
-  hasFutureDemo, isOpenSalesDeal, isTaskSuperseded,
-  type ActivityRow, type CompanyRow, type DealRow,
+  hasFutureDemo, isOpenSalesDeal, isTaskSuperseded, revenueRetentionReport,
+  type ActivityRow, type CompanyRow, type DealRow, type RevenueCohortMember,
 } from "@/lib/queries";
 
 export interface DrillRow {
@@ -394,7 +394,61 @@ function cohortMetric(key: string): { label: string; rows: (ctx: Ctx) => DrillRo
   };
 }
 
+/** Firms behind a revenue-retention chart: one cohort month, or one billing
+ * model. Kept separate from the Ctx-based metrics because revenue needs the
+ * cases table, which fetchCore() does not load. */
+async function revenueDrill(metric: string): Promise<DrillResult | null> {
+  const report = await revenueRetentionReport();
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  const row = (m: RevenueCohortMember): DrillRow => {
+    const series = m.months
+      .map((v, i) => `M${i} ${v === null ? "—" : money(v)}`).join(" → ");
+    return {
+      title: m.name,
+      subtitle: [
+        m.billing === "subscription" ? "subscription" : "per case",
+        `first billed ${m.cohortLabel}`,
+        series,
+        m.lapsed ? "STOPPED" : null,
+      ].filter(Boolean).join(" · "),
+      companyId: m.id,
+      when: `${m.cohortKey}-01T00:00:00Z`,
+    };
+  };
+
+  if (metric.startsWith("revcohort_")) {
+    const key = metric.slice("revcohort_".length);
+    const c = report.cohorts.find((x) => x.key === key);
+    if (!c) return null;
+    const lapsed = c.members.filter((m) => m.lapsed).length;
+    return {
+      label: `Revenue cohort — ${c.label} · ${c.firms} firm(s), ` +
+             `${money(c.baseRevenue)} in month 0` +
+             (lapsed ? ` · ${lapsed} since stopped` : ""),
+      rows: c.members.map(row),
+    };
+  }
+
+  const kind = metric.slice("revbilling_".length);
+  if (kind !== "subscription" && kind !== "transactional") return null;
+  const members = report.members.filter((m) => m.billing === kind);
+  // Deliberately not a sum of each firm's "latest month": those months are
+  // different calendar months, so adding them would be a meaningless total.
+  const tail = kind === "subscription"
+    ? `${money(report.mrr)}/month combined`
+    : `${members.filter((m) => m.lapsed).length} stopped billing`;
+  return {
+    label: `${kind === "subscription" ? "Subscription" : "Transactional"} firms — ` +
+           `${members.length} · ${tail}`,
+    rows: members.map(row),
+  };
+}
+
 export async function drill(metric: string, ownerId?: string | null): Promise<DrillResult | null> {
+  if (metric.startsWith("revcohort_") || metric.startsWith("revbilling_")) {
+    return revenueDrill(metric);
+  }
+
   const def = metric.startsWith("activation_")
     ? activationMetric(metric.slice("activation_".length))
     : metric.startsWith("cohort_")

@@ -223,7 +223,9 @@ export default async function ActivityPage() {
           <Table
             headers={["First-revenue cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
             rows={revRetention.cohorts.map((c) => [
-              c.label,
+              <Link key="c" href={`/drill/revcohort_${c.key}`} className="font-medium text-blue-600 hover:underline">
+                {c.label}
+              </Link>,
               String(c.firms),
               ...c.retention.map((r, i) =>
                 r === null || c.revenue[i] === null
@@ -236,7 +238,9 @@ export default async function ActivityPage() {
           <Table
             headers={["Cohort", "Still billing", "Stopped after month 0"]}
             rows={revRetention.cohorts.map((c) => [
-              c.label,
+              <Link key="c" href={`/drill/revcohort_${c.key}`} className="text-blue-600 hover:underline">
+                {c.label}
+              </Link>,
               c.members.filter((m) => !m.lapsed)
                 .map((m) => `${m.name} (${money(m.latest || m.base)})`).join(", ") || "—",
               <span key="lapsed" className={c.members.some((m) => m.lapsed) ? "text-amber-600" : ""}>
@@ -272,7 +276,11 @@ export default async function ActivityPage() {
               headers={["Model", "Month", "Firms this far in", "Their month-0 base", "Billed", "Retained"]}
               rows={revRetention.curves.flatMap((c) =>
                 c.points.map((p) => [
-                  p.month === 0 ? `${c.label} (${c.firms})` : "",
+                  p.month === 0 ? (
+                    <Link key="m" href={`/drill/revbilling_${c.key}`} className="font-medium text-blue-600 hover:underline">
+                      {c.label} ({c.firms})
+                    </Link>
+                  ) : "",
                   `Month ${p.month}`,
                   String(p.firms),
                   p.base === null ? "—" : money(p.base),
