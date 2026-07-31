@@ -22,6 +22,10 @@ import { supabaseService } from "@/lib/supabase/server";
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/** A case id minted by the platform, as opposed to a synthetic key we invent for
+ * a hand-entered row (intake_..., manual_...). */
+const REAL_CASE_ID = /^case_[0-9a-fA-F]{8,}$/;
+
 const OPEN_SALES_STAGES = new Set<string>([
   SALES_STAGES.mql, SALES_STAGES.attemptingContact, SALES_STAGES.connected,
   SALES_STAGES.qualified, SALES_STAGES.demoScheduled, SALES_STAGES.demoCompleted,
@@ -125,6 +129,11 @@ export async function syncCases() {
   for (const c of existingCases ?? []) {
     const window = STAND_IN_WINDOW[c.source ?? ""];
     if (!window || !c.company_hubspot_id || !c.submitted_date) continue;
+    // A row typed in WITH the platform's real case id is not a placeholder for
+    // anything: the discovered case matches it by id, so handing it a stand-in
+    // slot only lets it swallow a DIFFERENT, genuinely new case for the same
+    // firm. That hid Stitt Vu's third July case behind "Amador v. Reinoso".
+    if (REAL_CASE_ID.test(c.case_id)) continue;
     const t = new Date(c.submitted_date).getTime();
     if (Number.isNaN(t)) continue;
     standInByCompany.set(c.company_hubspot_id,
