@@ -329,7 +329,7 @@ export default async function ActivityPage() {
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Subscription vs transactional — normalised to each model&apos;s month 0
+          Subscription vs transactional — each firm counts equally
         </h2>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
@@ -347,7 +347,7 @@ export default async function ActivityPage() {
           <Card>
             <CardHeader title="Underlying dollars" />
             <Table
-              headers={["Model", "Month", "Firms this far in", "Their month-0 base", "Billed", "Retained"]}
+              headers={["Model", "Month", "Firms this far in", "Total month-0 $", "Total billed", "Avg firm retained"]}
               rows={revRetention.curves.flatMap((c) =>
                 c.points.map((p) => [
                   p.month === 0 ? (
@@ -367,7 +367,7 @@ export default async function ActivityPage() {
           <Card>
             <CardHeader title="Underlying cases" />
             <Table
-              headers={["Model", "Month", "Firms this far in", "Their month-0 base", "Cases", "Retained"]}
+              headers={["Model", "Month", "Firms this far in", "Total month-0 cases", "Total cases", "Avg firm retained"]}
               rows={useRetention.curves.flatMap((c) =>
                 c.points.map((p) => [
                   p.month === 0 ? (
@@ -386,12 +386,12 @@ export default async function ActivityPage() {
           </Card>
         </div>
         <p className="mt-2 text-xs text-zinc-400">
-          Both models start at 100% of their own month 0, so a $750/month firm and a one-case firm
-          carry equal weight and only the <em>shape</em> is compared. Each month counts only firms
-          that have actually reached it, in the numerator and the base alike, so young firms
-          don&apos;t drag the tail down. Read the two charts together: dollars are what we are paid,
-          cases are whether the product is being used, and a subscription whose dollars hold while
-          its cases fall is the one about to cancel.
+          Retained % is the average of each firm&apos;s own (month N ÷ month 0), so a $750/month
+          firm and a one-case firm each count as one — totals in the table are context only, not
+          the denominator. Only firms that have actually reached month N are in that average.
+          Read the two charts together: dollars are what we are paid, cases are whether the
+          product is being used, and a subscription whose dollars hold while its cases fall is
+          the one about to cancel.
           {billing.partialMonth ? ` ${billing.partialMonthLabel} is incomplete, which pulls whichever month lands on it down in both charts.` : ""}
         </p>
       </section>

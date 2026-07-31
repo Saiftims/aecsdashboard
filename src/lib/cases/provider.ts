@@ -180,6 +180,69 @@ export interface PostHogSignup {
   subscribedAt: string | null;
 }
 
+/** One person's footprint on one case, from one account. */
+interface Sighting {
+  account: string | null;
+  email: string | null;
+  at: string | null;
+  events: number;
+}
+
+/** The account that carried the most events, for cases nobody identified. */
+function dominantAccount(sightings: Sighting[]): string | null {
+  const tally = new Map<string, number>();
+  for (const s of sightings) {
+    if (s.account) tally.set(s.account, (tally.get(s.account) ?? 0) + s.events);
+  }
+  return [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+/** Who owns a case: the FIRST person to work it, because creating a case (or
+ * submitting the intake form) puts you on it before anyone else can see it.
+ * Two corrections to a naive "first seen":
+ *
+ * 1. Viewers with a footprint below `minEvents` are ignored. On page-URL data a
+ *    real owner's session produces many events, while one or two is a stray
+ *    pageview or a merged PostHog identity that can beat the true owner by
+ *    seconds and hand the case to an unrelated firm. Case-lifecycle events are
+ *    already meaningful on their own, so that path passes minEvents = 1.
+ * 2. We do NOT skip past an internal owner to a customer who viewed the case
+ *    later. Silent Witness builds demo cases that customers open afterwards, and
+ *    skipping would credit a real firm with a case it never submitted; such a
+ *    case is dropped downstream by isTestCaseActor().
+ *
+ * Deliberately not "most active": Silent Witness analysts do the heavy work on a
+ * customer's case after submission, so the busiest person on a real case is
+ * often staff.
+ */
+function pickOwner(
+  sightings: Sighting[],
+  minEvents: number,
+): { email: string; account: string | null } | null {
+  const byEmail = new Map<string, {
+    events: number; first: string | null; accounts: Map<string, number>;
+  }>();
+  for (const s of [...sightings].sort((a, b) => (a.at ?? "").localeCompare(b.at ?? ""))) {
+    if (!s.email) continue; // anonymous: $identify hadn't resolved yet
+    const rec = byEmail.get(s.email) ?? { events: 0, first: s.at, accounts: new Map() };
+    rec.events += s.events;
+    if (s.account) {
+      rec.accounts.set(s.account, (rec.accounts.get(s.account) ?? 0) + s.events);
+    }
+    byEmail.set(s.email, rec);
+  }
+  const all = [...byEmail.entries()]
+    .sort((a, b) => (a[1].first ?? "").localeCompare(b[1].first ?? ""));
+  const substantial = all.filter(([, r]) => r.events >= minEvents);
+  const owner = (substantial.length ? substantial : all)[0];
+  if (!owner) return null;
+  const [email, rec] = owner;
+  return {
+    email,
+    account: [...rec.accounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+  };
+}
+
 export class PostHogProvider {
   constructor(
     private apiKey: string,
@@ -216,6 +279,13 @@ export class PostHogProvider {
    *   submitted = first "case exists / work started" event
    *   completed = report_generation_completed
    *   delivered = report_downloaded OR invoice_downloaded (invoice == billed)
+   *
+   * Rows are grouped per (case, account, person), not per case. Collapsing the
+   * identity with max() hands the case to whichever email happens to sort last,
+   * which is routinely a Silent Witness analyst who worked the matter AFTER the
+   * firm submitted it - isTestCaseActor() then discards a real billable case.
+   * That silently lost Big Case Mike's first case on 2026-07-30, where the firm
+   * (daniel@) fired the intake events and staff (sachi@) everything downstream.
    */
   async listAllCases(sinceDays = 400): Promise<PostHogCase[]> {
     const START = CASE_START_EVENTS.map((e) => `'${e}'`).join(",");
@@ -224,37 +294,72 @@ export class PostHogProvider {
     const hogql = `
       select
         properties.caseId as case_id,
-        max(properties.$group_0) as account_id,
-        max(person.properties.email) as email,
+        properties.$group_0 as account_id,
+        person.properties.email as email,
         max(properties.analysisType) as analysis_type,
         minIf(timestamp, event in (${START})) as submitted_at,
         minIf(timestamp, event = 'report_generation_completed') as completed_at,
         minIf(timestamp, event in (${DELIVER})) as delivered_at,
-        min(timestamp) as first_seen
+        min(timestamp) as first_seen,
+        count() as events
       from events
       where event in (${ALL})
         and timestamp > now() - interval ${sinceDays} day
         and properties.caseId is not null
-      group by properties.caseId
-      limit 5000`;
+      group by case_id, account_id, email
+      limit 20000`;
     const rows = await this.query(hogql);
-    return rows.map((r) => {
-      const submitted = safeIso(r[4] as string | null);
-      const completed = safeIso(r[5] as string | null);
-      const delivered = safeIso(r[6] as string | null);
-      const firstSeen = safeIso(r[7] as string | null);
-      return {
-        caseId: String(r[0]),
-        accountId: r[1] ? String(r[1]) : null,
-        creatorEmail: r[2] ? String(r[2]).toLowerCase() : null,
-        analysisType: r[3] ? String(r[3]) : null,
+
+    interface Agg {
+      sightings: Sighting[];
+      analysisType: string | null;
+      submitted: string | null;
+      completed: string | null;
+      delivered: string | null;
+      firstSeen: string | null;
+    }
+    const earliest = (a: string | null, b: string | null) =>
+      !a ? b : !b ? a : (a < b ? a : b);
+
+    const byCase = new Map<string, Agg>();
+    for (const r of rows) {
+      const caseId = String(r[0]);
+      const agg = byCase.get(caseId) ?? {
+        sightings: [], analysisType: null,
+        submitted: null, completed: null, delivered: null, firstSeen: null,
+      };
+      agg.sightings.push({
+        account: r[1] ? String(r[1]) : null,
+        email: r[2] ? String(r[2]).toLowerCase() : null,
+        at: safeIso(r[7] as string | null),
+        events: Number(r[8] ?? 0),
+      });
+      agg.analysisType = agg.analysisType ?? (r[3] ? String(r[3]) : null);
+      agg.submitted = earliest(agg.submitted, safeIso(r[4] as string | null));
+      agg.completed = earliest(agg.completed, safeIso(r[5] as string | null));
+      agg.delivered = earliest(agg.delivered, safeIso(r[6] as string | null));
+      agg.firstSeen = earliest(agg.firstSeen, safeIso(r[7] as string | null));
+      byCase.set(caseId, agg);
+    }
+
+    const out: PostHogCase[] = [];
+    for (const [caseId, agg] of byCase) {
+      // Every event here is a case-lifecycle event, so there are no stray
+      // pageviews to filter out: the earliest identified actor is the creator.
+      const owner = pickOwner(agg.sightings, 1);
+      out.push({
+        caseId,
+        accountId: owner?.account ?? dominantAccount(agg.sightings),
+        creatorEmail: owner?.email ?? null,
+        analysisType: agg.analysisType,
         // Guarantee a submitted date: fall back to the earliest signal we saw
         // (e.g. a case known only from invoice_downloaded).
-        submittedAt: submitted ?? completed ?? delivered ?? firstSeen,
-        completedAt: completed,
-        deliveredAt: delivered,
-      };
-    });
+        submittedAt: agg.submitted ?? agg.completed ?? agg.delivered ?? agg.firstSeen,
+        completedAt: agg.completed,
+        deliveredAt: agg.delivered,
+      });
+    }
+    return out;
   }
 
   /** Cases whose id only ever appears in a `/cases/<id>` URL.
@@ -296,9 +401,6 @@ export class PostHogProvider {
       limit 20000`;
     const rows = await this.query(hogql);
 
-    interface Sighting {
-      account: string | null; email: string | null; at: string | null; events: number;
-    }
     const byCase = new Map<string, Sighting[]>();
     for (const r of rows) {
       const caseId = String(r[0]);
@@ -314,48 +416,13 @@ export class PostHogProvider {
     for (const [caseId, sightings] of byCase) {
       const ordered = [...sightings].sort(
         (a, b) => (a.at ?? "").localeCompare(b.at ?? ""));
-      // The owner is the FIRST person to work the case: creating it (or
-      // submitting the intake form) puts you on its page before anyone else can
-      // see it. Two corrections to a naive "first seen":
-      //
-      // 1. Viewers with a trivial footprint are ignored. A real owner's session
-      //    produces many events; one or two is a stray pageview or a merged
-      //    PostHog identity, which can otherwise beat the true owner by seconds
-      //    and hand the case to an unrelated firm.
-      // 2. We do NOT skip past an internal owner to a customer who viewed the
-      //    case later. Silent Witness builds demo cases that customers open
-      //    afterwards, and skipping would credit a real firm with a case it never
-      //    submitted; such a case is dropped downstream by isTestCaseActor().
-      //
-      // Deliberately not "most active": Silent Witness analysts do the heavy work
-      // on a customer's case after submission, so the busiest person on a real
-      // case is often staff.
-      const byEmail = new Map<string, {
-        events: number; first: string | null; accounts: Map<string, number>;
-      }>();
-      for (const s of ordered) {
-        if (!s.email) continue; // anonymous: $identify hadn't resolved yet
-        const rec = byEmail.get(s.email)
-          ?? { events: 0, first: s.at, accounts: new Map() };
-        rec.events += s.events;
-        if (s.account) {
-          rec.accounts.set(s.account, (rec.accounts.get(s.account) ?? 0) + s.events);
-        }
-        byEmail.set(s.email, rec);
-      }
-      const MIN_OWNER_EVENTS = 3;
-      const all = [...byEmail.entries()]
-        .sort((a, b) => (a[1].first ?? "").localeCompare(b[1].first ?? ""));
-      const substantial = all.filter(([, r]) => r.events >= MIN_OWNER_EVENTS);
-      const owner = (substantial.length ? substantial : all)[0];
+      // A single stray pageview is not ownership - see pickOwner().
+      const owner = pickOwner(ordered, 3);
       if (!owner) continue; // never seen by an identified user
-      const [email, rec] = owner;
-      const account = [...rec.accounts.entries()]
-        .sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
       out.push({
         caseId,
-        accountId: account,
-        creatorEmail: email,
+        accountId: owner.account,
+        creatorEmail: owner.email,
         analysisType: null,
         // Earliest sighting of the case page across everyone.
         submittedAt: ordered[0]?.at ?? null,

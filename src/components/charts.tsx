@@ -148,8 +148,9 @@ export function RevenueRetentionChart({
   );
 }
 
-/** Subscription vs transactional dollar retention, each indexed to its own
- * month 0 so firm size cancels out of the comparison. */
+/** Subscription vs transactional retention. Each point is the mean of every
+ * eligible firm's own (month N / month 0), so firm size cancels out and the
+ * two billing models are compared on shape, not volume. */
 export function BillingRetentionChart({
   curves,
   monthCols,

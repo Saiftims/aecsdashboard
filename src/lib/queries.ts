@@ -109,6 +109,14 @@ export function firmMrr(c: PlanFields): number {
   return ended && ended.getTime() <= Date.now() ? 0 : amount;
 }
 
+/** What a single case billed. A null amount means "never priced", so it falls
+ * back to the standard price; an explicit amount is authoritative INCLUDING
+ * zero, which is how a non-billable case is recorded (already invoiced outside
+ * the platform, goodwill re-run, a matter typed in after the fact). */
+export function caseRevenue(c: { revenue_amount: number | null }, price: number): number {
+  return c.revenue_amount == null ? price : Number(c.revenue_amount) || 0;
+}
+
 /** Monthly revenue split: subscription firms bill their flat MRR (their per-case
  * cases are ignored); everyone else bills per case. `monthCases` must carry
  * company_hubspot_id + revenue_amount for cases submitted this month. */
@@ -126,7 +134,7 @@ export function monthlyRevenue(
   let transactional = 0;
   for (const mc of monthCases) {
     if (mc.company_hubspot_id && subIds.has(mc.company_hubspot_id)) continue;
-    transactional += Number(mc.revenue_amount) || price;
+    transactional += caseRevenue(mc, price);
   }
   return { mrr, transactional, total: mrr + transactional, subscriptionFirms: subIds.size };
 }
@@ -757,8 +765,13 @@ export async function activityReport(ownerId?: string | null) {
   const { data: caseRows } = await supabaseService()
     .from("cases").select("company_hubspot_id, submitted_date, revenue_amount");
   const casesThisWeek = (caseRows ?? []).filter((c) => inWeek(c.submitted_date));
-  const revenue = casesThisWeek.reduce(
-    (s, c) => s + (Number(c.revenue_amount) || settings.defaultCasePrice), 0);
+  // A subscriber's case bills nothing extra - their flat fee already covers it,
+  // so pricing it per case invents money (same rule as monthlyRevenue).
+  const planFirms = new Set(
+    companies.filter((c) => firmPlanAmount(c) > 0).map((c) => c.hubspot_id));
+  const revenue = casesThisWeek.reduce((s, c) => s + (
+    c.company_hubspot_id && planFirms.has(c.company_hubspot_id)
+      ? 0 : caseRevenue(c, settings.defaultCasePrice)), 0);
   // New customers = firms that BECAME a customer this week by ANY onset signal
   // (first case, app signup, subscription, or closed-won) - not just first case.
   // A firm signing up / subscribing without a case yet still counts.
@@ -977,8 +990,10 @@ export interface RetentionCohortRow {
 export interface RetentionCurvePoint {
   month: number;
   firms: number;                  // firms old enough to have reached this month
-  base: number | null;            // their month-0 total
-  value: number | null;           // their total this month
+  base: number | null;            // their month-0 total (volume, for context)
+  value: number | null;           // their total this month (volume, for context)
+  /** Mean of each firm's own (month N / month 0) — cohort-size normalised so
+   * a $750 firm and a $250 firm each count as one. Not value/base. */
   pct: number | null;
 }
 
@@ -1074,24 +1089,37 @@ function buildRetentionView(
       };
     });
 
-  // Each curve is indexed to its own month 0, which is the normalisation: a
-  // $750/mo firm and a one-case firm both start at 100%. Only firms that have
-  // actually reached month N count toward it, numerator AND denominator, or a
-  // young firm would drag the tail down just for being young.
+  // Billing-model curves are cohort-size normalised: each firm's own
+  // (month N / month 0) is averaged, so a $750/mo firm and a one-case firm
+  // each count as one. Volume sums stay on the point for the underlying
+  // table, but pct is NOT value/base — that would let whales dominate the
+  // shape comparison the section is for. Only firms that have actually
+  // reached month N are in the average.
   const curves: RetentionCurve[] = (["subscription", "transactional"] as const)
     .map((kind) => {
       const list = firms.filter((f) => f.billing === kind);
       const points: RetentionCurvePoint[] = [];
       for (let m = 0; m < monthCols; m++) {
         const eligible = list.filter((f) => f.first + m <= nowIdx);
-        const base = sumAt(eligible, (f) => f.first);
-        const value = sumAt(eligible, (f) => f.first + m);
+        const ratios: number[] = [];
+        let base = 0;
+        let value = 0;
+        for (const f of eligible) {
+          const b = f.series.get(f.first) ?? 0;
+          const v = f.series.get(f.first + m) ?? 0;
+          base += b;
+          value += v;
+          if (b > 0) ratios.push(v / b);
+        }
+        const pct = ratios.length
+          ? Math.round((ratios.reduce((s, r) => s + r, 0) / ratios.length) * 100)
+          : null;
         points.push({
           month: m,
           firms: eligible.length,
           base: eligible.length ? round2(base) : null,
           value: eligible.length ? round2(value) : null,
-          pct: base ? Math.round((value / base) * 100) : null,
+          pct,
         });
       }
       return {
@@ -1136,7 +1164,7 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
     const m = idxOf(c.submitted_date);
     if (m === null || !c.company_hubspot_id) continue;
     const f = caseRev.get(c.company_hubspot_id) ?? new Map<number, number>();
-    f.set(m, (f.get(m) ?? 0) + (Number(c.revenue_amount) || price));
+    f.set(m, (f.get(m) ?? 0) + caseRevenue(c, price));
     caseRev.set(c.company_hubspot_id, f);
     const n = caseCount.get(c.company_hubspot_id) ?? new Map<number, number>();
     n.set(m, (n.get(m) ?? 0) + 1);
