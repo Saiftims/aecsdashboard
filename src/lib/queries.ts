@@ -5,6 +5,9 @@ import { median } from "@/lib/metrics";
 import {
   SALES_STAGES, hubspotDealUrl, type ActivationStage,
 } from "@/lib/hubspot/stages";
+import {
+  buildRoleActivity, callsTodayFor, fetchRepSources, quoBackedOwners, roleOf,
+} from "@/lib/rep-activity";
 import { loadSettings } from "@/lib/settings";
 import { supabaseService } from "@/lib/supabase/server";
 
@@ -537,9 +540,28 @@ export async function aeDashboard(ownerId?: string | null) {
     return touches.length > 0 && Math.min(...touches) - created <= slaMs;
   });
 
+  // Calls come from Quo for any rep it can account for; HubSpot only logs a
+  // dial that already had a contact behind it. Targets follow the viewer's role
+  // - an AE prospecting and a CSM working a book are not the same day's work.
+  const { quoCalls } = await fetchRepSources(subDays(now, 2).toISOString());
+  const role = roleOf(ownerId ?? null, settings);
+  const isAe = role !== "cs";
+
   const today = {
-    calls: { value: todayActs.filter((a) => actType(a) === "call" || actType(a) === "voicemail").length, target: settings.dailyCallsTarget },
-    emails: { value: todayActs.filter((a) => actType(a) === "email").length, target: settings.dailyEmailsTarget },
+    calls: {
+      value: callsTodayFor({
+        ownerId: ownerId ?? null,
+        touches: todayActs.map((a) => ({
+          owner_id: a.owner_id, occurred_at: a.occurred_at, type: actType(a),
+        })),
+        quoCalls, settings, now,
+      }),
+      target: isAe ? settings.aeDailyCallsTarget : settings.dailyCallsTarget,
+    },
+    emails: {
+      value: todayActs.filter((a) => actType(a) === "email").length,
+      target: isAe ? settings.aeDailyEmailsTarget : settings.dailyEmailsTarget,
+    },
     followups: { value: followupsToday.length, target: settings.dailyFollowupsTarget },
     newLeadsSla: { value: contactedWithinSla.length, target: newLeadsToday.length || settings.dailyNewLeadsTarget, isSla: newLeadsToday.length > 0 },
     tasksCompleted: { value: completedTasksToday.length, target: settings.dailyTasksTarget },
@@ -678,7 +700,6 @@ export interface FunnelStep {
 export async function activityReport(ownerId?: string | null) {
   const { settings, deals, companies, activities } = await fetchCore();
   const now = new Date();
-  const tz = settings.dashboardTimezone;
   const weekAgo = subDays(now, 7);
   const weekAgoMs = weekAgo.getTime();
   const nowMs = now.getTime();
@@ -691,35 +712,47 @@ export async function activityReport(ownerId?: string | null) {
   );
   const t = (a: ActivityRow) => a.activity_type ?? a.kind;
 
+  const { quoCalls: allQuo, owners } = await fetchRepSources(weekAgo.toISOString());
+  const quoCalls = ownerId
+    ? allQuo.filter((c) => c.hubspot_owner_id === ownerId)
+    : allQuo;
+  // Quo is the source of truth for dials by any rep it can account for, so that
+  // rep's HubSpot call rows are dropped rather than added to them.
+  const quoOwners = quoBackedOwners(allQuo);
+  const hsCalls = (type: string) => acts7.filter(
+    (a) => t(a) === type && !(a.owner_id && quoOwners.has(a.owner_id)),
+  ).length;
+
   const activityTotals = {
-    touches: acts7.length,
-    calls: acts7.filter((a) => t(a) === "call").length,
+    touches: acts7.filter((a) => !(a.owner_id && quoOwners.has(a.owner_id) &&
+      (t(a) === "call" || t(a) === "voicemail"))).length + quoCalls.length,
+    calls: hsCalls("call") + quoCalls.length,
     emails: acts7.filter((a) => t(a) === "email").length,
-    voicemails: acts7.filter((a) => t(a) === "voicemail").length,
+    voicemails: hsCalls("voicemail"),
     linkedin: acts7.filter((a) => t(a) === "linkedin").length,
     meetings: acts7.filter((a) => a.kind === "meeting").length,
     inPersonVisits: acts7.filter((a) => t(a) === "in_person_visit").length,
     connected: acts7.filter((a) => a.outcome === "connected").length,
   };
 
-  // Daily breakdown (last 7 LA days).
-  const daily: { day: string; calls: number; emails: number; other: number }[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(nowMs - i * 86400000);
-    const label = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(d);
-    const md = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "numeric", day: "numeric" }).format(d);
-    daily.push({ day: `${label} ${md}`, calls: 0, emails: 0, other: 0 });
-  }
-  const dayIndex = new Map(daily.map((b, i) => [b.day, i]));
-  for (const a of acts7) {
-    const label = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(new Date(a.occurred_at!));
-    const md = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "numeric", day: "numeric" }).format(new Date(a.occurred_at!));
-    const idx = dayIndex.get(`${label} ${md}`);
-    if (idx === undefined) continue;
-    if (t(a) === "call" || t(a) === "voicemail") daily[idx].calls += 1;
-    else if (t(a) === "email") daily[idx].emails += 1;
-    else daily[idx].other += 1;
-  }
+  // Daily breakdown (last 7 local days), split by role so an AE's prospecting
+  // targets and a CSM's account-management targets are each judged on their own.
+  const roleDaily = buildRoleActivity({
+    touches: acts7.map((a) => ({
+      owner_id: a.owner_id, occurred_at: a.occurred_at, type: t(a),
+    })),
+    quoCalls,
+    owners,
+    settings,
+    now,
+  });
+  // Combined series, kept for anything that wants the team as one line.
+  const daily = roleDaily[0].data.map((b, i) => ({
+    day: b.day,
+    calls: b.calls + roleDaily[1].data[i].calls,
+    emails: b.emails + roleDaily[1].data[i].emails,
+    other: b.other + roleDaily[1].data[i].other,
+  }));
 
   // Funnel cohort = deals created in the last 7 days (this week's new business).
   const cohort = deals.filter(
@@ -801,7 +834,7 @@ export async function activityReport(ownerId?: string | null) {
     (d) => d.stage === SALES_STAGES.closedWon && inWeek(d.closed_at)).length;
 
   return {
-    settings, activityTotals, daily, funnel, cohortSize: cohort.length,
+    settings, activityTotals, daily, roleDaily, funnel, cohortSize: cohort.length,
     revenue, casesThisWeek: casesThisWeek.length, newCustomers, dealsWon,
   };
 }

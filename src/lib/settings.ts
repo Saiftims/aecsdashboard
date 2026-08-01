@@ -9,11 +9,17 @@ export interface GtmSettings {
   stalledDealDays: number;
   dashboardTimezone: string;
   slaFirstContactHours: number;
+  /** CSM daily targets. AEs carry their own, higher, prospecting numbers. */
   dailyCallsTarget: number;
   dailyEmailsTarget: number;
+  aeDailyCallsTarget: number;
+  aeDailyEmailsTarget: number;
   dailyFollowupsTarget: number;
   dailyNewLeadsTarget: number;
   dailyTasksTarget: number;
+  /** HubSpot owner id -> role. Anyone not listed is treated as an AE, so a new
+   * rep counts against AE targets the moment they get a HubSpot seat. */
+  repRoles: Record<string, "ae" | "cs" | "exec">;
   hubspotPortalId: string;
   hubspotSalesPipelineId: string;
   aeWeeklyTargets: Record<string, unknown>;
@@ -32,11 +38,19 @@ const DEFAULTS: GtmSettings = {
   stalledDealDays: 14,
   dashboardTimezone: "America/Los_Angeles",
   slaFirstContactHours: 2,
-  dailyCallsTarget: 30,
+  dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
+  aeDailyCallsTarget: 50,
+  aeDailyEmailsTarget: 50,
   dailyFollowupsTarget: 25,
   dailyNewLeadsTarget: 5,
   dailyTasksTarget: 30,
+  repRoles: {
+    "36148171": "cs",    // Chris Sanz
+    "91425496": "exec",  // Saif Altimimi
+    "62117007": "exec",  // Andrew Epps (FlyTech)
+    "35454790": "ae",    // Victoria (departed; kept so her history reads right)
+  },
   hubspotPortalId: "148349267",
   hubspotSalesPipelineId: "default",
   aeWeeklyTargets: {},
@@ -62,6 +76,9 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   sla_first_contact_hours: "slaFirstContactHours",
   daily_calls_target: "dailyCallsTarget",
   daily_emails_target: "dailyEmailsTarget",
+  ae_daily_calls_target: "aeDailyCallsTarget",
+  ae_daily_emails_target: "aeDailyEmailsTarget",
+  rep_roles: "repRoles",
   daily_followups_target: "dailyFollowupsTarget",
   daily_new_leads_target: "dailyNewLeadsTarget",
   daily_tasks_target: "dailyTasksTarget",
@@ -90,8 +107,11 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.healthyCasesPer30d = Number(out.healthyCasesPer30d) || 2;
   out.stalledDealDays = Number(out.stalledDealDays) || 14;
   out.slaFirstContactHours = Number(out.slaFirstContactHours) || 2;
-  out.dailyCallsTarget = Number(out.dailyCallsTarget) || 30;
+  out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
+  out.aeDailyCallsTarget = Number(out.aeDailyCallsTarget) || 50;
+  out.aeDailyEmailsTarget = Number(out.aeDailyEmailsTarget) || 50;
+  if (!out.repRoles || typeof out.repRoles !== "object") out.repRoles = DEFAULTS.repRoles;
   out.dailyFollowupsTarget = Number(out.dailyFollowupsTarget) || 25;
   out.dailyNewLeadsTarget = Number(out.dailyNewLeadsTarget) || 5;
   out.dailyTasksTarget = Number(out.dailyTasksTarget) || 30;

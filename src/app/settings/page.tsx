@@ -52,10 +52,17 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
-          <CardHeader title="AE daily targets" />
+          <CardHeader title="Daily targets by role" />
           <div className="space-y-3 p-4">
-            <SettingField settingKey="daily_calls_target" label="Calls per day" defaultValue={settings.dailyCallsTarget} />
-            <SettingField settingKey="daily_emails_target" label="Emails per day" defaultValue={settings.dailyEmailsTarget} />
+            <p className="text-xs text-zinc-500">
+              AEs prospect and CSMs work a book of accounts, so each role is
+              charted against its own call and email numbers. Anyone not listed
+              in <code>rep_roles</code> counts as an AE.
+            </p>
+            <SettingField settingKey="ae_daily_calls_target" label="AE calls per day" defaultValue={settings.aeDailyCallsTarget} />
+            <SettingField settingKey="ae_daily_emails_target" label="AE emails per day" defaultValue={settings.aeDailyEmailsTarget} />
+            <SettingField settingKey="daily_calls_target" label="CSM calls per day" defaultValue={settings.dailyCallsTarget} />
+            <SettingField settingKey="daily_emails_target" label="CSM emails per day" defaultValue={settings.dailyEmailsTarget} />
             <SettingField settingKey="daily_followups_target" label="Follow-ups completed per day" defaultValue={settings.dailyFollowupsTarget} />
             <SettingField settingKey="daily_new_leads_target" label="New leads contacted per day (fallback when none arrive)" defaultValue={settings.dailyNewLeadsTarget} />
             <SettingField settingKey="daily_tasks_target" label="Tasks completed per day" defaultValue={settings.dailyTasksTarget} />

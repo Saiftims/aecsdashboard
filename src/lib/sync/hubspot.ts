@@ -1,7 +1,8 @@
 /** HubSpot -> Supabase cache sync (idempotent upserts keyed by HubSpot id).
  * Incremental via the search API (hs_lastmodifieddate); full for backfills. */
 import {
-  HubSpotError, hsListAll, hsListModifiedSince, hsRequest, type HsObject,
+  HubSpotError, hsListAll, hsListModifiedSince, hsListOwners, hsRequest,
+  type HsObject,
 } from "@/lib/hubspot/client";
 import { SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
 import { env } from "@/lib/env";
@@ -124,6 +125,18 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
       ? hsListAll(object, props, assoc)
       : hsListModifiedSince(object, props, sinceMs, assoc);
   const assocKnown = makeAssocKnown(mode, sinceMs);
+
+  // ---- owners (small list; keeps per-rep reporting able to name people) ----
+  try {
+    const owners = await hsListOwners();
+    stats.owners = owners.length;
+    if (owners.length) {
+      await sb.from("crm_owners").upsert(owners, { onConflict: "owner_id" });
+    }
+  } catch (e) {
+    // A roster hiccup must not fail the whole sync.
+    console.error("owner sync:", e instanceof Error ? e.message : e);
+  }
 
   // ---- companies ----
   const companies = await fetchObjects("companies", COMPANY_PROPS);

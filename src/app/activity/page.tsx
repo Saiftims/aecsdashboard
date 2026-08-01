@@ -32,7 +32,7 @@ export default async function ActivityPage() {
   ]);
   const revRetention = billing.revenue;
   const useRetention = billing.usage;
-  const { settings, activityTotals, daily, funnel, revenue, cohortSize, casesThisWeek, newCustomers, dealsWon } = report;
+  const { settings, activityTotals, roleDaily, funnel, revenue, cohortSize, casesThisWeek, newCustomers, dealsWon } = report;
   const freq = retention.frequency;
   const scope = user.role === "ae" ? "your" : "team";
   const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
@@ -76,23 +76,35 @@ export default async function ActivityPage() {
         </div>
       </section>
 
-      <Card>
-        <CardHeader
-          title="Daily calls & emails vs targets"
-          action={
-            <span className="text-xs text-zinc-500">
-              targets: {settings.dailyCallsTarget} calls · {settings.dailyEmailsTarget} emails / day
-            </span>
-          }
-        />
-        <div className="p-4">
-          <DailyActivityChart
-            data={daily}
-            callsTarget={settings.dailyCallsTarget}
-            emailsTarget={settings.dailyEmailsTarget}
-          />
-        </div>
-      </Card>
+      <section className="grid gap-4 lg:grid-cols-2">
+        {roleDaily.map((r) => (
+          <Card key={r.role}>
+            <CardHeader
+              title={`${r.label} — daily calls & emails vs targets`}
+              action={
+                <span className="text-xs text-zinc-500">
+                  {r.callsTarget} calls · {r.emailsTarget} emails / day
+                </span>
+              }
+            />
+            <div className="p-4">
+              <DailyActivityChart
+                data={r.data}
+                callsTarget={r.callsTarget}
+                emailsTarget={r.emailsTarget}
+              />
+              <p className="mt-2 text-xs text-zinc-500">
+                {r.people.length
+                  ? <>{r.people.join(", ")} · calls from{" "}
+                      {r.callSource === "quo"
+                        ? "Quo (every dial)"
+                        : "HubSpot logged calls"}</>
+                  : "No activity logged in this role over the last 7 days."}
+              </p>
+            </div>
+          </Card>
+        ))}
+      </section>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">

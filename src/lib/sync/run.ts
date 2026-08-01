@@ -3,9 +3,10 @@ import { supabaseService } from "@/lib/supabase/server";
 import { syncHubSpot } from "@/lib/sync/hubspot";
 import { syncCalendly } from "@/lib/sync/calendly";
 import { computeRollups, syncCases } from "@/lib/sync/cases";
+import { syncQuo } from "@/lib/sync/quo";
 
 export type SyncKind =
-  | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup";
+  | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup" | "quo";
 
 export async function runSync(kinds: SyncKind[]) {
   const sb = supabaseService();
@@ -33,6 +34,8 @@ export async function runSync(kinds: SyncKind[]) {
         stats = await syncHubSpot("incremental", sinceMs);
       } else if (kind === "calendly") {
         stats = await syncCalendly();
+      } else if (kind === "quo") {
+        stats = await syncQuo();
       } else if (kind === "cases") {
         stats = await syncCases();
       } else if (kind === "rollup") {

@@ -170,6 +170,45 @@ export async function hsListModifiedSince(
   return out;
 }
 
+export interface HsOwnerRow {
+  owner_id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  archived: boolean;
+}
+
+/** The full owner roster, including archived seats (their ids still appear as
+ * history on activity logged before they left). */
+export async function hsListOwners(): Promise<HsOwnerRow[]> {
+  const out: HsOwnerRow[] = [];
+  for (const archived of [false, true]) {
+    let after: string | undefined;
+    do {
+      const params: Record<string, string> = { limit: "100", archived: String(archived) };
+      if (after) params.after = after;
+      const page = await hsRequest<{
+        results: {
+          id: string; email?: string | null;
+          firstName?: string | null; lastName?: string | null;
+        }[];
+        paging?: { next?: { after?: string } };
+      }>("GET", "/crm/v3/owners", undefined, params);
+      for (const o of page.results ?? []) {
+        out.push({
+          owner_id: String(o.id),
+          email: o.email ?? null,
+          first_name: o.firstName ?? null,
+          last_name: o.lastName ?? null,
+          archived,
+        });
+      }
+      after = page.paging?.next?.after;
+    } while (after);
+  }
+  return out;
+}
+
 /** Association ids for one object (v4). */
 export async function hsAssociations(
   fromObject: string,

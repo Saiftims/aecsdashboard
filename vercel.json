@@ -2,6 +2,7 @@
   "regions": ["lhr1"],
   "crons": [
     { "path": "/api/cron/hubspot", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/quo", "schedule": "10 * * * *" },
     { "path": "/api/cron/cases", "schedule": "0 5 * * *" }
   ]
 }
