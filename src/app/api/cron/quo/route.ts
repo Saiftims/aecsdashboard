@@ -10,8 +10,10 @@ function authorized(req: NextRequest): boolean {
   return req.headers.get("authorization") === `Bearer ${secret}`;
 }
 
-/** Hourly: pull Quo calls, the source of truth for dial activity. */
+/** Hourly: pull Quo calls, the source of truth for dial activity.
+ * `?full=1` re-walks every known number instead of only threads that moved. */
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  return NextResponse.json(await runSync(["quo"]));
+  const full = req.nextUrl.searchParams.get("full") === "1";
+  return NextResponse.json(await runSync([full ? "quo_full" : "quo"]));
 }

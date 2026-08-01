@@ -22,7 +22,9 @@ async function ownerIdByEmail(): Promise<Map<string, string>> {
   return out;
 }
 
-export async function syncQuo() {
+/** @param sinceMs only walk conversation threads touched since this time.
+ * Omit for a full backfill. */
+export async function syncQuo(sinceMs?: number) {
   const sb = supabaseService();
 
   const phones = await listPhoneNumbers();
@@ -44,7 +46,7 @@ export async function syncQuo() {
     phones.map((p) => [p.id, p.formattedNumber ?? p.number ?? ""]),
   );
 
-  const participants = await listParticipants();
+  const participants = await listParticipants({ sinceMs });
   const byId = new Map<string, QuoCall & { participant: string }>();
   let errors = 0;
   for (const part of participants) {
@@ -94,6 +96,7 @@ export async function syncQuo() {
   }
 
   return {
+    mode: sinceMs ? "incremental" : "full",
     lines: phones.length,
     participants: participants.length,
     calls: rows.length,

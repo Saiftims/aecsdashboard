@@ -6,7 +6,8 @@ import { computeRollups, syncCases } from "@/lib/sync/cases";
 import { syncQuo } from "@/lib/sync/quo";
 
 export type SyncKind =
-  | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup" | "quo";
+  | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup"
+  | "quo" | "quo_full";
 
 export async function runSync(kinds: SyncKind[]) {
   const sb = supabaseService();
@@ -34,8 +35,20 @@ export async function runSync(kinds: SyncKind[]) {
         stats = await syncHubSpot("incremental", sinceMs);
       } else if (kind === "calendly") {
         stats = await syncCalendly();
-      } else if (kind === "quo") {
-        stats = await syncQuo();
+      } else if (kind === "quo" || kind === "quo_full") {
+        // Routine runs only revisit threads that moved since the last success,
+        // because cost is participants x lines and grows with every new number
+        // a rep dials. A day of overlap covers a late-landing call.
+        let sinceMs: number | undefined;
+        if (kind === "quo") {
+          const { data: last } = await sb.from("sync_runs")
+            .select("finished_at").in("kind", ["quo", "quo_full"]).eq("status", "ok")
+            .order("finished_at", { ascending: false }).limit(1).maybeSingle();
+          if (last?.finished_at) {
+            sinceMs = new Date(last.finished_at).getTime() - 24 * 60 * 60 * 1000;
+          }
+        }
+        stats = await syncQuo(sinceMs);
       } else if (kind === "cases") {
         stats = await syncCases();
       } else if (kind === "rollup") {

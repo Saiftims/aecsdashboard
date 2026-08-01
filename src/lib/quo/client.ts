@@ -84,17 +84,49 @@ export async function listPhoneNumbers(): Promise<QuoPhoneNumber[]> {
   return res.data ?? [];
 }
 
-/** Counterparty numbers, from conversation threads plus the contact book. */
-export async function listParticipants(maxPages = 20): Promise<string[]> {
+interface QuoConversation {
+  participants?: string[];
+  lastActivityAt?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+
+function conversationTouchedAt(c: QuoConversation): number | null {
+  for (const v of [c.lastActivityAt, c.updatedAt, c.createdAt]) {
+    if (v) {
+      const t = Date.parse(v);
+      if (!Number.isNaN(t)) return t;
+    }
+  }
+  return null;
+}
+
+/** Counterparty numbers to ask each line about.
+ *
+ * Cost is participants x lines, so a full walk grows without bound as reps
+ * dial more people. Passing `sinceMs` keeps a routine sync to threads that
+ * have moved since the last run; the contact book (numbers whose thread has
+ * aged out of the list) is only worth its pages on a full backfill.
+ */
+export async function listParticipants(
+  { sinceMs, maxPages = 20 }: { sinceMs?: number; maxPages?: number } = {},
+): Promise<string[]> {
   const numbers = new Set<string>();
-  const convs = await paginate<{ participants?: string[] }>("/v1/conversations", { maxPages });
-  for (const c of convs) for (const p of c.participants ?? []) if (p) numbers.add(p);
-  // The contact book turns up numbers whose thread has aged out of the list.
-  const contacts = await paginate<{
-    defaultFields?: { phoneNumbers?: { value?: string }[] };
-  }>("/v1/contacts", { pageSize: 50, maxPages }); // contacts cap at 50 per page
-  for (const c of contacts) {
-    for (const f of c.defaultFields?.phoneNumbers ?? []) if (f.value) numbers.add(f.value);
+  const convs = await paginate<QuoConversation>("/v1/conversations", { maxPages });
+  for (const c of convs) {
+    // A thread with no usable timestamp is always included: missing the call is
+    // worse than one extra lookup.
+    const touched = conversationTouchedAt(c);
+    if (sinceMs && touched !== null && touched < sinceMs) continue;
+    for (const p of c.participants ?? []) if (p) numbers.add(p);
+  }
+  if (!sinceMs) {
+    const contacts = await paginate<{
+      defaultFields?: { phoneNumbers?: { value?: string }[] };
+    }>("/v1/contacts", { pageSize: 50, maxPages }); // contacts cap at 50 per page
+    for (const c of contacts) {
+      for (const f of c.defaultFields?.phoneNumbers ?? []) if (f.value) numbers.add(f.value);
+    }
   }
   return [...numbers];
 }
