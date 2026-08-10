@@ -1,7 +1,7 @@
 /** Drill-down lists behind the dashboard stat tiles. Each metric returns the
  * underlying records with links to the related firm/deal. */
 import { differenceInDays, subDays } from "date-fns";
-import { isOtherChannel, isSms } from "@/lib/activity-channels";
+import { bucketOf, isOutreach, isSms } from "@/lib/activity-channels";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
@@ -192,9 +192,15 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
   // shorter than the Texts tile: that counts every text Quo saw, including ones
   // to numbers HubSpot has no contact for.
   sms_7d: { label: "Texts (7d)", rows: (ctx) => activityRows(ctx, (a) => isSms(a.activity_type)) },
+  // Everything that is not a dial, an email or a text - the DMs plus meetings,
+  // demos and visits - matching the band of the same name on the daily charts.
   other_channels_7d: {
     label: "Other channels (7d)",
-    rows: (ctx) => activityRows(ctx, (a) => isOtherChannel(a.activity_type)),
+    rows: (ctx) => activityRows(
+      ctx,
+      (a) => isOutreach(a.kind, a.activity_type) &&
+        bucketOf(a.activity_type ?? a.kind) === "other",
+    ),
   },
   visits_7d: { label: "In-person visits (7d)", rows: (ctx) => activityRows(ctx, (a) => a.activity_type === "in_person_visit") },
   connected_7d: { label: "Connected conversations (7d)", rows: (ctx) => activityRows(ctx, (a) => a.outcome === "connected") },

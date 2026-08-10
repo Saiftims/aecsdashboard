@@ -32,12 +32,12 @@ export function DailyActivityChart({
 }: {
   data: {
     day: string; calls: number; emails: number;
-    sms?: number; social?: number; other?: number; total?: number;
+    sms?: number; other?: number; total?: number;
   }[];
   activityTarget?: number;
 }) {
   const height = (d: (typeof data)[number]) =>
-    d.total ?? d.calls + d.emails + (d.sms ?? 0) + (d.social ?? 0) + (d.other ?? 0);
+    d.total ?? d.calls + d.emails + (d.sms ?? 0) + (d.other ?? 0);
   // Keep the target line in frame even on a quiet week, and leave headroom
   // above the tallest stack so its label is readable.
   const maxVal = Math.max(activityTarget ?? 0, ...data.map(height), 1);
@@ -48,9 +48,9 @@ export function DailyActivityChart({
       get: (d: (typeof data)[number]) => d.emails },
     { key: "sms", name: "Texts", fill: "hsl(38 92% 50%)", always: false,
       get: (d: (typeof data)[number]) => d.sms },
-    { key: "social", name: "Other channels", fill: "hsl(280 55% 58%)", always: false,
-      get: (d: (typeof data)[number]) => d.social },
-    { key: "other", name: "Meetings & other", fill: "hsl(215 15% 65%)", always: false,
+    // DMs, meetings, demos and visits together. Split out, each was a sliver
+    // too thin to read on the stack.
+    { key: "other", name: "Other channels", fill: "hsl(280 55% 58%)", always: false,
       get: (d: (typeof data)[number]) => d.other },
   ];
   // Hide a channel nobody used, so a team that only calls and emails still

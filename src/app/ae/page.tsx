@@ -29,7 +29,7 @@ export default async function AePage() {
             label="Activity today"
             value={today.activity.value}
             target={today.activity.target}
-            sub={`${today.activity.breakdown.calls} calls · ${today.activity.breakdown.emails} emails · ${today.activity.breakdown.sms} texts · ${today.activity.breakdown.social + today.activity.breakdown.other} other · 7-day view →`}
+            sub={`${today.activity.breakdown.calls} calls · ${today.activity.breakdown.emails} emails · ${today.activity.breakdown.sms} texts · ${today.activity.breakdown.other} other · 7-day view →`}
             href="/activity"
           />
           <TargetCard label="Follow-ups completed" value={today.followups.value} target={today.followups.target} sub="due tasks cleared · 7-day view →" href="/activity" />

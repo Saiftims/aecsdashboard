@@ -35,6 +35,38 @@ export function supabaseService(): SupabaseClient {
   return service;
 }
 
+/** Read a whole table, in pages.
+ *
+ * PostgREST answers at most 1000 rows per request and says nothing about the
+ * rest, so a plain `.select()` on a table that has outgrown that silently
+ * returns a slice - and with no ORDER BY, an arbitrary one. That is not a
+ * capacity problem you notice: every figure downstream just comes out low. It
+ * cost the Activity page roughly a third of a CSM's week once `activities`
+ * passed 1000 rows.
+ *
+ * Throws rather than returning a partial table: wrong numbers presented as
+ * right are worse than an error.
+ */
+export async function selectAll<T>(
+  table: string,
+  columns = "*",
+  orderBy = "hubspot_id",
+): Promise<T[]> {
+  const sb = supabaseService();
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from(table)
+      .select(columns)
+      .order(orderBy, { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`selectAll(${table}): ${error.message}`);
+    out.push(...((data ?? []) as unknown as T[]));
+    if (!data || data.length < PAGE) return out;
+  }
+}
+
 export interface AppUser {
   id: string;
   email: string;

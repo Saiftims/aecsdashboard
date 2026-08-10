@@ -12,7 +12,7 @@
  * stay on HubSpot, which sees all of them. Social DMs (LinkedIn, Instagram, ...)
  * exist only where a rep logged them; see lib/activity-channels.ts.
  */
-import { isOtherChannel, isSms } from "@/lib/activity-channels";
+import { bucketOf, isSms } from "@/lib/activity-channels";
 import { supabaseService } from "@/lib/supabase/server";
 import type { GtmSettings } from "@/lib/settings";
 
@@ -46,10 +46,9 @@ export interface DayBucket {
   emails: number;
   /** SMS/texts, from Quo where available. */
   sms: number;
-  /** LinkedIn / Instagram / Facebook / WhatsApp / other logged DMs. */
-  social: number;
-  /** Meetings, demos, visits and any other logged touch that is not a channel
-   * above. Unmarked notes are excluded - see buildRoleActivity. */
+  /** Every other channel in one band: LinkedIn / Instagram / Facebook /
+   * WhatsApp DMs, plus meetings, demos and in-person visits. Unmarked notes
+   * and tasks are excluded - see buildRoleActivity. */
   other: number;
   /** The stack height, and the number judged against the activity target. */
   total: number;
@@ -148,7 +147,7 @@ export function emptyDays(days: number, tz: string, now = new Date()): DayBucket
   for (let i = days - 1; i >= 0; i--) {
     out.push({
       day: localDayLabel(new Date(now.getTime() - i * 86400000), tz),
-      calls: 0, emails: 0, sms: 0, social: 0, other: 0, total: 0,
+      calls: 0, emails: 0, sms: 0, other: 0, total: 0,
     });
   }
   return out;
@@ -157,7 +156,11 @@ export function emptyDays(days: number, tz: string, now = new Date()): DayBucket
 interface TouchRow {
   owner_id: string | null;
   occurred_at: string | null;
+  /** Derived channel, falling back to the HubSpot object name. */
   type: string;
+  /** HubSpot object name. Optional, but without it a task the quick logger
+   * stamped with a type (`walk_in`) reads as a channel and counts as contact. */
+  kind?: string | null;
 }
 
 /** Build one series per role over the last `days` days. */
@@ -208,7 +211,7 @@ export function buildRoleActivity({
     // A logged touch always carries a type, so a bare "note" is either the
     // agent's own context note or a jotting - not outreach. Counting those
     // would inflate the day's total against the activity target.
-    if (t.type === "note" || t.type === "task") continue;
+    if (t.kind === "task" || t.type === "note" || t.type === "task") continue;
     const role = roleOf(t.owner_id, settings);
     if (role === "exec") continue;
     // Quo owns this rep's dial and text counts; counting HubSpot's copy of the
@@ -218,11 +221,7 @@ export function buildRoleActivity({
     if (isSms(t.type) && quoTexts) continue;
     const b = bucket(role, t.occurred_at);
     if (!b) continue;
-    if (isCall) b.calls += 1;
-    else if (t.type === "email") b.emails += 1;
-    else if (isSms(t.type)) b.sms += 1;
-    else if (isOtherChannel(t.type)) b.social += 1;
-    else b.other += 1;
+    b[bucketOf(t.type)] += 1;
     if (t.owner_id) contributors.get(role)!.add(t.owner_id);
   }
 
@@ -257,7 +256,7 @@ export function buildRoleActivity({
     s.people = [...contributors.get(role)!]
       .map((id) => ownerName(ownerById.get(id), id))
       .sort();
-    for (const b of s.data) b.total = b.calls + b.emails + b.sms + b.social + b.other;
+    for (const b of s.data) b.total = b.calls + b.emails + b.sms + b.other;
     s.dailyAverage = s.data.length
       ? Math.round(s.data.reduce((n, b) => n + b.total, 0) / s.data.length)
       : 0;
@@ -278,7 +277,7 @@ export function activityTodayFor({
   quoMessages?: QuoMessageRow[];
   settings: GtmSettings;
   now?: Date;
-}): { total: number; calls: number; emails: number; sms: number; social: number; other: number } {
+}): { total: number; calls: number; emails: number; sms: number; other: number } {
   const tz = settings.dashboardTimezone;
   const today = localDayLabel(now, tz);
   const quoOwners = quoBackedOwners(quoCalls);
@@ -286,18 +285,14 @@ export function activityTodayFor({
   const inScope = (id: string | null) => !ownerId || id === ownerId;
   const isTodayFor = (ts: string | null) => Boolean(ts && localDayLabel(ts, tz) === today);
 
-  const out = { total: 0, calls: 0, emails: 0, sms: 0, social: 0, other: 0 };
+  const out = { total: 0, calls: 0, emails: 0, sms: 0, other: 0 };
   for (const t of touches) {
     if (!isTodayFor(t.occurred_at) || !inScope(t.owner_id)) continue;
-    if (t.type === "note" || t.type === "task") continue;
+    if (t.kind === "task" || t.type === "note" || t.type === "task") continue;
     const isCall = t.type === "call" || t.type === "voicemail";
     if (isCall && t.owner_id && quoOwners.has(t.owner_id)) continue;
     if (isSms(t.type) && quoTexts) continue;
-    if (isCall) out.calls += 1;
-    else if (t.type === "email") out.emails += 1;
-    else if (isSms(t.type)) out.sms += 1;
-    else if (isOtherChannel(t.type)) out.social += 1;
-    else out.other += 1;
+    out[bucketOf(t.type)] += 1;
   }
   for (const c of quoCalls) {
     if (isTodayFor(c.created_at) && inScope(c.hubspot_owner_id)) out.calls += 1;
@@ -305,7 +300,7 @@ export function activityTodayFor({
   for (const m of quoMessages) {
     if (isTodayFor(m.created_at) && inScope(m.hubspot_owner_id)) out.sms += 1;
   }
-  out.total = out.calls + out.emails + out.sms + out.social + out.other;
+  out.total = out.calls + out.emails + out.sms + out.other;
   return out;
 }
 

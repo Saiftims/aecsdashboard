@@ -33,6 +33,44 @@ export function isSms(activityType: string | null | undefined): boolean {
   return activityType === SMS_CHANNEL;
 }
 
+/** Segments of the daily activity stack. */
+export type ActivityBucket = "calls" | "emails" | "sms" | "other";
+
+/** Which segment a touch belongs to.
+ *
+ * Everything that is not a dial, an email or a text - the social DMs, but also
+ * meetings, demos and in-person visits - is reported as one "other" bucket. The
+ * volume in any single one is far too small to read as its own band on a
+ * stacked chart, and the rep is measured on total contact anyway.
+ *
+ * Callers must drop non-outreach rows first; see `isOutreach`.
+ */
+export function bucketOf(activityType: string | null | undefined): ActivityBucket {
+  if (activityType === "call" || activityType === "voicemail") return "calls";
+  if (activityType === "email") return "emails";
+  if (isSms(activityType)) return "sms";
+  return "other";
+}
+
+/** Whether a logged record counts as contact with a lead.
+ *
+ * A real touch always carries a channel, so a note with no channel on it is the
+ * agent's own "Lead context:" note or a rep's jotting. A task is a reminder to
+ * make contact rather than contact - including one the quick logger stamped
+ * with a type, e.g. a `walk_in` task, which is a plan to visit an office.
+ *
+ * `kind` is the HubSpot object (call, email, meeting, note, task,
+ * communication); `activityType` is the channel we derived for it.
+ */
+export function isOutreach(
+  kind: string | null | undefined,
+  activityType: string | null | undefined,
+): boolean {
+  if (kind === "task") return false;
+  if (kind === "note") return Boolean(activityType);
+  return true;
+}
+
 export const CHANNEL_LABELS: Record<string, string> = {
   sms: "SMS/Text",
   linkedin: "LinkedIn",

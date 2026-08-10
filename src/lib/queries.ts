@@ -3,7 +3,7 @@
 import { differenceInDays, startOfMonth, subDays } from "date-fns";
 import { median } from "@/lib/metrics";
 import {
-  OTHER_CHANNELS, isOtherChannel, isSms, type OtherChannel,
+  OTHER_CHANNELS, bucketOf, isSms, type OtherChannel,
 } from "@/lib/activity-channels";
 import {
   SALES_STAGES, hubspotDealUrl, type ActivationStage,
@@ -13,7 +13,7 @@ import {
   quoBackedOwners, roleOf, textsComeFromQuo,
 } from "@/lib/rep-activity";
 import { loadSettings } from "@/lib/settings";
-import { supabaseService } from "@/lib/supabase/server";
+import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 export interface DealRow {
   hubspot_id: string;
@@ -179,24 +179,38 @@ export function sameLocalDay(a: string | Date, b: string | Date, tz: string): bo
   return fmt.format(new Date(a)) === fmt.format(new Date(b));
 }
 
+export interface ContactRow {
+  hubspot_id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  company_hubspot_id: string | null;
+  owner_id: string | null;
+  lifecycle_stage: string | null;
+  properties: Record<string, string | null>;
+}
+
 export async function fetchCore() {
-  const sb = supabaseService();
+  // Every read here is paged: `activities` passed PostgREST's 1000-row ceiling
+  // in August 2026 and an unbounded select had been quietly dropping half of
+  // it. The rest are smaller but grow the same way.
   const [settings, deals, companies, contacts, activities] = await Promise.all([
     loadSettings(),
-    sb.from("deals").select("*").then((r) => (r.data ?? []) as DealRow[]),
-    sb.from("companies").select("*").then((r) => (r.data ?? []) as CompanyRow[]),
-    sb.from("contacts").select("hubspot_id, email, first_name, last_name, company_hubspot_id, owner_id, lifecycle_stage, properties"),
+    selectAll<DealRow>("deals"),
+    selectAll<CompanyRow>("companies"),
+    selectAll<ContactRow>("contacts",
+      "hubspot_id, email, first_name, last_name, company_hubspot_id, owner_id, " +
+      "lifecycle_stage, properties"),
     // Note: body/properties intentionally excluded - large payloads (215+ note
     // bodies) that no dashboard aggregate needs.
-    sb.from("activities").select(
+    selectAll<ActivityRow>("activities",
       "hubspot_id, kind, owner_id, subject, outcome, activity_type, " +
       "contact_hubspot_id, deal_hubspot_id, company_hubspot_id, " +
       "occurred_at, due_at, completed, " +
       "completed_at:properties->>hs_task_completion_date, " +
-      "modified_at:properties->>hs_lastmodifieddate",
-    ).then((r) => (r.data ?? []) as unknown as ActivityRow[]),
+      "modified_at:properties->>hs_lastmodifieddate"),
   ]);
-  return { settings, deals, companies, contacts: contacts.data ?? [], activities };
+  return { settings, deals, companies, contacts, activities };
 }
 
 const OPEN_SALES_STAGES = new Set<string>([
@@ -551,7 +565,7 @@ export async function aeDashboard(ownerId?: string | null) {
   const role = roleOf(ownerId ?? null, settings);
   const isAe = role !== "cs";
   const todayTouches = todayActs.map((a) => ({
-    owner_id: a.owner_id, occurred_at: a.occurred_at, type: actType(a),
+    owner_id: a.owner_id, occurred_at: a.occurred_at, type: actType(a), kind: a.kind,
   }));
 
   // The rep is measured on total activity, not on each channel: hitting the
@@ -668,7 +682,9 @@ export async function aeDashboard(ownerId?: string | null) {
       calls: typeCount("call"), emails: typeCount("email"),
       voicemails: typeCount("voicemail"), linkedin: typeCount("linkedin"),
       sms: typeCount("sms"),
-      otherChannels: weekActs.filter((a) => isOtherChannel(actType(a))).length,
+      otherChannels: weekActs.filter(
+        (a) => isMeaningfulTouch(a) && bucketOf(actType(a)) === "other",
+      ).length,
       inPersonVisits: typeCount("in_person_visit"),
       connected: weekActs.filter((a) => a.outcome === "connected").length,
       qualified: salesDeals.filter((d) => d.stage === SALES_STAGES.qualified).length,
@@ -766,9 +782,12 @@ export async function activityReport(ownerId?: string | null) {
     meetings: acts7.filter((a) => a.kind === "meeting").length,
     inPersonVisits: acts7.filter((a) => t(a) === "in_person_visit").length,
     connected: acts7.filter((a) => a.outcome === "connected").length,
-    // LinkedIn/Instagram/Facebook/WhatsApp/other DMs, reported as one bucket
-    // plus the per-network split behind it.
-    otherChannels: acts7.filter((a) => isOtherChannel(t(a))).length,
+    // Everything that is not a dial, an email or a text: the DMs plus meetings,
+    // demos and visits. Matches the "Other channels" band on the daily charts.
+    // `byChannel` is the per-network split of the DM part.
+    otherChannels: acts7.filter(
+      (a) => isMeaningfulTouch(a) && bucketOf(t(a)) === "other",
+    ).length,
     byChannel,
   };
 
@@ -776,7 +795,7 @@ export async function activityReport(ownerId?: string | null) {
   // targets and a CSM's account-management targets are each judged on their own.
   const roleDaily = buildRoleActivity({
     touches: acts7.map((a) => ({
-      owner_id: a.owner_id, occurred_at: a.occurred_at, type: t(a),
+      owner_id: a.owner_id, occurred_at: a.occurred_at, type: t(a), kind: a.kind,
     })),
     quoCalls,
     quoMessages,
@@ -792,7 +811,6 @@ export async function activityReport(ownerId?: string | null) {
       calls: b.calls + o.calls,
       emails: b.emails + o.emails,
       sms: b.sms + o.sms,
-      social: b.social + o.social,
       other: b.other + o.other,
       total: b.total + o.total,
     };

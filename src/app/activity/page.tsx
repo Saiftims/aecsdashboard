@@ -37,6 +37,11 @@ export default async function ActivityPage() {
   const freq = retention.frequency;
   const scope = user.role === "ae" ? "your" : "team";
   const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  // Only the networks actually used, so a quiet week isn't a row of zeroes.
+  const dmSplit = OTHER_CHANNELS
+    .filter((c) => activityTotals.byChannel[c] > 0)
+    .map((c) => `${CHANNEL_LABELS[c]} ${activityTotals.byChannel[c]}`)
+    .join(" · ");
 
   return (
     <div className="space-y-6">
@@ -79,10 +84,9 @@ export default async function ActivityPage() {
         </div>
         <p className="mt-2 text-xs text-zinc-500">
           Texts come from Quo, the same source as dials. &ldquo;Other
-          channels&rdquo; is every DM a rep logged:{" "}
-          {OTHER_CHANNELS.map((c) => `${CHANNEL_LABELS[c]} ${activityTotals.byChannel[c]}`)
-            .join(" · ")}
-          .
+          channels&rdquo; is every touch that is not a dial, an email or a text
+          — the DMs a rep logged plus meetings, demos and visits.
+          {dmSplit ? <> DMs this week: {dmSplit}.</> : null}
         </p>
       </section>
 

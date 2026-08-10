@@ -10,7 +10,7 @@ const iso = (hoursAgo: number) =>
 const settings = { ...DEFAULT_SETTINGS, dashboardTimezone: "America/Los_Angeles" };
 
 const build = (
-  touches: { owner_id: string | null; occurred_at: string; type: string }[],
+  touches: { owner_id: string | null; occurred_at: string; type: string; kind?: string }[],
   quoCalls: { call_id: string; hubspot_owner_id: string | null; created_at: string }[] = [],
   quoMessages: { message_id: string; hubspot_owner_id: string | null; created_at: string }[] = [],
 ) =>
@@ -22,7 +22,7 @@ const build = (
   });
 
 const total = (r: ReturnType<typeof build>, role: "ae" | "cs",
-               key: "calls" | "emails" | "sms" | "social" | "other" | "total") =>
+               key: "calls" | "emails" | "sms" | "other" | "total") =>
   r.find((s) => s.role === role)!.data.reduce((n, d) => n + d[key], 0);
 
 describe("texts", () => {
@@ -68,23 +68,31 @@ describe("texts", () => {
 });
 
 describe("other channels", () => {
-  it("buckets social DMs together, apart from calls/emails/texts", () => {
+  it("buckets DMs and meetings together, apart from calls/emails/texts", () => {
+    // One band: split out, each of these was a sliver too thin to read.
     const r = build([
       { owner_id: ALEX, occurred_at: iso(2), type: "linkedin" },
       { owner_id: ALEX, occurred_at: iso(3), type: "instagram" },
       { owner_id: ALEX, occurred_at: iso(4), type: "facebook" },
       { owner_id: ALEX, occurred_at: iso(5), type: "whatsapp" },
       { owner_id: ALEX, occurred_at: iso(6), type: "other" },
+      { owner_id: ALEX, occurred_at: iso(7), type: "meeting", kind: "meeting" },
+      { owner_id: ALEX, occurred_at: iso(8), type: "in_person_visit", kind: "meeting" },
     ]);
-    expect(total(r, "ae", "social")).toBe(5);
-    expect(total(r, "ae", "other")).toBe(0);
+    expect(total(r, "ae", "other")).toBe(7);
     expect(total(r, "ae", "calls")).toBe(0);
+    expect(total(r, "ae", "emails")).toBe(0);
+    expect(total(r, "ae", "sms")).toBe(0);
   });
 
-  it("puts meetings in the leftover bucket, not in social", () => {
-    const r = build([{ owner_id: ALEX, occurred_at: iso(2), type: "meeting" }]);
-    expect(total(r, "ae", "social")).toBe(0);
+  it("still excludes a task the quick logger stamped with a type", () => {
+    // A walk_in task is a plan to visit an office, not a visit.
+    const r = build([
+      { owner_id: ALEX, occurred_at: iso(2), type: "walk_in", kind: "task" },
+      { owner_id: ALEX, occurred_at: iso(3), type: "linkedin", kind: "note" },
+    ]);
     expect(total(r, "ae", "other")).toBe(1);
+    expect(total(r, "ae", "total")).toBe(1);
   });
 });
 
@@ -98,7 +106,7 @@ describe("activity target", () => {
       [{ message_id: "m1", hubspot_owner_id: ALEX, created_at: iso(2) }],
     );
     const day = r.find((s) => s.role === "ae")!.data.find((d) => d.total > 0)!;
-    expect(day).toMatchObject({ calls: 1, emails: 1, sms: 1, social: 1, other: 1 });
+    expect(day).toMatchObject({ calls: 1, emails: 1, sms: 1, other: 2 });
     expect(day.total).toBe(5);
     expect(total(r, "ae", "total")).toBe(5);
   });
@@ -155,7 +163,7 @@ describe("activityTodayFor", () => {
       [{ call_id: "c1", hubspot_owner_id: ALEX, created_at: iso(1) }],
       [{ message_id: "m1", hubspot_owner_id: ALEX, created_at: iso(3) }],
     );
-    expect(r).toMatchObject({ calls: 1, emails: 1, sms: 1, social: 1, total: 4 });
+    expect(r).toMatchObject({ calls: 1, emails: 1, sms: 1, other: 1, total: 4 });
   });
 
   it("ignores yesterday, other reps and unmarked notes", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  CHANNEL_LABELS, HS_COMMUNICATION_CHANNELS, OTHER_CHANNELS, channelFromText,
-  isOtherChannel, isSms,
+  CHANNEL_LABELS, HS_COMMUNICATION_CHANNELS, OTHER_CHANNELS, bucketOf,
+  channelFromText, isOtherChannel, isOutreach, isSms,
 } from "@/lib/activity-channels";
 
 describe("channelFromText", () => {
@@ -63,5 +63,38 @@ describe("channel buckets", () => {
     }
     expect(HS_COMMUNICATION_CHANNELS.LINKEDIN_MESSAGE).toBe("linkedin");
     expect(HS_COMMUNICATION_CHANNELS.SMS).toBe("sms");
+  });
+});
+
+describe("bucketOf", () => {
+  it("puts dials, emails and texts in their own bands", () => {
+    expect(bucketOf("call")).toBe("calls");
+    expect(bucketOf("voicemail")).toBe("calls");
+    expect(bucketOf("email")).toBe("emails");
+    expect(bucketOf("sms")).toBe("sms");
+  });
+
+  it("collects DMs, meetings and visits into one 'other' band", () => {
+    for (const t of ["linkedin", "instagram", "facebook", "whatsapp", "other",
+                     "meeting", "demo", "in_person_visit", "follow_up"]) {
+      expect(bucketOf(t)).toBe("other");
+    }
+  });
+});
+
+describe("isOutreach", () => {
+  it("counts a logged message on any channel", () => {
+    expect(isOutreach("call", "call")).toBe(true);
+    expect(isOutreach("meeting", null)).toBe(true);
+    expect(isOutreach("communication", "linkedin")).toBe(true);
+    expect(isOutreach("note", "instagram")).toBe(true);
+  });
+
+  it("rejects a bare note and every task", () => {
+    // A note with no channel is the agent's own "Lead context:" note; a task is
+    // a reminder to make contact, including one stamped with a type.
+    expect(isOutreach("note", null)).toBe(false);
+    expect(isOutreach("task", null)).toBe(false);
+    expect(isOutreach("task", "walk_in")).toBe(false);
   });
 });
