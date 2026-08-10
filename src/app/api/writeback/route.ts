@@ -43,7 +43,8 @@ const activationMoveSchema = z.object({
 const logActivitySchema = z.object({
   action: z.literal("log_activity"),
   kind: z.enum(["call", "meeting", "note"]),
-  activityType: z.enum(["call", "email", "voicemail", "linkedin", "demo",
+  activityType: z.enum(["call", "email", "voicemail", "sms", "linkedin",
+                        "instagram", "facebook", "whatsapp", "demo",
                         "in_person_visit", "follow_up", "cs_touch", "other"]),
   outcome: z.string().min(1),
   summary: z.string().min(1),

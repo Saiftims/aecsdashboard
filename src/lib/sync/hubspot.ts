@@ -5,6 +5,7 @@ import {
   type HsObject,
 } from "@/lib/hubspot/client";
 import { SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
+import { HS_COMMUNICATION_CHANNELS, channelFromText } from "@/lib/activity-channels";
 import { env } from "@/lib/env";
 import { supabaseService } from "@/lib/supabase/server";
 
@@ -71,6 +72,12 @@ const ENGAGEMENTS: Record<string, string[]> = {
   // fetch 403s and is skipped gracefully - everything else still syncs.
   emails: ["hs_timestamp", "hs_email_subject", "hs_email_direction",
            "hs_email_status", "hubspot_owner_id"],
+  // SMS / WhatsApp / LinkedIn messages that arrive through a connected HubSpot
+  // channel. The portal has none today (so this returns nothing), but wiring it
+  // now means such touches classify themselves the day one is connected.
+  communications: ["hs_timestamp", "hs_communication_body",
+                   "hs_communication_channel_type", "hs_communication_logged_from",
+                   "hubspot_owner_id"],
 };
 
 function assocIds(o: HsObject, kind: string): string[] {
@@ -244,13 +251,14 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
       rows.map((a) => {
         const body =
           a.properties.hs_call_body ?? a.properties.hs_meeting_body ??
-          a.properties.hs_note_body ?? a.properties.hs_task_body ?? null;
+          a.properties.hs_note_body ?? a.properties.hs_task_body ??
+          a.properties.hs_communication_body ?? null;
         const subject =
           a.properties.hs_call_title ?? a.properties.hs_meeting_title ??
           a.properties.hs_task_subject ?? a.properties.hs_email_subject ?? null;
         return {
           hubspot_id: a.id,
-          kind: kind.slice(0, -1), // call/meeting/note/task
+          kind: kind.slice(0, -1), // call/meeting/note/task/communication
           owner_id: a.properties.hubspot_owner_id,
           subject,
           body,
@@ -260,7 +268,18 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
             a.properties.hs_meeting_outcome ??
             a.properties.hs_email_direction ??
             null,
-          activity_type: parseMarker(body, "type"),
+          // The dashboard's own logger writes a [type:...] marker. Failing
+          // that: a connected channel names itself, a custom HubSpot activity
+          // type is honoured if the portal ever defines one, and finally a rep
+          // logging straight into HubSpot can just open the note with the
+          // channel ("LinkedIn: ...", "Texted - ...").
+          activity_type:
+            parseMarker(body, "type") ??
+            HS_COMMUNICATION_CHANNELS[
+              a.properties.hs_communication_channel_type ?? ""] ??
+            (a.properties.hs_activity_type || null) ??
+            channelFromText(subject) ??
+            channelFromText(body),
           contact_hubspot_id: assocIds(a, "contacts")[0] ?? null,
           deal_hubspot_id: assocIds(a, "deals")[0] ?? null,
           company_hubspot_id: assocIds(a, "companies")[0] ?? null,

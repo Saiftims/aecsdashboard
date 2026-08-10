@@ -32,6 +32,21 @@ export interface QuoCall {
   completedAt?: string | null;
 }
 
+/** An SMS/MMS. Unlike a call there is no answeredBy/initiatedBy: an outgoing
+ * text names the seat that sent it, an inbound one names no seat at all. */
+export interface QuoMessage {
+  id: string;
+  userId?: string | null;
+  phoneNumberId?: string | null;
+  conversationId?: string | null;
+  direction?: string | null;
+  status?: string | null;
+  text?: string | null;
+  from?: string | null;
+  to?: string[] | null;
+  createdAt?: string | null;
+}
+
 function key(): string {
   const k = (process.env.QUO_API_KEY ?? "").trim();
   if (!k) throw new Error("QUO_API_KEY not configured");
@@ -86,6 +101,7 @@ export async function listPhoneNumbers(): Promise<QuoPhoneNumber[]> {
 
 interface QuoConversation {
   participants?: string[];
+  phoneNumberId?: string | null;
   lastActivityAt?: string | null;
   updatedAt?: string | null;
   createdAt?: string | null;
@@ -101,24 +117,43 @@ function conversationTouchedAt(c: QuoConversation): number | null {
   return null;
 }
 
-/** Counterparty numbers to ask each line about.
+export interface ThreadIndex {
+  /** Every counterparty number, to ask each line about. Calls need this wide
+   * net: a rep can dial from a second line and that thread may have aged out. */
+  participants: string[];
+  /** (participant, line) pairs that actually have a conversation. Sending or
+   * receiving a text always creates the thread, so these are the only places a
+   * message can exist - which keeps the message walk at roughly one request per
+   * participant instead of one per line. */
+  threads: { participant: string; phoneNumberId: string }[];
+}
+
+/** Counterparty numbers to ask each line about, plus the (number, line) pairs
+ * that have a real thread.
  *
  * Cost is participants x lines, so a full walk grows without bound as reps
  * dial more people. Passing `sinceMs` keeps a routine sync to threads that
  * have moved since the last run; the contact book (numbers whose thread has
  * aged out of the list) is only worth its pages on a full backfill.
  */
-export async function listParticipants(
+export async function listThreads(
   { sinceMs, maxPages = 20 }: { sinceMs?: number; maxPages?: number } = {},
-): Promise<string[]> {
+): Promise<ThreadIndex> {
   const numbers = new Set<string>();
+  const pairs = new Map<string, { participant: string; phoneNumberId: string }>();
   const convs = await paginate<QuoConversation>("/v1/conversations", { maxPages });
   for (const c of convs) {
     // A thread with no usable timestamp is always included: missing the call is
     // worse than one extra lookup.
     const touched = conversationTouchedAt(c);
     if (sinceMs && touched !== null && touched < sinceMs) continue;
-    for (const p of c.participants ?? []) if (p) numbers.add(p);
+    for (const p of c.participants ?? []) {
+      if (!p) continue;
+      numbers.add(p);
+      if (c.phoneNumberId) {
+        pairs.set(`${p}|${c.phoneNumberId}`, { participant: p, phoneNumberId: c.phoneNumberId });
+      }
+    }
   }
   if (!sinceMs) {
     const contacts = await paginate<{
@@ -128,11 +163,15 @@ export async function listParticipants(
       for (const f of c.defaultFields?.phoneNumbers ?? []) if (f.value) numbers.add(f.value);
     }
   }
-  return [...numbers];
+  return { participants: [...numbers], threads: [...pairs.values()] };
 }
 
-export async function listCalls(phoneNumberId: string, participant: string): Promise<QuoCall[]> {
-  const out: QuoCall[] = [];
+/** Both /v1/calls and /v1/messages refuse to answer without BOTH a line and a
+ * participant, so they share one pager and one participant walk. */
+async function listByPair<T>(
+  path: string, phoneNumberId: string, participant: string,
+): Promise<T[]> {
+  const out: T[] = [];
   let token: string | null | undefined;
   do {
     const params: Record<string, string | string[]> = {
@@ -141,9 +180,19 @@ export async function listCalls(phoneNumberId: string, participant: string): Pro
       maxResults: "100",
     };
     if (token) params.pageToken = token as string;
-    const page = await quoGet<Page<QuoCall>>("/v1/calls", params);
+    const page = await quoGet<Page<T>>(path, params);
     out.push(...(page.data ?? []));
     token = page.nextPageToken;
   } while (token);
   return out;
+}
+
+export function listCalls(phoneNumberId: string, participant: string): Promise<QuoCall[]> {
+  return listByPair<QuoCall>("/v1/calls", phoneNumberId, participant);
+}
+
+export function listMessages(
+  phoneNumberId: string, participant: string,
+): Promise<QuoMessage[]> {
+  return listByPair<QuoMessage>("/v1/messages", phoneNumberId, participant);
 }

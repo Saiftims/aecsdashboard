@@ -5,6 +5,7 @@ import {
   RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
+import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
 import { activityReport, billingRetentionReport, retentionReport } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
 
@@ -64,23 +65,32 @@ export default async function ActivityPage() {
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
           Activity (7 days)
         </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-9">
           <Stat label="Total touches" value={activityTotals.touches} />
           <Stat label="Calls" value={activityTotals.calls} />
           <Stat label="Emails" value={activityTotals.emails} />
+          <Stat label="Texts" value={activityTotals.sms} href="/drill/sms_7d" />
+          <Stat label="Other channels" value={activityTotals.otherChannels}
+            href="/drill/other_channels_7d" />
           <Stat label="Voicemails" value={activityTotals.voicemails} />
-          <Stat label="LinkedIn" value={activityTotals.linkedin} />
           <Stat label="Meetings" value={activityTotals.meetings} />
           <Stat label="In-person visits" value={activityTotals.inPersonVisits} />
           <Stat label="Connected" value={activityTotals.connected} tone="good" />
         </div>
+        <p className="mt-2 text-xs text-zinc-500">
+          Texts come from Quo, the same source as dials. &ldquo;Other
+          channels&rdquo; is every DM a rep logged:{" "}
+          {OTHER_CHANNELS.map((c) => `${CHANNEL_LABELS[c]} ${activityTotals.byChannel[c]}`)
+            .join(" · ")}
+          .
+        </p>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
         {roleDaily.map((r) => (
           <Card key={r.role}>
             <CardHeader
-              title={`${r.label} — daily calls & emails vs targets`}
+              title={`${r.label} — daily activity vs targets`}
               action={
                 <span className="text-xs text-zinc-500">
                   {r.callsTarget} calls · {r.emailsTarget} emails / day
@@ -98,7 +108,10 @@ export default async function ActivityPage() {
                   ? <>{r.people.join(", ")} · calls from{" "}
                       {r.callSource === "quo"
                         ? "Quo (every dial)"
-                        : "HubSpot logged calls"}</>
+                        : "HubSpot logged calls"}
+                      {" · texts from "}
+                      {r.smsSource === "quo" ? "Quo" : "HubSpot logged messages"}
+                      . Texts and other channels have no target.</>
                   : "No activity logged in this role over the last 7 days."}
               </p>
             </div>

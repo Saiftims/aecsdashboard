@@ -8,8 +8,21 @@ import {
   ACTIVATION_STAGE_LABELS, ACTIVATION_STAGES, SALES_STAGE_LABELS, SALES_STAGE_ORDER,
 } from "@/lib/hubspot/stages";
 
-const AE_TYPES = ["call", "email", "voicemail", "linkedin", "demo",
-                  "in_person_visit", "follow_up", "other"] as const;
+// Channel order mirrors how a rep works a lead: phone, inbox, text, then the
+// social DMs. Whatever is picked here becomes the activity's channel in the
+// dashboard - see lib/activity-channels.ts.
+const AE_TYPES = ["call", "email", "voicemail", "sms", "linkedin", "instagram",
+                  "facebook", "whatsapp", "demo", "in_person_visit", "follow_up",
+                  "other"] as const;
+const TYPE_LABELS: Record<string, string> = {
+  sms: "text / SMS",
+  linkedin: "LinkedIn DM",
+  instagram: "Instagram DM",
+  facebook: "Facebook DM",
+  whatsapp: "WhatsApp",
+  in_person_visit: "in-person visit",
+  other: "other channel",
+};
 const AE_OUTCOMES = ["no_answer", "voicemail_left", "connected", "qualified",
   "disqualified", "demo_booked", "demo_completed", "follow_up_required",
   "first_case_identified", "first_case_committed", "closed_won", "closed_lost"];
@@ -89,6 +102,9 @@ export function FirmActions(p: Props) {
               const f = new FormData(e.currentTarget);
               submit({
                 action: "log_activity",
+                // A text or a DM has no native HubSpot object on this portal, so
+                // it is stored as a note and the channel travels in the body
+                // marker; the sync reads it back out.
                 kind: f.get("type") === "demo" || f.get("type") === "in_person_visit" ? "meeting"
                      : f.get("type") === "call" || f.get("type") === "voicemail" ? "call" : "note",
                 activityType: f.get("type"),
@@ -111,7 +127,9 @@ export function FirmActions(p: Props) {
             <div className="grid grid-cols-2 gap-2">
               <select name="type" className={inputCls} required>
                 {(isCs ? ["cs_touch", ...AE_TYPES] : AE_TYPES).map((t) => (
-                  <option key={t} value={t}>{t.replaceAll("_", " ")}</option>
+                  <option key={t} value={t}>
+                    {TYPE_LABELS[t] ?? t.replaceAll("_", " ")}
+                  </option>
                 ))}
               </select>
               <select name="outcome" className={inputCls} required>

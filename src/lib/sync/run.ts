@@ -7,7 +7,7 @@ import { syncQuo } from "@/lib/sync/quo";
 
 export type SyncKind =
   | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup"
-  | "quo" | "quo_full";
+  | "quo" | "quo_full" | "quo_messages_full";
 
 export async function runSync(kinds: SyncKind[]) {
   const sb = supabaseService();
@@ -35,7 +35,7 @@ export async function runSync(kinds: SyncKind[]) {
         stats = await syncHubSpot("incremental", sinceMs);
       } else if (kind === "calendly") {
         stats = await syncCalendly();
-      } else if (kind === "quo" || kind === "quo_full") {
+      } else if (kind === "quo" || kind === "quo_full" || kind === "quo_messages_full") {
         // Routine runs only revisit threads that moved since the last success,
         // because cost is participants x lines and grows with every new number
         // a rep dials. A day of overlap covers a late-landing call.
@@ -48,7 +48,10 @@ export async function runSync(kinds: SyncKind[]) {
             sinceMs = new Date(last.finished_at).getTime() - 24 * 60 * 60 * 1000;
           }
         }
-        stats = await syncQuo(sinceMs);
+        // Backfilling texts alone: the full CALL walk (every number x every
+        // line) does not fit in the 300s function limit, but the message walk
+        // is one request per thread and comfortably does.
+        stats = await syncQuo(sinceMs, { skipCalls: kind === "quo_messages_full" });
       } else if (kind === "cases") {
         stats = await syncCases();
       } else if (kind === "rollup") {

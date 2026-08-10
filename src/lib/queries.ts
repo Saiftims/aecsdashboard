@@ -3,6 +3,9 @@
 import { differenceInDays, startOfMonth, subDays } from "date-fns";
 import { median } from "@/lib/metrics";
 import {
+  OTHER_CHANNELS, isOtherChannel, isSms, type OtherChannel,
+} from "@/lib/activity-channels";
+import {
   SALES_STAGES, hubspotDealUrl, type ActivationStage,
 } from "@/lib/hubspot/stages";
 import {
@@ -652,6 +655,8 @@ export async function aeDashboard(ownerId?: string | null) {
       medianSpeedToLeadHours: median(speedSamples),
       calls: typeCount("call"), emails: typeCount("email"),
       voicemails: typeCount("voicemail"), linkedin: typeCount("linkedin"),
+      sms: typeCount("sms"),
+      otherChannels: weekActs.filter((a) => isOtherChannel(actType(a))).length,
       inPersonVisits: typeCount("in_person_visit"),
       connected: weekActs.filter((a) => a.outcome === "connected").length,
       qualified: salesDeals.filter((d) => d.stage === SALES_STAGES.qualified).length,
@@ -712,27 +717,45 @@ export async function activityReport(ownerId?: string | null) {
   );
   const t = (a: ActivityRow) => a.activity_type ?? a.kind;
 
-  const { quoCalls: allQuo, owners } = await fetchRepSources(weekAgo.toISOString());
-  const quoCalls = ownerId
-    ? allQuo.filter((c) => c.hubspot_owner_id === ownerId)
-    : allQuo;
-  // Quo is the source of truth for dials by any rep it can account for, so that
-  // rep's HubSpot call rows are dropped rather than added to them.
+  const { quoCalls: allQuo, quoMessages: allQuoMsgs, owners } =
+    await fetchRepSources(weekAgo.toISOString());
+  const forOwner = <T extends { hubspot_owner_id: string | null }>(rows: T[]) =>
+    ownerId ? rows.filter((c) => c.hubspot_owner_id === ownerId) : rows;
+  const quoCalls = forOwner(allQuo);
+  const quoMessages = forOwner(allQuoMsgs);
+  // Quo is the source of truth for dials and texts by any rep it can account
+  // for, so that rep's HubSpot rows for the same channel are dropped rather
+  // than added to them.
   const quoOwners = quoBackedOwners(allQuo);
+  const quoTextOwners = quoBackedOwners(allQuoMsgs);
   const hsCalls = (type: string) => acts7.filter(
     (a) => t(a) === type && !(a.owner_id && quoOwners.has(a.owner_id)),
   ).length;
+  const superseded = (a: ActivityRow) =>
+    (a.owner_id && quoOwners.has(a.owner_id) &&
+      (t(a) === "call" || t(a) === "voicemail")) ||
+    (a.owner_id && quoTextOwners.has(a.owner_id) && isSms(t(a)));
+
+  const byChannel = Object.fromEntries(
+    OTHER_CHANNELS.map((c) => [c, acts7.filter((a) => t(a) === c).length]),
+  ) as Record<OtherChannel, number>;
 
   const activityTotals = {
-    touches: acts7.filter((a) => !(a.owner_id && quoOwners.has(a.owner_id) &&
-      (t(a) === "call" || t(a) === "voicemail"))).length + quoCalls.length,
+    touches: acts7.filter((a) => !superseded(a)).length +
+      quoCalls.length + quoMessages.length,
     calls: hsCalls("call") + quoCalls.length,
     emails: acts7.filter((a) => t(a) === "email").length,
+    sms: acts7.filter((a) => isSms(t(a)) &&
+      !(a.owner_id && quoTextOwners.has(a.owner_id))).length + quoMessages.length,
     voicemails: hsCalls("voicemail"),
-    linkedin: acts7.filter((a) => t(a) === "linkedin").length,
+    linkedin: byChannel.linkedin,
     meetings: acts7.filter((a) => a.kind === "meeting").length,
     inPersonVisits: acts7.filter((a) => t(a) === "in_person_visit").length,
     connected: acts7.filter((a) => a.outcome === "connected").length,
+    // LinkedIn/Instagram/Facebook/WhatsApp/other DMs, reported as one bucket
+    // plus the per-network split behind it.
+    otherChannels: acts7.filter((a) => isOtherChannel(t(a))).length,
+    byChannel,
   };
 
   // Daily breakdown (last 7 local days), split by role so an AE's prospecting
@@ -742,6 +765,7 @@ export async function activityReport(ownerId?: string | null) {
       owner_id: a.owner_id, occurred_at: a.occurred_at, type: t(a),
     })),
     quoCalls,
+    quoMessages,
     owners,
     settings,
     now,
@@ -751,6 +775,8 @@ export async function activityReport(ownerId?: string | null) {
     day: b.day,
     calls: b.calls + roleDaily[1].data[i].calls,
     emails: b.emails + roleDaily[1].data[i].emails,
+    sms: b.sms + roleDaily[1].data[i].sms,
+    social: b.social + roleDaily[1].data[i].social,
     other: b.other + roleDaily[1].data[i].other,
   }));
 

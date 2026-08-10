@@ -1,12 +1,14 @@
 /** Drill-down lists behind the dashboard stat tiles. Each metric returns the
  * underlying records with links to the related firm/deal. */
 import { differenceInDays, subDays } from "date-fns";
+import { isOtherChannel, isSms } from "@/lib/activity-channels";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
   billingRetentionReport, hasFutureDemo, isOpenSalesDeal, isTaskSuperseded,
   type ActivityRow, type CompanyRow, type DealRow, type RetentionMember,
 } from "@/lib/queries";
+import { supabaseService } from "@/lib/supabase/server";
 
 export interface DrillRow {
   title: string;
@@ -16,6 +18,8 @@ export interface DrillRow {
   when?: string | null;
   nextStep?: string | null;
   nextStepDate?: string | null;
+  /** Most recent logged activity: "Call · Alex · Aug 6". */
+  lastTouch?: string | null;
 }
 
 export interface DrillResult {
@@ -33,8 +37,31 @@ interface Ctx {
   lastTouch: (d: DealRow) => number | null;
   isSuperseded: (a: ActivityRow) => boolean;
   futureTaskDealIds: Set<string>;
+  /** deal/company id -> most recent past activity on it. */
+  lastActivityByTarget: Map<string, ActivityRow>;
+  /** deal id -> soonest open future task. */
+  nextTaskByDeal: Map<string, ActivityRow>;
+  ownerName: Map<string, string>;
   stalledDealDays: number;
   now: Date;
+}
+
+const KIND_LABEL: Record<string, string> = {
+  note: "Note", task: "Task", call: "Call", email: "Email", meeting: "Meeting",
+};
+
+/** "Call · Alex · Aug 6" for the freshest activity on the deal (or its firm). */
+function lastTouchLabel(ctx: Ctx, d: DealRow): string | null {
+  const a = ctx.lastActivityByTarget.get(d.hubspot_id) ??
+    (d.company_hubspot_id
+      ? ctx.lastActivityByTarget.get(d.company_hubspot_id) : undefined);
+  if (!a?.occurred_at) return null;
+  const kind = KIND_LABEL[a.kind ?? ""] ?? a.kind ?? "Touch";
+  const who = (a.owner_id && ctx.ownerName.get(a.owner_id)) ?? "agent";
+  const when = new Date(a.occurred_at).toLocaleDateString("en-US", {
+    month: "short", day: "numeric",
+  });
+  return `${kind} · ${who} · ${when}`;
 }
 
 /** Covered = future task scheduled OR touched within the grace window OR a
@@ -68,14 +95,28 @@ function dealRow(ctx: Ctx, d: DealRow, subtitle?: string): DrillRow {
   const when = (d.stage === SALES_STAGES.demoScheduled || d.stage === SALES_STAGES.demoCompleted)
     ? (d.properties?.sw_demo_date ?? d.hs_created_at)
     : d.hs_created_at;
+  // Next step: the manually-set property wins; else the soonest open task;
+  // else an upcoming demo (the demo IS the plan).
+  const task = ctx.nextTaskByDeal.get(d.hubspot_id);
+  let nextStep = d.properties?.sw_next_step ?? null;
+  let nextStepDate = nextStep ? (d.properties?.sw_next_step_date ?? null) : null;
+  if (!nextStep && task) {
+    nextStep = task.subject || "Follow-up task";
+    nextStepDate = task.due_at ? task.due_at.slice(0, 10) : null;
+  }
+  if (!nextStep && hasFutureDemo(d, ctx.now)) {
+    nextStep = "Run demo";
+    nextStepDate = d.properties?.sw_demo_date?.slice(0, 10) ?? null;
+  }
   return {
     title: d.name ?? d.hubspot_id,
     subtitle: subtitle ?? d.stage_label ?? undefined,
     companyId: d.company_hubspot_id,
     dealId: d.hubspot_id,
     when,
-    nextStep: d.properties?.sw_next_step ?? null,
-    nextStepDate: d.properties?.sw_next_step_date ?? null,
+    nextStep,
+    nextStepDate,
+    lastTouch: lastTouchLabel(ctx, d),
   };
 }
 
@@ -147,6 +188,14 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
   emails_7d: { label: "Emails (7d)", rows: (ctx) => activityRows(ctx, (a) => (a.activity_type ?? a.kind) === "email") },
   voicemails_7d: { label: "Voicemails (7d)", rows: (ctx) => activityRows(ctx, (a) => a.activity_type === "voicemail") },
   linkedin_7d: { label: "LinkedIn (7d)", rows: (ctx) => activityRows(ctx, (a) => a.activity_type === "linkedin") },
+  // Texts logged against a record. The Activity tile counts Quo as well, so its
+  // number is usually higher than this list - Quo sees texts to numbers HubSpot
+  // has no contact for.
+  sms_7d: { label: "Texts (7d)", rows: (ctx) => activityRows(ctx, (a) => isSms(a.activity_type)) },
+  other_channels_7d: {
+    label: "Other channels (7d)",
+    rows: (ctx) => activityRows(ctx, (a) => isOtherChannel(a.activity_type)),
+  },
   visits_7d: { label: "In-person visits (7d)", rows: (ctx) => activityRows(ctx, (a) => a.activity_type === "in_person_visit") },
   connected_7d: { label: "Connected conversations (7d)", rows: (ctx) => activityRows(ctx, (a) => a.outcome === "connected") },
   demo_noshows_7d: { label: "Demo no-shows (7d)", rows: (ctx) => activityRows(ctx, (a) => a.outcome === "no_show") },
@@ -478,6 +527,43 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
       .filter(Boolean) as string[],
   );
 
+  // Owner roster for "who touched it" labels; tolerant of a missing table.
+  const ownerName = new Map<string, string>();
+  {
+    const { data } = await supabaseService()
+      .from("crm_owners").select("owner_id, email, first_name");
+    for (const o of data ?? []) {
+      // alex@ signs in as Alex even though the seat says Ahmad.
+      const fromEmail = (o.email ?? "").split("@")[0];
+      const name = fromEmail.toLowerCase() === "alex"
+        ? "Alex" : (o.first_name || fromEmail || o.owner_id);
+      ownerName.set(o.owner_id, name);
+    }
+  }
+
+  // Freshest past activity per deal and per company (future tasks are plans,
+  // not touches), and the soonest open future task per deal.
+  const lastActivityByTarget = new Map<string, ActivityRow>();
+  const nextTaskByDeal = new Map<string, ActivityRow>();
+  for (const a of activities) {
+    if (a.occurred_at && new Date(a.occurred_at) <= now) {
+      for (const key of [a.deal_hubspot_id, a.company_hubspot_id]) {
+        if (!key) continue;
+        const prev = lastActivityByTarget.get(key);
+        if (!prev || (prev.occurred_at ?? "") < a.occurred_at) {
+          lastActivityByTarget.set(key, a);
+        }
+      }
+    }
+    if (a.kind === "task" && !a.completed && a.due_at &&
+        new Date(a.due_at) >= now && a.deal_hubspot_id) {
+      const prev = nextTaskByDeal.get(a.deal_hubspot_id);
+      if (!prev || (prev.due_at ?? "") > a.due_at) {
+        nextTaskByDeal.set(a.deal_hubspot_id, a);
+      }
+    }
+  }
+
   const ctx: Ctx = {
     deals: scopedDeals,
     companies,
@@ -495,6 +581,9 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
     lastTouch,
     isSuperseded: (a: ActivityRow) => isTaskSuperseded(a, touchMaps),
     futureTaskDealIds,
+    lastActivityByTarget,
+    nextTaskByDeal,
+    ownerName,
     stalledDealDays: settings.stalledDealDays,
     now,
   };

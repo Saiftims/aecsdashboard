@@ -28,14 +28,18 @@ export function DailyActivityChart({
   callsTarget,
   emailsTarget,
 }: {
-  data: { day: string; calls: number; emails: number; other: number }[];
+  data: { day: string; calls: number; emails: number; sms?: number; social?: number }[];
   callsTarget?: number;
   emailsTarget?: number;
 }) {
+  // Only draw the texting and social bars once there is something in them, so a
+  // team that does not use those channels keeps a two-bar chart.
+  const hasSms = data.some((d) => (d.sms ?? 0) > 0);
+  const hasSocial = data.some((d) => (d.social ?? 0) > 0);
   const maxVal = Math.max(
     callsTarget ?? 0,
     emailsTarget ?? 0,
-    ...data.map((d) => Math.max(d.calls, d.emails)),
+    ...data.map((d) => Math.max(d.calls, d.emails, d.sms ?? 0, d.social ?? 0)),
   );
   return (
     <ResponsiveContainer width="100%" height={260}>
@@ -47,6 +51,13 @@ export function DailyActivityChart({
         <Legend />
         <Bar dataKey="calls" fill="hsl(210 70% 50%)" name="Calls" radius={[3, 3, 0, 0]} />
         <Bar dataKey="emails" fill="hsl(160 60% 45%)" name="Emails" radius={[3, 3, 0, 0]} />
+        {hasSms ? (
+          <Bar dataKey="sms" fill="hsl(38 92% 50%)" name="Texts" radius={[3, 3, 0, 0]} />
+        ) : null}
+        {hasSocial ? (
+          <Bar dataKey="social" fill="hsl(280 55% 58%)" name="Other channels"
+            radius={[3, 3, 0, 0]} />
+        ) : null}
         {callsTarget ? (
           <ReferenceLine
             y={callsTarget}
