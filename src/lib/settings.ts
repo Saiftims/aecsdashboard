@@ -29,7 +29,7 @@ export interface GtmSettings {
   segmentConfig: Record<string, { monthly_target: number | null; at_risk_floor_30d: number; churn_days: number }>;
 }
 
-const DEFAULTS: GtmSettings = {
+export const DEFAULT_SETTINGS: GtmSettings = {
   defaultCasePrice: 250,
   atRiskInactivityDays: 30,
   firstCaseTargetDays: 14,
@@ -94,7 +94,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
 export async function loadSettings(): Promise<GtmSettings> {
   const sb = supabaseService();
   const { data } = await sb.from("settings").select("key, value");
-  const out = { ...DEFAULTS };
+  const out = { ...DEFAULT_SETTINGS };
   for (const row of data ?? []) {
     const key = KEY_MAP[row.key as string];
     if (key) (out as Record<string, unknown>)[key] = row.value;
@@ -111,7 +111,7 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
   out.aeDailyCallsTarget = Number(out.aeDailyCallsTarget) || 50;
   out.aeDailyEmailsTarget = Number(out.aeDailyEmailsTarget) || 50;
-  if (!out.repRoles || typeof out.repRoles !== "object") out.repRoles = DEFAULTS.repRoles;
+  if (!out.repRoles || typeof out.repRoles !== "object") out.repRoles = DEFAULT_SETTINGS.repRoles;
   out.dailyFollowupsTarget = Number(out.dailyFollowupsTarget) || 25;
   out.dailyNewLeadsTarget = Number(out.dailyNewLeadsTarget) || 5;
   out.dailyTasksTarget = Number(out.dailyTasksTarget) || 30;

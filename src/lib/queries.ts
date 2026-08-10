@@ -10,6 +10,7 @@ import {
 } from "@/lib/hubspot/stages";
 import {
   buildRoleActivity, callsTodayFor, fetchRepSources, quoBackedOwners, roleOf,
+  textsComeFromQuo,
 } from "@/lib/rep-activity";
 import { loadSettings } from "@/lib/settings";
 import { supabaseService } from "@/lib/supabase/server";
@@ -727,14 +728,14 @@ export async function activityReport(ownerId?: string | null) {
   // for, so that rep's HubSpot rows for the same channel are dropped rather
   // than added to them.
   const quoOwners = quoBackedOwners(allQuo);
-  const quoTextOwners = quoBackedOwners(allQuoMsgs);
+  const quoTexts = textsComeFromQuo(allQuoMsgs);
   const hsCalls = (type: string) => acts7.filter(
     (a) => t(a) === type && !(a.owner_id && quoOwners.has(a.owner_id)),
   ).length;
   const superseded = (a: ActivityRow) =>
     (a.owner_id && quoOwners.has(a.owner_id) &&
       (t(a) === "call" || t(a) === "voicemail")) ||
-    (a.owner_id && quoTextOwners.has(a.owner_id) && isSms(t(a)));
+    (isSms(t(a)) && quoTexts);
 
   const byChannel = Object.fromEntries(
     OTHER_CHANNELS.map((c) => [c, acts7.filter((a) => t(a) === c).length]),
@@ -745,8 +746,8 @@ export async function activityReport(ownerId?: string | null) {
       quoCalls.length + quoMessages.length,
     calls: hsCalls("call") + quoCalls.length,
     emails: acts7.filter((a) => t(a) === "email").length,
-    sms: acts7.filter((a) => isSms(t(a)) &&
-      !(a.owner_id && quoTextOwners.has(a.owner_id))).length + quoMessages.length,
+    sms: (quoTexts ? 0 : acts7.filter((a) => isSms(t(a))).length) +
+      quoMessages.length,
     voicemails: hsCalls("voicemail"),
     linkedin: byChannel.linkedin,
     meetings: acts7.filter((a) => a.kind === "meeting").length,

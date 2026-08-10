@@ -113,6 +113,21 @@ export function quoBackedOwners(
   );
 }
 
+/** Whether HubSpot's SMS rows should be ignored wholesale.
+ *
+ * Unlike calls, HubSpot never learns of a text independently - its SMS
+ * Communications records are mirrored FROM Quo - so every one duplicates a
+ * quo_messages row. Matching per owner is not enough: HubSpot leaves some of
+ * them unowned (7 of 30 in the week of 2026-08-10), and an unowned row cannot
+ * be paired with a rep, so it would both double the total and default into the
+ * AE series. Once Quo has produced any text in the window it is the only source
+ * counted; when it has produced none (sync down, no seats yet) HubSpot's copy
+ * is still better than showing zero.
+ */
+export function textsComeFromQuo(quoMessages: unknown[]): boolean {
+  return quoMessages.length > 0;
+}
+
 export function localDayLabel(ts: string | Date, tz: string): string {
   const d = new Date(ts);
   const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(d);
@@ -155,7 +170,7 @@ export function buildRoleActivity({
   const tz = settings.dashboardTimezone;
   const ownerById = new Map(owners.map((o) => [o.owner_id, o]));
   const quoOwners = quoBackedOwners(quoCalls);
-  const quoTextOwners = quoBackedOwners(quoMessages);
+  const quoTexts = textsComeFromQuo(quoMessages);
 
   const roles: Exclude<RepRole, "exec">[] = ["ae", "cs"];
   const series = new Map<string, RoleActivity>();
@@ -189,7 +204,7 @@ export function buildRoleActivity({
     // same channel would double it.
     const isCall = t.type === "call" || t.type === "voicemail";
     if (isCall && t.owner_id && quoOwners.has(t.owner_id)) continue;
-    if (isSms(t.type) && t.owner_id && quoTextOwners.has(t.owner_id)) continue;
+    if (isSms(t.type) && quoTexts) continue;
     const b = bucket(role, t.occurred_at);
     if (!b) continue;
     if (isCall) b.calls += 1;

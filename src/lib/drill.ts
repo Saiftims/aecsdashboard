@@ -188,9 +188,9 @@ const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }>
   emails_7d: { label: "Emails (7d)", rows: (ctx) => activityRows(ctx, (a) => (a.activity_type ?? a.kind) === "email") },
   voicemails_7d: { label: "Voicemails (7d)", rows: (ctx) => activityRows(ctx, (a) => a.activity_type === "voicemail") },
   linkedin_7d: { label: "LinkedIn (7d)", rows: (ctx) => activityRows(ctx, (a) => a.activity_type === "linkedin") },
-  // Texts logged against a record. The Activity tile counts Quo as well, so its
-  // number is usually higher than this list - Quo sees texts to numbers HubSpot
-  // has no contact for.
+  // Only the texts HubSpot managed to attach to a record, so this list is
+  // shorter than the Texts tile: that counts every text Quo saw, including ones
+  // to numbers HubSpot has no contact for.
   sms_7d: { label: "Texts (7d)", rows: (ctx) => activityRows(ctx, (a) => isSms(a.activity_type)) },
   other_channels_7d: {
     label: "Other channels (7d)",

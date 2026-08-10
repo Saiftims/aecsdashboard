@@ -64,11 +64,14 @@ const ALIASES: Record<string, string> = {
   sms: "sms", text: "sms", txt: "sms", texted: "sms",
 };
 
-// "LinkedIn: ...", "IG DM - ...", "Texted her about pricing:" etc. Requires a
-// separator so ordinary prose ("Text me the deck" in a summary) cannot match.
+// "LinkedIn: ...", "IG DM - ...", "FB messenger - ..." etc. A separator is
+// required so ordinary prose ("Text me the deck" in a summary) cannot match.
+// Longer filler words come first: alternation is ordered, so "message" would
+// otherwise win over "messenger" and leave "nger" before the separator.
 const PREFIX = new RegExp(
   `^\\s*(${Object.keys(ALIASES).join("|")})` +
-  "\\s*(?:dm|dms|message|msg|inmail|reply|follow[ -]?up)?\\s*[:\\-\u2013]",
+  "\\s*(?:messenger|messages|message|msgs|msg|dms|dm|inmail|reply|follow[ -]?up)?" +
+  "\\s*[:\\-\u2013]",
   "i",
 );
 
