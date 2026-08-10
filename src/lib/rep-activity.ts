@@ -48,8 +48,11 @@ export interface DayBucket {
   sms: number;
   /** LinkedIn / Instagram / Facebook / WhatsApp / other logged DMs. */
   social: number;
-  /** Everything else logged that is not one of the above (e.g. plain notes). */
+  /** Meetings, demos, visits and any other logged touch that is not a channel
+   * above. Unmarked notes are excluded - see buildRoleActivity. */
   other: number;
+  /** The stack height, and the number judged against the activity target. */
+  total: number;
 }
 
 export interface RoleActivity {
@@ -57,11 +60,13 @@ export interface RoleActivity {
   label: string;
   /** Names of the reps whose activity is in this series. */
   people: string[];
-  callsTarget: number;
-  emailsTarget: number;
+  /** Total touches per day expected of this role, across all channels. */
+  activityTarget: number;
   callSource: "quo" | "hubspot";
   smsSource: "quo" | "hubspot";
   data: DayBucket[];
+  /** Mean daily total over the window, for "45 of 75 a day" style captions. */
+  dailyAverage: number;
 }
 
 export const ROLE_LABEL: Record<Exclude<RepRole, "exec">, string> = {
@@ -143,7 +148,7 @@ export function emptyDays(days: number, tz: string, now = new Date()): DayBucket
   for (let i = days - 1; i >= 0; i--) {
     out.push({
       day: localDayLabel(new Date(now.getTime() - i * 86400000), tz),
-      calls: 0, emails: 0, sms: 0, social: 0, other: 0,
+      calls: 0, emails: 0, sms: 0, social: 0, other: 0, total: 0,
     });
   }
   return out;
@@ -179,11 +184,13 @@ export function buildRoleActivity({
       role,
       label: ROLE_LABEL[role],
       people: [],
-      callsTarget: role === "ae" ? settings.aeDailyCallsTarget : settings.dailyCallsTarget,
-      emailsTarget: role === "ae" ? settings.aeDailyEmailsTarget : settings.dailyEmailsTarget,
+      activityTarget: role === "ae"
+        ? settings.aeDailyActivityTarget
+        : settings.csDailyActivityTarget,
       callSource: "hubspot",
       smsSource: "hubspot",
       data: emptyDays(days, tz, now),
+      dailyAverage: 0,
     });
   }
   const index = new Map(
@@ -198,6 +205,10 @@ export function buildRoleActivity({
 
   for (const t of touches) {
     if (!t.occurred_at) continue;
+    // A logged touch always carries a type, so a bare "note" is either the
+    // agent's own context note or a jotting - not outreach. Counting those
+    // would inflate the day's total against the activity target.
+    if (t.type === "note" || t.type === "task") continue;
     const role = roleOf(t.owner_id, settings);
     if (role === "exec") continue;
     // Quo owns this rep's dial and text counts; counting HubSpot's copy of the
@@ -246,8 +257,56 @@ export function buildRoleActivity({
     s.people = [...contributors.get(role)!]
       .map((id) => ownerName(ownerById.get(id), id))
       .sort();
+    for (const b of s.data) b.total = b.calls + b.emails + b.sms + b.social + b.other;
+    s.dailyAverage = s.data.length
+      ? Math.round(s.data.reduce((n, b) => n + b.total, 0) / s.data.length)
+      : 0;
   }
   return roles.map((r) => series.get(r)!);
+}
+
+/** Today's total activity for one rep, and the channel split behind it.
+ *
+ * The same source rules as the daily charts: Quo owns dials and texts for a rep
+ * it can account for, and unmarked notes are not outreach. */
+export function activityTodayFor({
+  ownerId, touches, quoCalls, quoMessages = [], settings, now = new Date(),
+}: {
+  ownerId: string | null;
+  touches: TouchRow[];
+  quoCalls: QuoCallRow[];
+  quoMessages?: QuoMessageRow[];
+  settings: GtmSettings;
+  now?: Date;
+}): { total: number; calls: number; emails: number; sms: number; social: number; other: number } {
+  const tz = settings.dashboardTimezone;
+  const today = localDayLabel(now, tz);
+  const quoOwners = quoBackedOwners(quoCalls);
+  const quoTexts = textsComeFromQuo(quoMessages);
+  const inScope = (id: string | null) => !ownerId || id === ownerId;
+  const isTodayFor = (ts: string | null) => Boolean(ts && localDayLabel(ts, tz) === today);
+
+  const out = { total: 0, calls: 0, emails: 0, sms: 0, social: 0, other: 0 };
+  for (const t of touches) {
+    if (!isTodayFor(t.occurred_at) || !inScope(t.owner_id)) continue;
+    if (t.type === "note" || t.type === "task") continue;
+    const isCall = t.type === "call" || t.type === "voicemail";
+    if (isCall && t.owner_id && quoOwners.has(t.owner_id)) continue;
+    if (isSms(t.type) && quoTexts) continue;
+    if (isCall) out.calls += 1;
+    else if (t.type === "email") out.emails += 1;
+    else if (isSms(t.type)) out.sms += 1;
+    else if (isOtherChannel(t.type)) out.social += 1;
+    else out.other += 1;
+  }
+  for (const c of quoCalls) {
+    if (isTodayFor(c.created_at) && inScope(c.hubspot_owner_id)) out.calls += 1;
+  }
+  for (const m of quoMessages) {
+    if (isTodayFor(m.created_at) && inScope(m.hubspot_owner_id)) out.sms += 1;
+  }
+  out.total = out.calls + out.emails + out.sms + out.social + out.other;
+  return out;
 }
 
 /** Today's call count for one rep, from Quo when Quo knows them. */

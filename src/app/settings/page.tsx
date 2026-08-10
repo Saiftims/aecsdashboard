@@ -56,8 +56,16 @@ export default async function SettingsPage() {
           <div className="space-y-3 p-4">
             <p className="text-xs text-zinc-500">
               AEs prospect and CSMs work a book of accounts, so each role is
-              charted against its own call and email numbers. Anyone not listed
-              in <code>rep_roles</code> counts as an AE.
+              charted against its own number. The activity target is the total
+              across every channel - calls, emails, texts and DMs - so a rep who
+              gets there by texting has still done the day&apos;s work. Anyone
+              not listed in <code>rep_roles</code> counts as an AE.
+            </p>
+            <SettingField settingKey="ae_daily_activity_target" label="AE total activity per day" defaultValue={settings.aeDailyActivityTarget} />
+            <SettingField settingKey="cs_daily_activity_target" label="CSM total activity per day" defaultValue={settings.csDailyActivityTarget} />
+            <p className="text-xs text-zinc-500">
+              The per-channel numbers below are kept for reference only - nothing
+              is measured against them since the activity target replaced them.
             </p>
             <SettingField settingKey="ae_daily_calls_target" label="AE calls per day" defaultValue={settings.aeDailyCallsTarget} />
             <SettingField settingKey="ae_daily_emails_target" label="AE emails per day" defaultValue={settings.aeDailyEmailsTarget} />

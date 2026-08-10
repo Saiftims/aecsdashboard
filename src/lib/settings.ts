@@ -9,7 +9,13 @@ export interface GtmSettings {
   stalledDealDays: number;
   dashboardTimezone: string;
   slaFirstContactHours: number;
-  /** CSM daily targets. AEs carry their own, higher, prospecting numbers. */
+  /** Total logged touches a role is expected to make per day, across every
+   * channel. This is what the daily charts are measured against: a rep who hits
+   * the number by texting instead of dialling has still done the day's work. */
+  aeDailyActivityTarget: number;
+  csDailyActivityTarget: number;
+  /** Per-channel daily targets. Reference only since the activity target above
+   * replaced them - nothing is measured against these. */
   dailyCallsTarget: number;
   dailyEmailsTarget: number;
   aeDailyCallsTarget: number;
@@ -38,6 +44,8 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   stalledDealDays: 14,
   dashboardTimezone: "America/Los_Angeles",
   slaFirstContactHours: 2,
+  aeDailyActivityTarget: 75,
+  csDailyActivityTarget: 40,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
   aeDailyCallsTarget: 50,
@@ -74,6 +82,8 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   stalled_deal_days: "stalledDealDays",
   dashboard_timezone: "dashboardTimezone",
   sla_first_contact_hours: "slaFirstContactHours",
+  ae_daily_activity_target: "aeDailyActivityTarget",
+  cs_daily_activity_target: "csDailyActivityTarget",
   daily_calls_target: "dailyCallsTarget",
   daily_emails_target: "dailyEmailsTarget",
   ae_daily_calls_target: "aeDailyCallsTarget",
@@ -107,6 +117,8 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.healthyCasesPer30d = Number(out.healthyCasesPer30d) || 2;
   out.stalledDealDays = Number(out.stalledDealDays) || 14;
   out.slaFirstContactHours = Number(out.slaFirstContactHours) || 2;
+  out.aeDailyActivityTarget = Number(out.aeDailyActivityTarget) || 75;
+  out.csDailyActivityTarget = Number(out.csDailyActivityTarget) || 40;
   out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
   out.aeDailyCallsTarget = Number(out.aeDailyCallsTarget) || 50;

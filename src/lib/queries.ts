@@ -9,8 +9,8 @@ import {
   SALES_STAGES, hubspotDealUrl, type ActivationStage,
 } from "@/lib/hubspot/stages";
 import {
-  buildRoleActivity, callsTodayFor, fetchRepSources, quoBackedOwners, roleOf,
-  textsComeFromQuo,
+  activityTodayFor, buildRoleActivity, callsTodayFor, fetchRepSources,
+  quoBackedOwners, roleOf, textsComeFromQuo,
 } from "@/lib/rep-activity";
 import { loadSettings } from "@/lib/settings";
 import { supabaseService } from "@/lib/supabase/server";
@@ -547,18 +547,29 @@ export async function aeDashboard(ownerId?: string | null) {
   // Calls come from Quo for any rep it can account for; HubSpot only logs a
   // dial that already had a contact behind it. Targets follow the viewer's role
   // - an AE prospecting and a CSM working a book are not the same day's work.
-  const { quoCalls } = await fetchRepSources(subDays(now, 2).toISOString());
+  const { quoCalls, quoMessages } = await fetchRepSources(subDays(now, 2).toISOString());
   const role = roleOf(ownerId ?? null, settings);
   const isAe = role !== "cs";
+  const todayTouches = todayActs.map((a) => ({
+    owner_id: a.owner_id, occurred_at: a.occurred_at, type: actType(a),
+  }));
+
+  // The rep is measured on total activity, not on each channel: hitting the
+  // number by texting is still a day's work. The split is shown as detail.
+  const activity = activityTodayFor({
+    ownerId: ownerId ?? null, touches: todayTouches, quoCalls, quoMessages,
+    settings, now,
+  });
 
   const today = {
+    activity: {
+      value: activity.total,
+      target: isAe ? settings.aeDailyActivityTarget : settings.csDailyActivityTarget,
+      breakdown: activity,
+    },
     calls: {
       value: callsTodayFor({
-        ownerId: ownerId ?? null,
-        touches: todayActs.map((a) => ({
-          owner_id: a.owner_id, occurred_at: a.occurred_at, type: actType(a),
-        })),
-        quoCalls, settings, now,
+        ownerId: ownerId ?? null, touches: todayTouches, quoCalls, settings, now,
       }),
       target: isAe ? settings.aeDailyCallsTarget : settings.dailyCallsTarget,
     },
@@ -742,7 +753,9 @@ export async function activityReport(ownerId?: string | null) {
   ) as Record<OtherChannel, number>;
 
   const activityTotals = {
-    touches: acts7.filter((a) => !superseded(a)).length +
+    // Only real outreach, so this agrees with the stack height on the daily
+    // charts: an unmarked note is the agent's own context or a jotting.
+    touches: acts7.filter((a) => isMeaningfulTouch(a) && !superseded(a)).length +
       quoCalls.length + quoMessages.length,
     calls: hsCalls("call") + quoCalls.length,
     emails: acts7.filter((a) => t(a) === "email").length,
@@ -772,14 +785,18 @@ export async function activityReport(ownerId?: string | null) {
     now,
   });
   // Combined series, kept for anything that wants the team as one line.
-  const daily = roleDaily[0].data.map((b, i) => ({
-    day: b.day,
-    calls: b.calls + roleDaily[1].data[i].calls,
-    emails: b.emails + roleDaily[1].data[i].emails,
-    sms: b.sms + roleDaily[1].data[i].sms,
-    social: b.social + roleDaily[1].data[i].social,
-    other: b.other + roleDaily[1].data[i].other,
-  }));
+  const daily = roleDaily[0].data.map((b, i) => {
+    const o = roleDaily[1].data[i];
+    return {
+      day: b.day,
+      calls: b.calls + o.calls,
+      emails: b.emails + o.emails,
+      sms: b.sms + o.sms,
+      social: b.social + o.social,
+      other: b.other + o.other,
+      total: b.total + o.total,
+    };
+  });
 
   // Funnel cohort = deals created in the last 7 days (this week's new business).
   const cohort = deals.filter(

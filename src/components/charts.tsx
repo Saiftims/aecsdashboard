@@ -23,55 +23,67 @@ export function FunnelChart({ data }: { data: { label: string; count: number }[]
   );
 }
 
+/** One stacked bar per day - every channel a rep can touch a lead through -
+ * measured against a single total-activity target. Channel-level targets would
+ * punish a rep who hit the number a different way. */
 export function DailyActivityChart({
   data,
-  callsTarget,
-  emailsTarget,
+  activityTarget,
 }: {
-  data: { day: string; calls: number; emails: number; sms?: number; social?: number }[];
-  callsTarget?: number;
-  emailsTarget?: number;
+  data: {
+    day: string; calls: number; emails: number;
+    sms?: number; social?: number; other?: number; total?: number;
+  }[];
+  activityTarget?: number;
 }) {
-  // Only draw the texting and social bars once there is something in them, so a
-  // team that does not use those channels keeps a two-bar chart.
-  const hasSms = data.some((d) => (d.sms ?? 0) > 0);
-  const hasSocial = data.some((d) => (d.social ?? 0) > 0);
-  const maxVal = Math.max(
-    callsTarget ?? 0,
-    emailsTarget ?? 0,
-    ...data.map((d) => Math.max(d.calls, d.emails, d.sms ?? 0, d.social ?? 0)),
-  );
+  const height = (d: (typeof data)[number]) =>
+    d.total ?? d.calls + d.emails + (d.sms ?? 0) + (d.social ?? 0) + (d.other ?? 0);
+  // Keep the target line in frame even on a quiet week, and leave headroom
+  // above the tallest stack so its label is readable.
+  const maxVal = Math.max(activityTarget ?? 0, ...data.map(height), 1);
+  const SERIES = [
+    { key: "calls", name: "Calls", fill: "hsl(210 70% 50%)", always: true,
+      get: (d: (typeof data)[number]) => d.calls },
+    { key: "emails", name: "Emails", fill: "hsl(160 60% 45%)", always: true,
+      get: (d: (typeof data)[number]) => d.emails },
+    { key: "sms", name: "Texts", fill: "hsl(38 92% 50%)", always: false,
+      get: (d: (typeof data)[number]) => d.sms },
+    { key: "social", name: "Other channels", fill: "hsl(280 55% 58%)", always: false,
+      get: (d: (typeof data)[number]) => d.social },
+    { key: "other", name: "Meetings & other", fill: "hsl(215 15% 65%)", always: false,
+      get: (d: (typeof data)[number]) => d.other },
+  ];
+  // Hide a channel nobody used, so a team that only calls and emails still
+  // reads as a two-colour chart. The topmost drawn bar gets the rounded cap.
+  const shown = SERIES.filter(
+    (s) => s.always || data.some((d) => (s.get(d) ?? 0) > 0));
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <BarChart data={data} margin={{ top: 8, right: 48 }} barGap={2}>
+      <BarChart data={data} margin={{ top: 8, right: 56 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="day" tick={{ fontSize: 11 }} />
-        <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.1)]} />
+        <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
         <Legend />
-        <Bar dataKey="calls" fill="hsl(210 70% 50%)" name="Calls" radius={[3, 3, 0, 0]} />
-        <Bar dataKey="emails" fill="hsl(160 60% 45%)" name="Emails" radius={[3, 3, 0, 0]} />
-        {hasSms ? (
-          <Bar dataKey="sms" fill="hsl(38 92% 50%)" name="Texts" radius={[3, 3, 0, 0]} />
-        ) : null}
-        {hasSocial ? (
-          <Bar dataKey="social" fill="hsl(280 55% 58%)" name="Other channels"
-            radius={[3, 3, 0, 0]} />
-        ) : null}
-        {callsTarget ? (
-          <ReferenceLine
-            y={callsTarget}
-            stroke="hsl(210 70% 50%)"
-            strokeDasharray="5 4"
-            label={{ value: `Calls target ${callsTarget}`, position: "right", fontSize: 10, fill: "hsl(210 70% 45%)" }}
+        {shown.map((s, i) => (
+          <Bar
+            key={s.key}
+            dataKey={s.key}
+            stackId="activity"
+            fill={s.fill}
+            name={s.name}
+            radius={i === shown.length - 1 ? [3, 3, 0, 0] : undefined}
           />
-        ) : null}
-        {emailsTarget ? (
+        ))}
+        {activityTarget ? (
           <ReferenceLine
-            y={emailsTarget}
-            stroke="hsl(160 60% 40%)"
+            y={activityTarget}
+            stroke="hsl(220 9% 40%)"
             strokeDasharray="5 4"
-            label={{ value: `Emails target ${emailsTarget}`, position: "right", fontSize: 10, fill: "hsl(160 60% 35%)" }}
+            label={{
+              value: `Target ${activityTarget}/day`,
+              position: "right", fontSize: 10, fill: "hsl(220 9% 40%)",
+            }}
           />
         ) : null}
       </BarChart>

@@ -24,9 +24,14 @@ export default async function AePage() {
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
           Today
         </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <TargetCard label="Calls today" value={today.calls.value} target={today.calls.target} sub="incl. voicemails · 7-day view →" href="/activity" />
-          <TargetCard label="Emails today" value={today.emails.value} target={today.emails.target} sub="7-day view →" href="/activity" />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <TargetCard
+            label="Activity today"
+            value={today.activity.value}
+            target={today.activity.target}
+            sub={`${today.activity.breakdown.calls} calls · ${today.activity.breakdown.emails} emails · ${today.activity.breakdown.sms} texts · ${today.activity.breakdown.social + today.activity.breakdown.other} other · 7-day view →`}
+            href="/activity"
+          />
           <TargetCard label="Follow-ups completed" value={today.followups.value} target={today.followups.target} sub="due tasks cleared · 7-day view →" href="/activity" />
           <TargetCard
             label="New leads in SLA"

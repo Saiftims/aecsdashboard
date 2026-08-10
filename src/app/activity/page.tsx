@@ -90,28 +90,24 @@ export default async function ActivityPage() {
         {roleDaily.map((r) => (
           <Card key={r.role}>
             <CardHeader
-              title={`${r.label} — daily activity vs targets`}
+              title={`${r.label} — daily activity vs target`}
               action={
                 <span className="text-xs text-zinc-500">
-                  {r.callsTarget} calls · {r.emailsTarget} emails / day
+                  {r.dailyAverage} of {r.activityTarget} a day
                 </span>
               }
             />
             <div className="p-4">
-              <DailyActivityChart
-                data={r.data}
-                callsTarget={r.callsTarget}
-                emailsTarget={r.emailsTarget}
-              />
+              <DailyActivityChart data={r.data} activityTarget={r.activityTarget} />
               <p className="mt-2 text-xs text-zinc-500">
                 {r.people.length
-                  ? <>{r.people.join(", ")} · calls from{" "}
+                  ? <>{r.people.join(", ")} · every channel stacked to one
+                      total against the {r.activityTarget}/day target · calls from{" "}
                       {r.callSource === "quo"
                         ? "Quo (every dial)"
                         : "HubSpot logged calls"}
-                      {" · texts from "}
-                      {r.smsSource === "quo" ? "Quo" : "HubSpot logged messages"}
-                      . Texts and other channels have no target.</>
+                      {", texts from "}
+                      {r.smsSource === "quo" ? "Quo" : "HubSpot logged messages"}.</>
                   : "No activity logged in this role over the last 7 days."}
               </p>
             </div>
