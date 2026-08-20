@@ -218,37 +218,32 @@ export async function syncCases() {
   // attributed by email domain or by branded portal, and duplicate them.
   const resolvedCompany = new Map<string, string>();
 
-  // Public-portal submissions that we can tie to a firm, for attributing the
-  // anonymous case they create. Submitting on a branded portal signs nobody in,
-  // so the resulting case has no account and no email and is unattributable on
-  // its own - but it was submitted minutes earlier on a host that names the firm.
-  const publicIntakes = phIntakes
-    .filter((it) => (it.mode ?? "") === "public" && it.submittedAt)
-    .map((it) => ({
-      companyId: companyForSlug(it.portalSlug),
-      t: new Date(it.submittedAt as string).getTime(),
-    }))
-    .filter((x): x is { companyId: string; t: number } => Boolean(x.companyId));
-  /** The firm whose portal produced this anonymous case, if one submitted within
-   * the window. Deliberately one-sided and short: the case is created BY the
-   * submission, so it cannot precede it by much, and a long window would let one
-   * firm's portal claim another firm's case. */
-  const firmFromPublicIntake = (submittedAt: string | null): string | null => {
-    if (!submittedAt) return null;
-    const t = new Date(submittedAt).getTime();
-    if (Number.isNaN(t)) return null;
-    const hits = publicIntakes.filter((p) => t - p.t >= -30 * 60 * 1000 &&
-                                             t - p.t <= 12 * 60 * 60 * 1000);
-    const firms = new Set(hits.map((h) => h.companyId));
-    return firms.size === 1 ? [...firms][0] : null;
-  };
+  // Cases created by a submission on a firm's own branded intake portal.
+  //
+  // Nobody is signed in on a public portal, so the case carries no account and no
+  // email, and the only people who ever touch it afterwards are the Silent
+  // Witness analysts who work it up - which made isTestCaseActor() discard it as
+  // internal. That is the documented failure mode of attributing a case to its
+  // busiest actor rather than its submitter, and it lost Nordean both August
+  // cases. The submission event names the firm in its host and (since 2026-07-30)
+  // carries the case id, so the two can be tied together exactly.
+  const portalCase = new Map<string, { companyId: string; submittedAt: string | null }>();
+  for (const it of phIntakes) {
+    if ((it.mode ?? "") !== "public" || !it.caseId) continue;
+    const companyId = companyForSlug(it.portalSlug);
+    if (companyId) portalCase.set(it.caseId, { companyId, submittedAt: it.submittedAt });
+  }
+  const phCaseIds = new Set(phCases.map((c) => c.caseId));
 
   // Oldest first: stand-in slots are single-use, so the pairing (and therefore
   // which cases get skipped) must not depend on PostHog's row order.
   phCases.sort((a, b) => (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""));
 
   for (const pc of phCases) {
-    if (isTestCaseActor(pc.creatorEmail, pc.accountId)) continue;
+    // A portal case has a known customer behind it, so the analysts working it
+    // must not read as "this is an internal case".
+    const portal = portalCase.get(pc.caseId);
+    if (!portal && isTestCaseActor(pc.creatorEmail, pc.accountId)) continue;
     if (EXCLUDED_CASE_IDS.includes(pc.caseId)) continue;
     stats.posthog += 1;
 
@@ -269,11 +264,7 @@ export async function syncCases() {
         }
       }
     }
-    // Anonymous case (no account, nobody signed in): the only remaining clue is
-    // a public submission on a firm's branded portal moments earlier.
-    if (!companyId && !pc.accountId && !pc.creatorEmail) {
-      companyId = firmFromPublicIntake(pc.submittedAt ?? pc.completedAt ?? pc.deliveredAt);
-    }
+    if (portal) companyId = portal.companyId;
     if (companyId) {
       stats.mapped += 1;
       resolvedCompany.set(pc.caseId, companyId);
@@ -281,7 +272,9 @@ export async function syncCases() {
 
     // Fall back to completed/delivered when there's no valid submitted date
     // (a case can appear via report events without a case_created event).
-    const submittedAt = pc.submittedAt ?? pc.completedAt ?? pc.deliveredAt;
+    // A portal case is dated by its submission: its other events belong to the
+    // analyst picking it up, which can be days later.
+    const submittedAt = portal?.submittedAt ?? pc.submittedAt ?? pc.completedAt ?? pc.deliveredAt;
 
     // Skip discovered cases that a hand-entered row already stands in for. Only
     // skip NEW ones; never delete a case a human/CS already curated.
@@ -331,7 +324,7 @@ export async function syncCases() {
       const existingBad = !existingSubmitted ||
         Number.isNaN(existingSubmitted.getTime()) ||
         existingSubmitted.getUTCFullYear() < 2015;
-      if (submittedAt && existingBad) {
+      if (submittedAt && (existingBad || portal)) {
         row.submitted_date = submittedAt;
         row.submitted_at = submittedAt;
       }
@@ -364,6 +357,10 @@ export async function syncCases() {
   for (const it of phIntakes) {
     if (isTestCaseActor(it.email, it.accountId)) continue;
     if ((it.mode ?? "") === "internal") continue;
+    // The submission names the case it created and that case is being ingested
+    // under its real id, so a synthetic intake_evt_ row would be the same matter
+    // a second time.
+    if (it.caseId && phCaseIds.has(it.caseId)) continue;
     const caseId = `intake_evt_${it.eventId}`;
     if (existingById.has(caseId)) continue;
     let companyId: string | null = (it.accountId && byAccount.get(it.accountId)) || null;

@@ -175,6 +175,9 @@ export interface PostHogIntake {
    * nordean.intake.silentwitness.ai. The only identity a public submission
    * carries: it has no account and no signed-in person. */
   portalSlug: string | null;
+  /** The case this submission created. Present since 2026-07-30; before that the
+   * submission and the case it produced cannot be linked. */
+  caseId: string | null;
 }
 
 export interface PostHogSignup {
@@ -457,7 +460,7 @@ export class PostHogProvider {
       select uuid, properties.$group_0 as account_id,
              person.properties.email as email, timestamp,
              properties.mode as mode, properties.fileCount as file_count,
-             toString(properties.$host) as host
+             toString(properties.$host) as host, properties.caseId as case_id
       from events
       where event = 'intake_submission_completed'
         and timestamp > now() - interval ${sinceDays} day
@@ -472,6 +475,7 @@ export class PostHogProvider {
       mode: r[4] ? String(r[4]).toLowerCase() : null,
       fileCount: r[5] != null ? Number(r[5]) : null,
       portalSlug: portalSlug(r[6] as string | null),
+      caseId: r[7] ? String(r[7]) : null,
     }));
   }
 
