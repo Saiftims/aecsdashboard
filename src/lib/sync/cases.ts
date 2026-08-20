@@ -303,8 +303,13 @@ export async function syncCases() {
         delivered_at: pc.deliveredAt,
         analysis_type: pc.analysisType,
         source: "posthog",
-        posthog_account_id: pc.accountId,
-        creator_email: pc.creatorEmail,
+        // A portal case has no submitter identity, and its only actors are the
+        // analysts. Storing one of those here would be wrong on the face of it
+        // AND fatal: the purge at the top of this sync deletes any case whose
+        // creator is a silentwitness.ai address or whose account is the internal
+        // one, so the row would be dropped again on every run.
+        posthog_account_id: portal ? null : pc.accountId,
+        creator_email: portal ? null : pc.creatorEmail,
         revenue_amount: 250,
         updated_at: new Date().toISOString(),
       });
@@ -313,6 +318,7 @@ export async function syncCases() {
       // override a CS-set issue_open / cancelled).
       const row: Record<string, unknown> = {
         company_hubspot_id: companyId ?? existing.company_hubspot_id,
+        ...(portal ? { posthog_account_id: null, creator_email: null } : {}),
         completed_date: pc.completedAt,
         delivered_date: pc.deliveredAt,
         delivered_at: pc.deliveredAt,
