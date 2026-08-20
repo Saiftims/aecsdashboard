@@ -345,11 +345,16 @@ export async function syncCases() {
   // Deals whose name flags an intake submission == a case for that firm.
   const phByCompany = new Map<string, number[]>(); // company -> submitted epochs
   for (const pc of phCases) {
-    if (isTestCaseActor(pc.creatorEmail, pc.accountId) || !pc.submittedAt) continue;
-    if (EXCLUDED_CASE_IDS.includes(pc.caseId)) continue;
+    // Same portal exemption as the ingestion loop: judging a portal case by its
+    // actors calls it internal and leaves it out of this index, which is how a
+    // hand-entered stand-in for it gets recreated as a duplicate every run.
+    const portal = portalCase.get(pc.caseId);
+    const submittedAt = portal?.submittedAt ?? pc.submittedAt;
+    if (!portal && isTestCaseActor(pc.creatorEmail, pc.accountId)) continue;
+    if (!submittedAt || EXCLUDED_CASE_IDS.includes(pc.caseId)) continue;
     const cid = resolvedCompany.get(pc.caseId) ??
       ((pc.accountId && byAccount.get(pc.accountId)) || null);
-    if (cid) phByCompany.set(cid, [...(phByCompany.get(cid) ?? []), new Date(pc.submittedAt).getTime()]);
+    if (cid) phByCompany.set(cid, [...(phByCompany.get(cid) ?? []), new Date(submittedAt).getTime()]);
   }
   // ---- PostHog intake-form submissions (no caseId on these events) ----
   // Each completed submission == one case, keyed by the event uuid. Firm is
