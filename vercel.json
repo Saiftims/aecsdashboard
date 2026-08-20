@@ -4,6 +4,6 @@
     { "path": "/api/cron/hubspot", "schedule": "*/15 * * * *" },
     { "path": "/api/cron/quo", "schedule": "10 * * * *" },
     { "path": "/api/cron/calendly", "schedule": "25 * * * *" },
-    { "path": "/api/cron/cases", "schedule": "0 5 * * *" }
+    { "path": "/api/cron/cases", "schedule": "40 */3 * * *" }
   ]
 }
