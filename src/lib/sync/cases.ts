@@ -96,10 +96,35 @@ export async function syncCases() {
 
   const byDomain = new Map<string, CompanyLite>();
   const byAccount = new Map<string, string>(); // acc -> hubspot_company_id
+  // Branded intake portal slug -> firm. A public submission carries no account
+  // and no person, so its portal host is the only thing identifying the firm.
+  // Indexed on both the domain stem and the squashed company name, because the
+  // slug is chosen by hand and matches one or the other ('nordean' sits under
+  // nordeanlaw.com; 'stittvu' under Stitt Vu Trial Lawyers).
+  const bySlug = new Map<string, string>();
+  const addSlug = (key: string | null | undefined, id: string) => {
+    const k = (key ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    // Ambiguity must not silently pick a winner and bill the wrong firm.
+    if (!k) return;
+    bySlug.set(k, bySlug.has(k) && bySlug.get(k) !== id ? "" : id);
+  };
   for (const c of (companies ?? []) as CompanyLite[]) {
     if (c.domain) byDomain.set(c.domain.toLowerCase(), c);
     if (c.sw_account_id) byAccount.set(c.sw_account_id, c.hubspot_id);
+    addSlug(c.domain?.split(".")[0], c.hubspot_id);
+    addSlug(c.name, c.hubspot_id);
   }
+  /** Longest company whose squashed name/domain starts with the slug, so
+   * 'nordean' still finds 'nordeanlaw.com' / 'Nordean Law'. Exact wins first. */
+  const companyForSlug = (slug: string | null): string | null => {
+    if (!slug) return null;
+    const exact = bySlug.get(slug);
+    if (exact) return exact;
+    const hits = [...bySlug.entries()]
+      .filter(([k, v]) => v && k.startsWith(slug))
+      .map(([, v]) => v);
+    return new Set(hits).size === 1 ? hits[0] : null;
+  };
   for (const m of mappings ?? []) {
     if (m.sw_account_id && m.hubspot_company_id) byAccount.set(m.sw_account_id, m.hubspot_company_id);
   }
@@ -188,6 +213,35 @@ export async function syncCases() {
   const bootstrapMappings: { sw_account_id: string; hubspot_company_id: string; confirmed: boolean }[] = [];
   const inserts: Record<string, unknown>[] = [];
   const updates: { case_id: string; row: Record<string, unknown> }[] = [];
+  // caseId -> firm, as actually resolved below. The later dedupe passes need the
+  // same answer; re-deriving it from the account id alone would miss cases
+  // attributed by email domain or by branded portal, and duplicate them.
+  const resolvedCompany = new Map<string, string>();
+
+  // Public-portal submissions that we can tie to a firm, for attributing the
+  // anonymous case they create. Submitting on a branded portal signs nobody in,
+  // so the resulting case has no account and no email and is unattributable on
+  // its own - but it was submitted minutes earlier on a host that names the firm.
+  const publicIntakes = phIntakes
+    .filter((it) => (it.mode ?? "") === "public" && it.submittedAt)
+    .map((it) => ({
+      companyId: companyForSlug(it.portalSlug),
+      t: new Date(it.submittedAt as string).getTime(),
+    }))
+    .filter((x): x is { companyId: string; t: number } => Boolean(x.companyId));
+  /** The firm whose portal produced this anonymous case, if one submitted within
+   * the window. Deliberately one-sided and short: the case is created BY the
+   * submission, so it cannot precede it by much, and a long window would let one
+   * firm's portal claim another firm's case. */
+  const firmFromPublicIntake = (submittedAt: string | null): string | null => {
+    if (!submittedAt) return null;
+    const t = new Date(submittedAt).getTime();
+    if (Number.isNaN(t)) return null;
+    const hits = publicIntakes.filter((p) => t - p.t >= -30 * 60 * 1000 &&
+                                             t - p.t <= 12 * 60 * 60 * 1000);
+    const firms = new Set(hits.map((h) => h.companyId));
+    return firms.size === 1 ? [...firms][0] : null;
+  };
 
   // Oldest first: stand-in slots are single-use, so the pairing (and therefore
   // which cases get skipped) must not depend on PostHog's row order.
@@ -215,7 +269,15 @@ export async function syncCases() {
         }
       }
     }
-    if (companyId) stats.mapped += 1; else stats.unmapped += 1;
+    // Anonymous case (no account, nobody signed in): the only remaining clue is
+    // a public submission on a firm's branded portal moments earlier.
+    if (!companyId && !pc.accountId && !pc.creatorEmail) {
+      companyId = firmFromPublicIntake(pc.submittedAt ?? pc.completedAt ?? pc.deliveredAt);
+    }
+    if (companyId) {
+      stats.mapped += 1;
+      resolvedCompany.set(pc.caseId, companyId);
+    } else stats.unmapped += 1;
 
     // Fall back to completed/delivered when there's no valid submitted date
     // (a case can appear via report events without a case_created event).
@@ -286,7 +348,8 @@ export async function syncCases() {
   for (const pc of phCases) {
     if (isTestCaseActor(pc.creatorEmail, pc.accountId) || !pc.submittedAt) continue;
     if (EXCLUDED_CASE_IDS.includes(pc.caseId)) continue;
-    const cid = (pc.accountId && byAccount.get(pc.accountId)) || null;
+    const cid = resolvedCompany.get(pc.caseId) ??
+      ((pc.accountId && byAccount.get(pc.accountId)) || null);
     if (cid) phByCompany.set(cid, [...(phByCompany.get(cid) ?? []), new Date(pc.submittedAt).getTime()]);
   }
   // ---- PostHog intake-form submissions (no caseId on these events) ----
@@ -315,10 +378,14 @@ export async function syncCases() {
         }
       }
     }
-    // Skip submissions we can't attribute to a firm (anonymous public-portal
-    // intakes carry no account/email). An unmapped intake can't be tied to a
-    // customer and would inflate revenue/volume as a phantom row - and it's
-    // almost always the same case the firm also has in-app.
+    // A public-portal submission is anonymous - no account, no signed-in person -
+    // so account and domain both fail and it used to be dropped outright. But it
+    // was made on the firm's OWN branded portal, so the host names the customer:
+    // Nordean's 13 Aug case was lost this way, and its 3 Aug one only survived
+    // because somebody happened to open the case page afterwards.
+    if (!companyId) companyId = companyForSlug(it.portalSlug);
+    // Still nothing: an intake we cannot tie to a customer would inflate
+    // revenue and volume as a phantom row.
     if (!companyId) continue;
     // dedupe: skip if a caseId-based PostHog case already exists for this firm
     // within 2 days (same physical case captured via both paths).
@@ -326,6 +393,12 @@ export async function syncCases() {
     const near = ts !== null &&
       (phByCompany.get(companyId) ?? []).some((t) => Math.abs(t - ts) <= 2 * DAY);
     if (near) continue;
+    // Or a hand-entered row someone added precisely because this submission was
+    // never tracked - same rule the discovered-case path uses.
+    if (absorbedByStandIn(companyId, it.submittedAt)) {
+      stats.dedupedStandIn += 1;
+      continue;
+    }
     inserts.push({
       case_id: caseId,
       sw_id: caseId,

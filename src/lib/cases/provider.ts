@@ -171,6 +171,10 @@ export interface PostHogIntake {
   submittedAt: string | null;
   mode: string | null;
   fileCount: number | null;
+  /** Subdomain of a branded intake portal, e.g. 'nordean' for
+   * nordean.intake.silentwitness.ai. The only identity a public submission
+   * carries: it has no account and no signed-in person. */
+  portalSlug: string | null;
 }
 
 export interface PostHogSignup {
@@ -442,12 +446,18 @@ export class PostHogProvider {
    * Neither means Silent Witness staff - internal actors are excluded by email
    * via isTestCaseActor(). In-app ('internal') submissions do create a real case,
    * which is picked up by listCasesFromUrls() under its true case id, so they are
-   * skipped here to avoid a second phantom row for the same matter. */
+   * skipped here to avoid a second phantom row for the same matter.
+   *
+   * A 'public' submission is anonymous - no account, no signed-in person - so the
+   * host is fetched too. It is the firm's own branded portal
+   * (<firm>.intake.silentwitness.ai), which is the only thing tying the
+   * submission to a customer. */
   async listIntakeSubmissions(sinceDays = 400): Promise<PostHogIntake[]> {
     const hogql = `
       select uuid, properties.$group_0 as account_id,
              person.properties.email as email, timestamp,
-             properties.mode as mode, properties.fileCount as file_count
+             properties.mode as mode, properties.fileCount as file_count,
+             toString(properties.$host) as host
       from events
       where event = 'intake_submission_completed'
         and timestamp > now() - interval ${sinceDays} day
@@ -461,6 +471,7 @@ export class PostHogProvider {
       submittedAt: safeIso(r[3] as string | null),
       mode: r[4] ? String(r[4]).toLowerCase() : null,
       fileCount: r[5] != null ? Number(r[5]) : null,
+      portalSlug: portalSlug(r[6] as string | null),
     }));
   }
 
@@ -498,6 +509,13 @@ function safeIso(v: string | null): string | null {
   const t = new Date(v);
   if (Number.isNaN(t.getTime()) || t.getUTCFullYear() < 2015) return null;
   return t.toISOString();
+}
+
+/** Firm slug from a branded intake host, e.g. nordean.intake.silentwitness.ai ->
+ * 'nordean'. Returns null for the shared app host, which identifies nobody. */
+export function portalSlug(host: string | null): string | null {
+  const m = /^([a-z0-9-]+)\.intake\.silentwitness\.ai$/i.exec((host ?? "").trim());
+  return m ? m[1].toLowerCase() : null;
 }
 
 export function toCaseRecord(c: SwCase): CaseRecord {
