@@ -45,9 +45,6 @@ const DEAL_PROPS = [
   "createdate", "closedate", "hs_lastmodifieddate",
   "sw_lead_source", "sw_first_response_hours", "sw_qualification_status",
   "sw_demo_date", "sw_demo_completed", "sw_demo_booked_by", "sw_demo_booked_at",
-  // Entry into Demo Scheduled, so a booking with no rep credit can still be
-  // counted as self-serve rather than vanishing from the demo totals.
-  "hs_v2_date_entered_5242041536",
   "sw_estimated_monthly_case_volume",
   "sw_case_volume_tier",
   "sw_first_case_identified", "sw_first_case_target_date", "sw_first_case_committed",

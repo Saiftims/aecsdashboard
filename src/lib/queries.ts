@@ -961,19 +961,18 @@ export async function demoCreditReport(now = new Date()): Promise<DemoCreditRepo
     if (c.first_case_at) firstCaseMonth.set(c.hubspot_id, c.first_case_at.slice(0, 7));
   }
 
-  // A demo booked this month is one that was CREDITED this month, or - when no
-  // rep was on it to credit - one that first entered Demo Scheduled this month.
-  const entered = `hs_v2_date_entered_${SALES_STAGES.demoScheduled}`;
+  // `sw_demo_booked_at` is the FIRST time the deal entered Demo Scheduled, which
+  // is the only trustworthy booking date: HubSpot's own hs_v2_date_entered_*
+  // reports the LATEST entry, so a deal revived out of Nurture - or one of the
+  // stage reverts the Calendly integration performs on deals with a past
+  // booking - would read as a brand-new booking and inflate the month.
+  // A blank `by` alongside a set `at` means self-serve, not missing data.
   const booked: { deal: DealRow; ownerId: string | null }[] = [];
   for (const d of deals) {
-    const by = d.properties?.sw_demo_booked_by;
     const at = d.properties?.sw_demo_booked_at;
-    if (by && at) {
-      if (at.slice(0, 7) === month) booked.push({ deal: d, ownerId: String(by) });
-      continue;
-    }
-    const e = d.properties?.[entered];
-    if (e && e.slice(0, 7) === month) booked.push({ deal: d, ownerId: null });
+    if (!at || at.slice(0, 7) !== month) continue;
+    const by = d.properties?.sw_demo_booked_by;
+    booked.push({ deal: d, ownerId: by ? String(by) : null });
   }
 
   const agg = new Map<string, DemoCreditRow>();
