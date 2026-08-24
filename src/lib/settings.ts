@@ -44,7 +44,7 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   stalledDealDays: 14,
   dashboardTimezone: "America/Los_Angeles",
   slaFirstContactHours: 2,
-  aeDailyActivityTarget: 75,
+  aeDailyActivityTarget: 100,
   csDailyActivityTarget: 40,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
@@ -117,7 +117,7 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.healthyCasesPer30d = Number(out.healthyCasesPer30d) || 2;
   out.stalledDealDays = Number(out.stalledDealDays) || 14;
   out.slaFirstContactHours = Number(out.slaFirstContactHours) || 2;
-  out.aeDailyActivityTarget = Number(out.aeDailyActivityTarget) || 75;
+  out.aeDailyActivityTarget = Number(out.aeDailyActivityTarget) || 100;
   out.csDailyActivityTarget = Number(out.csDailyActivityTarget) || 40;
   out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
