@@ -6,7 +6,9 @@ import {
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
-import { activityReport, billingRetentionReport, retentionReport } from "@/lib/queries";
+import {
+  activityReport, billingRetentionReport, demoCreditReport, retentionReport,
+} from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +28,11 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention, billing] = await Promise.all([
+  const [report, retention, billing, demoCredit] = await Promise.all([
     activityReport(user.role === "ae" ? user.hubspot_owner_id : null),
     retentionReport(),
     billingRetentionReport(),
+    demoCreditReport(),
   ]);
   const revRetention = billing.revenue;
   const useRetention = billing.usage;
@@ -118,6 +121,37 @@ export default async function ActivityPage() {
           </Card>
         ))}
       </section>
+
+      <Card>
+        <CardHeader
+          title={`Demos booked by rep \u2014 ${demoCredit.monthLabel}`}
+          action={
+            <span className="text-xs text-zinc-500">
+              {demoCredit.total} demos, {demoCredit.totalFirstCases} first cases
+            </span>
+          }
+        />
+        <Table
+          headers={["Booked by", "Demos booked", "First case this month", "Cases this month"]}
+          rows={demoCredit.rows.map((r) => [
+            r.ownerId ? r.name : <span key={r.name} className="text-zinc-500">{r.name}</span>,
+            String(r.demos),
+            r.firstCases ? String(r.firstCases) : "\u2014",
+            r.cases ? String(r.cases) : "\u2014",
+          ])}
+        />
+        <p className="px-4 pb-4 pt-2 text-xs text-zinc-500">
+          Credit is the rep who owned the deal in the minute BEFORE it entered
+          Demo Scheduled, not the current deal owner {"\u2014"} the owner sweep hands
+          every booked deal to Chris within hours, so the owner field cannot
+          answer this. Self-serve means nobody was working the lead when it
+          booked; those belong to marketing, not to whoever inherited the deal.
+          &ldquo;First case this month&rdquo; counts firms whose FIRST EVER case
+          landed this month, so it is genuinely new revenue rather than a repeat
+          submission. Stamping began {demoCredit.creditFrom}, so demos booked
+          earlier in a month that starts before then read as self-serve.
+        </p>
+      </Card>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">

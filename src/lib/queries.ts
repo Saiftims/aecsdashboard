@@ -902,6 +902,129 @@ export async function activityReport(ownerId?: string | null) {
 }
 
 // ---------------------------------------------------------------------------
+// Demo booking credit: who actually booked each demo, and what came of it.
+//
+// Credit cannot be read off the deal owner - the owner sweep hands every deal
+// from Demo Scheduled onward to Chris within hours - so it comes from
+// `sw_demo_booked_by`, stamped once by the agent from HubSpot's owner history.
+// A BLANK stamp means self-serve (nobody was working the lead when it booked),
+// not unknown, so it is reported as its own row rather than dropped.
+// ---------------------------------------------------------------------------
+export interface DemoCreditRow {
+  ownerId: string | null;       // null = self-serve
+  name: string;
+  demos: number;
+  firstCases: number;           // of those demos, firms whose FIRST case landed
+                                // in the same month
+  cases: number;                // total cases from those firms this month
+}
+
+export interface DemoCreditReport {
+  month: string;                // "2026-08"
+  monthLabel: string;           // "August 2026"
+  creditFrom: string;           // stamping go-live; earlier demos are unstamped
+  rows: DemoCreditRow[];
+  total: number;
+  totalFirstCases: number;
+}
+
+/** Demos booked this month, split by the rep who booked them. */
+export async function demoCreditReport(now = new Date()): Promise<DemoCreditReport> {
+  const month = now.toISOString().slice(0, 7);
+  const [deals, companies, owners, caseRes] = await Promise.all([
+    selectAll<DealRow>("deals"),
+    selectAll<CompanyRow>("companies", "hubspot_id, name, first_case_at"),
+    supabaseService().from("crm_owners")
+      .select("owner_id, email, first_name, last_name")
+      .then((r) => r.data ?? [], () => []),
+    supabaseService().from("cases").select("company_hubspot_id, submitted_date"),
+  ]);
+
+  const ownerName = new Map<string, string>();
+  for (const o of owners as OwnerNameRow[]) {
+    const full = `${o.first_name ?? ""} ${o.last_name ?? ""}`.trim();
+    // Alex signs in as alex@ but the HubSpot seat still reads Ahmad.
+    const isAlex = (o.email ?? "").toLowerCase().startsWith("alex@");
+    ownerName.set(String(o.owner_id),
+      isAlex ? "Alex" : (full || o.email || `Owner ${o.owner_id}`));
+  }
+
+  const casesByCompanyThisMonth = new Map<string, number>();
+  for (const c of caseRes.data ?? []) {
+    if (!c.company_hubspot_id || !c.submitted_date) continue;
+    if (c.submitted_date.slice(0, 7) !== month) continue;
+    const k = String(c.company_hubspot_id);
+    casesByCompanyThisMonth.set(k, (casesByCompanyThisMonth.get(k) ?? 0) + 1);
+  }
+  const firstCaseMonth = new Map<string, string>();
+  for (const c of companies) {
+    if (c.first_case_at) firstCaseMonth.set(c.hubspot_id, c.first_case_at.slice(0, 7));
+  }
+
+  // A demo booked this month is one that was CREDITED this month, or - when no
+  // rep was on it to credit - one that first entered Demo Scheduled this month.
+  const entered = `hs_v2_date_entered_${SALES_STAGES.demoScheduled}`;
+  const booked: { deal: DealRow; ownerId: string | null }[] = [];
+  for (const d of deals) {
+    const by = d.properties?.sw_demo_booked_by;
+    const at = d.properties?.sw_demo_booked_at;
+    if (by && at) {
+      if (at.slice(0, 7) === month) booked.push({ deal: d, ownerId: String(by) });
+      continue;
+    }
+    const e = d.properties?.[entered];
+    if (e && e.slice(0, 7) === month) booked.push({ deal: d, ownerId: null });
+  }
+
+  const agg = new Map<string, DemoCreditRow>();
+  for (const { deal, ownerId } of booked) {
+    const key = ownerId ?? "self";
+    let row = agg.get(key);
+    if (!row) {
+      row = {
+        ownerId,
+        name: ownerId ? (ownerName.get(ownerId) ?? `Owner ${ownerId}`) : "Self-serve",
+        demos: 0, firstCases: 0, cases: 0,
+      };
+      agg.set(key, row);
+    }
+    row.demos += 1;
+    const cid = deal.company_hubspot_id;
+    if (cid) {
+      row.cases += casesByCompanyThisMonth.get(cid) ?? 0;
+      if (firstCaseMonth.get(cid) === month) row.firstCases += 1;
+    }
+  }
+
+  // Reps first (biggest booker down), self-serve last - it is context, not a
+  // competitor for the top of the list.
+  const rows = [...agg.values()].sort((a, b) => {
+    if (!a.ownerId !== !b.ownerId) return a.ownerId ? -1 : 1;
+    return b.demos - a.demos;
+  });
+
+  return {
+    month,
+    monthLabel: now.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
+    creditFrom: DEMO_CREDIT_START,
+    rows,
+    total: rows.reduce((s, r) => s + r.demos, 0),
+    totalFirstCases: rows.reduce((s, r) => s + r.firstCases, 0),
+  };
+}
+
+interface OwnerNameRow {
+  owner_id: string | number;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+/** Credit stamping went live on this date; demos booked before it were
+ * deliberately not back-filled, so they read as self-serve. */
+const DEMO_CREDIT_START = "2026-08-10";
+
+// ---------------------------------------------------------------------------
 // Retention: activation->2nd->3rd->30/60/90-day funnel, first-case cohorts,
 // and usage-frequency metrics. All firm/case-level and team-wide.
 // ---------------------------------------------------------------------------
