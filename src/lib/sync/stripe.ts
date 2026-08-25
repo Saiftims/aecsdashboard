@@ -194,18 +194,36 @@ export async function syncStripe() {
     };
   });
 
+  // What a subscription ACTUALLY bills, which is not always its list price:
+  // Peerali's line reads "1 x Boutique (at $700.00 / month)" but the charge is
+  // $500, and Stitt Vu bills $300 against a $350 line. Both carry a Stripe
+  // discount that the list API returns only as an opaque id with no amount, so
+  // the real figure has to come from the most recent successful subscription
+  // charge. Gross, not net: a refund is a one-off event, not a lower price.
+  // Read off the already-classified payments rather than the raw charges: most
+  // subscription charges are described only as "Payment for Invoice", and it is
+  // the invoice line paired above that reveals them as a plan.
+  const lastSubCharge = new Map<string, number>();
+  for (const p of [...paymentRows].sort(
+    (a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))) {
+    if (p.status !== "succeeded" || !p.customer_id || p.kind !== "subscription") continue;
+    lastSubCharge.set(p.customer_id, p.amount_cents);
+  }
+
   const subscriptionRows = subscriptions.map((s) => {
     const cust = byCustomer.get(s.customer ?? "");
     const items = s.items?.data ?? [];
     const amount = items.reduce((t, i) => t + (i.price?.unit_amount ?? 0), 0);
     const interval = items[0]?.price?.recurring?.interval ?? null;
+    const billed = lastSubCharge.get(s.customer ?? "") ?? amount;
     return {
       subscription_id: s.id,
       customer_id: s.customer ?? null,
       company_hubspot_id: cust?.company_hubspot_id ?? null,
       amount_cents: amount,
+      billed_cents: billed,
       // Normalised so an annual plan can be compared with a monthly one.
-      monthly_cents: interval === "year" ? Math.round(amount / 12) : amount,
+      monthly_cents: interval === "year" ? Math.round(billed / 12) : billed,
       interval,
       status: s.status ?? null,
       is_internal: cust?.is_internal ?? false,
@@ -247,8 +265,13 @@ export async function syncStripe() {
       .reduce((t, p) => t + p.net_cents, 0),
     refundedCents: real.reduce((t, p) => t + p.refunded_cents, 0),
     unmatchedCashCents: unmatchedCash,
+    // Discount-aware: what the active plans actually bill, not their list price.
     activeMrrCents: subscriptionRows
       .filter((s) => s.status === "active" && !s.is_internal)
       .reduce((t, s) => t + (s.monthly_cents ?? 0), 0),
+    activeMrrListCents: subscriptionRows
+      .filter((s) => s.status === "active" && !s.is_internal)
+      .reduce((t, s) => t + (s.interval === "year"
+        ? Math.round((s.amount_cents ?? 0) / 12) : s.amount_cents ?? 0), 0),
   };
 }

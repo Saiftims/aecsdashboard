@@ -148,13 +148,15 @@ export function monthlyRevenue(
     !!(facts?.ready && id && facts.inStripe.has(id));
 
   // ---- firms Stripe can speak for -----------------------------------------
-  let collected = 0;
+  // Taken from the month total rather than summed over `companies`: cash is cash
+  // whether or not the caller's company list happens to include the payer, and
+  // summing per firm would silently drop any payment whose company match failed.
+  // This is also what the monthly revenue chart plots, so the two always agree.
+  const collected = facts?.ready ? facts.byMonth.get(month) ?? 0 : 0;
   const counted = new Set<string>();
   if (facts?.ready) {
     for (const c of companies) {
-      if (!stripeKnows(c.hubspot_id) || counted.has(c.hubspot_id)) continue;
-      counted.add(c.hubspot_id);
-      collected += facts.byCompanyMonth.get(c.hubspot_id)?.get(month) ?? 0;
+      if (stripeKnows(c.hubspot_id)) counted.add(c.hubspot_id);
     }
   }
 
@@ -920,13 +922,14 @@ export async function activityReport(ownerId?: string | null) {
   // Cash first, then the model for whoever Stripe cannot speak for. A payment
   // lands in the week it was TAKEN, which is not always the week the case was
   // submitted - that timing difference is real and is the point of using cash.
-  const revenue = stripeRevenueBetween(revenueFacts, weekAgoMs, nowMs)
-    + casesThisWeek.reduce((s, c) => {
-      const id = c.company_hubspot_id;
-      if (revenueFacts.ready && id && revenueFacts.inStripe.has(id)) return s;
-      if (id && planFirms.has(id)) return s;
-      return s + caseRevenue(c, settings.defaultCasePrice);
-    }, 0);
+  const revenueCollected = stripeRevenueBetween(revenueFacts, weekAgoMs, nowMs);
+  const revenueModelled = casesThisWeek.reduce((s, c) => {
+    const id = c.company_hubspot_id;
+    if (revenueFacts.ready && id && revenueFacts.inStripe.has(id)) return s;
+    if (id && planFirms.has(id)) return s;
+    return s + caseRevenue(c, settings.defaultCasePrice);
+  }, 0);
+  const revenue = revenueCollected + revenueModelled;
   // New customers = firms that BECAME a customer this week by ANY onset signal
   // (first case, app signup, subscription, or closed-won) - not just first case.
   // A firm signing up / subscribing without a case yet still counts.
@@ -957,7 +960,9 @@ export async function activityReport(ownerId?: string | null) {
 
   return {
     settings, activityTotals, daily, roleDaily, funnel, cohortSize: cohort.length,
-    revenue, casesThisWeek: casesThisWeek.length, newCustomers, dealsWon,
+    revenue, revenueCollected, revenueModelled,
+    revenueFromStripe: revenueFacts.ready,
+    casesThisWeek: casesThisWeek.length, newCustomers, dealsWon,
   };
 }
 
@@ -1534,7 +1539,14 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
 
   const firms: SeriesFirm[] = [];
   const usage: SeriesFirm[] = [];
+  // Live subscription value, NOT this month's cash. These differ and the tile
+  // wants the plan: a subscriber whose renewal date has not come round yet has
+  // collected nothing so far this month but is still worth its monthly fee.
+  let mrr = 0;
   for (const co of (companies ?? []) as CompanyRow[]) {
+    mrr += facts.ready && facts.inStripe.has(co.hubspot_id)
+      ? facts.mrrByCompany.get(co.hubspot_id) ?? 0
+      : firmMrr(co);
     const cases = caseRev.get(co.hubspot_id) ?? new Map<number, number>();
     const name = co.name ?? co.domain ?? co.hubspot_id;
     // Usage is billing-agnostic: cases are cases whether they were paid for per
@@ -1600,8 +1612,7 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
     subscriptionFirms: firms.filter((f) => f.billing === "subscription").length,
     transactionalFirms: firms.filter((f) => f.billing === "transactional").length,
     usageFirms: usage.length,
-    mrr: firms.filter((f) => f.billing === "subscription")
-      .reduce((s, f) => s + (f.series.get(nowIdx) ?? 0), 0),
+    mrr,
     partialMonth: day < daysInMonth,
     partialMonthLabel: `${monthLabel(nowIdx)} (day ${day} of ${daysInMonth})`,
   };

@@ -36,7 +36,11 @@ export default async function ActivityPage() {
   ]);
   const revRetention = billing.revenue;
   const useRetention = billing.usage;
-  const { settings, activityTotals, roleDaily, funnel, revenue, cohortSize, casesThisWeek, newCustomers, dealsWon } = report;
+  const {
+    settings, activityTotals, roleDaily, funnel, revenue, revenueCollected,
+    revenueModelled, revenueFromStripe, cohortSize, casesThisWeek, newCustomers,
+    dealsWon,
+  } = report;
   const freq = retention.frequency;
   const scope = user.role === "ae" ? "your" : "team";
   const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
@@ -64,7 +68,17 @@ export default async function ActivityPage() {
           <Stat label="New leads" value={cohortSize} tone="good" sub="deals created this week" href="/drill/funnel_leads" />
           <Stat label="New customers" value={newCustomers} tone="good" sub="new this week (case/signup/sub)" href="/drill/new_customers_7d" />
           <Stat label="Cases won" value={casesThisWeek} tone="good" sub="cases submitted this week" href="/drill/cases_7d" />
-          <Stat label="Revenue" value={money(revenue)} tone="good" sub={`${casesThisWeek} cases x $${settings.defaultCasePrice}`} href="/drill/cases_7d" />
+          <Stat
+            label="Revenue"
+            value={money(revenue)}
+            tone="good"
+            // Not "cases x $250" any more: this is money Stripe took in the last
+            // 7 days, which is a different thing from the cases submitted in them.
+            sub={revenueFromStripe
+              ? `${money(revenueCollected)} collected${revenueModelled ? ` + ${money(revenueModelled)} est.` : ""}`
+              : `${casesThisWeek} cases x $${settings.defaultCasePrice}`}
+            href="/drill/cases_7d"
+          />
           <Stat label="Deals signed" value={dealsWon} sub="closed-won this week" href="/drill/funnel_closed_won" />
         </div>
       </section>
