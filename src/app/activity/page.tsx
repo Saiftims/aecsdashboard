@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   BillingRetentionChart, DailyActivityChart, FunnelChart, MonthlyBarChart,
-  RetentionChart, RevenueRetentionChart,
+  MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
@@ -196,6 +196,35 @@ export default async function ActivityPage() {
           <div className="p-4">
             <MonthlyBarChart data={retention.monthlyCases} />
           </div>
+        </Card>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Monthly revenue
+        </h2>
+        <Card>
+          <CardHeader
+            title="Revenue per month"
+            action={
+              <span className="text-xs text-zinc-500">
+                {money(retention.monthlyRevenue.reduce((s, m) => s + m.total, 0))} all-time
+              </span>
+            }
+          />
+          <div className="p-4">
+            <MonthlyRevenueChart data={retention.monthlyRevenue} />
+          </div>
+          <p className="px-4 pb-4 text-xs text-zinc-500">
+            The solid bar is cash Stripe actually collected that month, net of
+            refunds {"\u2014"} a refunded payment is not revenue, so a firm that was
+            billed and refunded in full reads as zero. The pale bar is the firms
+            Stripe has never billed, still priced by the old rules: a flat plan
+            where one is recorded, otherwise {money(settings.defaultCasePrice)} a
+            case. That part is an estimate, not money in the bank. Revenue counts
+            in the month it was TAKEN, which is not always the month the case was
+            submitted, so this will not track the case chart above exactly.
+          </p>
         </Card>
       </section>
 

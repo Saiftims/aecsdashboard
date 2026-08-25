@@ -1094,11 +1094,22 @@ export interface CohortRow {
   retention: (number | null)[]; // Month 0..N (% retained), null if not elapsed
 }
 
+/** One month of revenue, split by how much we actually know. `collected` is cash
+ * Stripe took; `modelled` is the remaining firms priced by the old rules. Kept
+ * separate so a reader can see how much of a bar is measured. */
+export interface MonthlyRevenueRow {
+  month: string;
+  collected: number;
+  modelled: number;
+  total: number;
+}
+
 export interface RetentionReport {
   funnel: FunnelStep[];
   cohorts: CohortRow[];
   monthCols: number;
   monthlyCases: { month: string; count: number }[];
+  monthlyRevenue: MonthlyRevenueRow[];
   frequency: {
     activatedFirms: number;
     totalCases: number;
@@ -1116,6 +1127,76 @@ export interface RetentionReport {
 }
 
 const DAY_MS = 86400000;
+
+/** Revenue per calendar month, on the same rule as everything else: cash for
+ * firms Stripe has billed, modelled pricing for the rest.
+ *
+ * The modelled half has to walk each plan firm's months rather than just pricing
+ * its cases, because a flat fee is charged whether or not a case was submitted -
+ * Chudacoff bills $500 in a quiet month too.
+ */
+export async function monthlyRevenueSeries(): Promise<MonthlyRevenueRow[]> {
+  const sb = supabaseService();
+  const settings = await loadSettings();
+  const [{ data: companies }, { data: caseRows }, facts] = await Promise.all([
+    sb.from("companies").select("*"),
+    sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount"),
+    loadRevenueFacts(),
+  ]);
+  const now = new Date();
+  const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
+  const knows = (id: string | null | undefined) =>
+    !!(facts.ready && id && facts.inStripe.has(id));
+
+  const collected = new Map<number, number>(facts.byMonth);
+  const modelled = new Map<number, number>();
+  const add = (m: number, v: number) =>
+    modelled.set(m, (modelled.get(m) ?? 0) + v);
+
+  const planFirms = new Set<string>();
+  const firstCaseMonth = new Map<string, number>();
+  for (const c of caseRows ?? []) {
+    const m = monthIndexOf(c.submitted_date);
+    if (m === null || !c.company_hubspot_id) continue;
+    const prev = firstCaseMonth.get(c.company_hubspot_id);
+    if (prev == null || m < prev) firstCaseMonth.set(c.company_hubspot_id, m);
+  }
+
+  for (const co of (companies ?? []) as CompanyRow[]) {
+    if (knows(co.hubspot_id)) continue;
+    const amount = firmPlanAmount(co);
+    if (amount <= 0) continue;
+    planFirms.add(co.hubspot_id);
+    const start = monthIndexOf(co.subscribed_at)
+      ?? firstCaseMonth.get(co.hubspot_id);
+    if (start == null) continue;
+    const end = firmPlanEnd(co);
+    const last = Math.min(
+      end ? end.getUTCFullYear() * 12 + end.getUTCMonth() : nowIdx, nowIdx);
+    for (let m = start; m <= last; m += 1) add(m, amount);
+  }
+
+  for (const c of caseRows ?? []) {
+    const m = monthIndexOf(c.submitted_date);
+    if (m === null) continue;
+    const id = c.company_hubspot_id;
+    // A plan firm's cases bill nothing extra, and a Stripe firm's cases are
+    // already counted as the cash they produced.
+    if (knows(id) || (id && planFirms.has(id))) continue;
+    add(m, caseRevenue(c, settings.defaultCasePrice));
+  }
+
+  const months = [...new Set([...collected.keys(), ...modelled.keys()])]
+    .filter((m) => m <= nowIdx)
+    .sort((a, b) => a - b);
+  return months.map((m) => {
+    const c = Math.round(collected.get(m) ?? 0);
+    const e = Math.round(modelled.get(m) ?? 0);
+    const label = new Date(Date.UTC(Math.floor(m / 12), m % 12, 1))
+      .toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+    return { month: label, collected: c, modelled: e, total: c + e };
+  });
+}
 
 export async function retentionReport(): Promise<RetentionReport> {
   const sb = supabaseService();
@@ -1157,6 +1238,8 @@ export async function retentionReport(): Promise<RetentionReport> {
       month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
       count,
     }));
+
+  const monthlyRevenue = await monthlyRevenueSeries();
 
   const has2 = firms.filter((f) => f.length >= 2).length;
   const has3 = firms.filter((f) => f.length >= 3).length;
@@ -1214,7 +1297,7 @@ export async function retentionReport(): Promise<RetentionReport> {
   const round1 = (n: number) => Math.round(n * 10) / 10;
 
   return {
-    funnel, cohorts, monthCols, monthlyCases,
+    funnel, cohorts, monthCols, monthlyCases, monthlyRevenue,
     frequency: {
       activatedFirms: activated,
       totalCases,

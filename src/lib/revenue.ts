@@ -49,6 +49,10 @@ export interface RevenueFacts {
   inStripe: Set<string>;
   /** company id -> month index -> dollars collected. */
   byCompanyMonth: Map<string, Map<number, number>>;
+  /** month index -> dollars collected across ALL real payers, including any the
+   * company match missed. Use this for a total; `byCompanyMonth` can only speak
+   * for firms that were matched. */
+  byMonth: Map<number, number>;
   /** Live subscription value per firm, in dollars a month. */
   mrrByCompany: Map<string, number>;
   payments: StripePayment[];
@@ -61,6 +65,7 @@ const EMPTY: RevenueFacts = {
   ready: false,
   inStripe: new Set(),
   byCompanyMonth: new Map(),
+  byMonth: new Map(),
   mrrByCompany: new Map(),
   payments: [],
   unmatched: 0,
@@ -86,6 +91,7 @@ export async function loadRevenueFacts(): Promise<RevenueFacts> {
   }
 
   const byCompanyMonth = new Map<string, Map<number, number>>();
+  const byMonth = new Map<number, number>();
   const payments: StripePayment[] = [];
   let unmatched = 0;
   let totalCollected = 0;
@@ -103,8 +109,9 @@ export async function loadRevenueFacts(): Promise<RevenueFacts> {
     });
     if (!net) continue;
     totalCollected += net;
-    if (!p.company_hubspot_id) { unmatched += net; continue; }
     const m = monthIndexOf(p.created_at);
+    if (m !== null) byMonth.set(m, (byMonth.get(m) ?? 0) + net);
+    if (!p.company_hubspot_id) { unmatched += net; continue; }
     if (m === null) continue;
     const firm = byCompanyMonth.get(p.company_hubspot_id) ?? new Map<number, number>();
     firm.set(m, (firm.get(m) ?? 0) + net);
@@ -119,8 +126,8 @@ export async function loadRevenueFacts(): Promise<RevenueFacts> {
       (mrrByCompany.get(s.company_hubspot_id) ?? 0) + amount);
   }
 
-  return { ready: true, inStripe, byCompanyMonth, mrrByCompany, payments,
-    unmatched, totalCollected };
+  return { ready: true, inStripe, byCompanyMonth, byMonth, mrrByCompany,
+    payments, unmatched, totalCollected };
 }
 
 /** Cash collected from a firm in one calendar month, or null when Stripe cannot

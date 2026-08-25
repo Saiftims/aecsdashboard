@@ -218,6 +218,35 @@ export function BillingRetentionChart({
   );
 }
 
+/** Revenue per month, stacked so the measured part is visibly separate from the
+ * estimated part. They are not equally trustworthy and a single bar would hide
+ * that: the solid block is cash Stripe collected, the pale block is firms Stripe
+ * has never billed, still priced by the old per-case/flat-fee rules. */
+export function MonthlyRevenueChart({
+  data,
+}: {
+  data: { month: string; collected: number; modelled: number; total: number }[];
+}) {
+  const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
+  const hasModelled = data.some((d) => d.modelled > 0);
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+        <YAxis width={58} tick={{ fontSize: 11 }}
+               tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
+        <Tooltip formatter={(v, name) => [money(Number(v)), name]} />
+        {hasModelled && <Legend wrapperStyle={{ fontSize: 11 }} />}
+        <Bar dataKey="collected" stackId="rev" name="Collected (Stripe)"
+             fill="hsl(150 55% 40%)" radius={hasModelled ? undefined : [4, 4, 0, 0]} />
+        <Bar dataKey="modelled" stackId="rev" name="Estimated (not in Stripe)"
+             fill="hsl(150 30% 72%)" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 export function MonthlyBarChart({
   data,
 }: {
