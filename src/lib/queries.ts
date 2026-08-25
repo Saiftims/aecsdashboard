@@ -12,6 +12,9 @@ import {
   activityTodayFor, buildRoleActivity, callsTodayFor, fetchRepSources,
   quoBackedOwners, roleOf, textsComeFromQuo,
 } from "@/lib/rep-activity";
+import {
+  loadRevenueFacts, monthIndexOf, stripeRevenueBetween, type RevenueFacts,
+} from "@/lib/revenue";
 import { loadSettings } from "@/lib/settings";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
@@ -124,26 +127,67 @@ export function caseRevenue(c: { revenue_amount: number | null }, price: number)
   return c.revenue_amount == null ? price : Number(c.revenue_amount) || 0;
 }
 
-/** Monthly revenue split: subscription firms bill their flat MRR (their per-case
- * cases are ignored); everyone else bills per case. `monthCases` must carry
- * company_hubspot_id + revenue_amount for cases submitted this month. */
+/** Monthly revenue split.
+ *
+ * Where Stripe knows the firm, its figure IS the firm's revenue: the cash
+ * collected this month, net of refunds. Firms Stripe has never billed keep the
+ * old model - flat MRR if they are on a plan, otherwise $250 a case - because
+ * something still has to price their cases. See src/lib/revenue.ts.
+ *
+ * `facts` is optional so the pure model stays testable and so a page that has
+ * not loaded Stripe still renders; pass it for a figure that matches the bank.
+ */
 export function monthlyRevenue(
   companies: { hubspot_id: string; billing_type?: string | null; subscription_monthly_amount?: number | null }[],
   monthCases: { company_hubspot_id: string | null; revenue_amount: number | null }[],
   price: number,
-): { mrr: number; transactional: number; total: number; subscriptionFirms: number } {
+  facts?: RevenueFacts,
+  month: number = new Date().getUTCFullYear() * 12 + new Date().getUTCMonth(),
+): { mrr: number; transactional: number; total: number; subscriptionFirms: number; collected: number; modelled: number } {
+  const stripeKnows = (id: string | null | undefined) =>
+    !!(facts?.ready && id && facts.inStripe.has(id));
+
+  // ---- firms Stripe can speak for -----------------------------------------
+  let collected = 0;
+  const counted = new Set<string>();
+  if (facts?.ready) {
+    for (const c of companies) {
+      if (!stripeKnows(c.hubspot_id) || counted.has(c.hubspot_id)) continue;
+      counted.add(c.hubspot_id);
+      collected += facts.byCompanyMonth.get(c.hubspot_id)?.get(month) ?? 0;
+    }
+  }
+
+  // ---- everyone else, on the old model ------------------------------------
   const subIds = new Set<string>();
   let mrr = 0;
   for (const c of companies) {
+    if (stripeKnows(c.hubspot_id)) continue;
     const amt = firmMrr(c);
     if (amt > 0) { subIds.add(c.hubspot_id); mrr += amt; }
   }
   let transactional = 0;
   for (const mc of monthCases) {
+    if (stripeKnows(mc.company_hubspot_id)) continue;
     if (mc.company_hubspot_id && subIds.has(mc.company_hubspot_id)) continue;
     transactional += caseRevenue(mc, price);
   }
-  return { mrr, transactional, total: mrr + transactional, subscriptionFirms: subIds.size };
+
+  const modelled = mrr + transactional;
+  // Live subscription value is Stripe's where it has the firm, so that a plan
+  // repriced in Stripe needs no edit in HubSpot to show up here.
+  const stripeMrr = facts?.ready
+    ? [...counted].reduce((s, id) => s + (facts.mrrByCompany.get(id) ?? 0), 0)
+    : 0;
+  return {
+    mrr: mrr + stripeMrr,
+    transactional,
+    total: collected + modelled,
+    subscriptionFirms: subIds.size + (facts?.ready
+      ? [...counted].filter((id) => (facts.mrrByCompany.get(id) ?? 0) > 0).length : 0),
+    collected,
+    modelled,
+  };
 }
 
 export interface ActivityRow {
@@ -394,10 +438,13 @@ export async function execOverview() {
     .from("cases").select("sw_id, submitted_at, company_hubspot_id, revenue_amount")
     .gte("submitted_at", monthStart.toISOString());
   const casesThisMonth = monthCases?.length ?? 0;
+  const revenueFacts = await loadRevenueFacts();
   const monthRevenue = monthlyRevenue(
     companies,
     (monthCases ?? []) as { company_hubspot_id: string | null; revenue_amount: number | null }[],
     settings.defaultCasePrice,
+    revenueFacts,
+    monthIndexOf(monthStart.toISOString()) ?? undefined,
   );
 
   const pipelineValue = sales
@@ -848,25 +895,35 @@ export async function activityReport(ownerId?: string | null) {
   }));
 
   // ---- real results this week (firm/case-level, team-wide) ------------------
-  // Revenue = cases submitted in the window x their price ($250/case) - NOT deal
-  // "amount" (rarely set). New customers = firms whose FIRST case landed this
-  // week (they started generating revenue). These are firm-level, so they are
-  // team-wide regardless of the AE activity scope above.
+  // Revenue is the money Stripe actually took this week, plus modelled pricing
+  // for firms Stripe has never billed. New customers = firms whose FIRST case
+  // landed this week (they started generating revenue). These are firm-level, so
+  // they are team-wide regardless of the AE activity scope above.
   const inWeek = (iso: string | null) => {
     if (!iso) return false;
     const t = new Date(iso).getTime();
     return t >= weekAgoMs && t <= nowMs;
   };
-  const { data: caseRows } = await supabaseService()
-    .from("cases").select("company_hubspot_id, submitted_date, revenue_amount");
+  const [{ data: caseRows }, revenueFacts] = await Promise.all([
+    supabaseService()
+      .from("cases").select("company_hubspot_id, submitted_date, revenue_amount"),
+    loadRevenueFacts(),
+  ]);
   const casesThisWeek = (caseRows ?? []).filter((c) => inWeek(c.submitted_date));
   // A subscriber's case bills nothing extra - their flat fee already covers it,
   // so pricing it per case invents money (same rule as monthlyRevenue).
   const planFirms = new Set(
     companies.filter((c) => firmPlanAmount(c) > 0).map((c) => c.hubspot_id));
-  const revenue = casesThisWeek.reduce((s, c) => s + (
-    c.company_hubspot_id && planFirms.has(c.company_hubspot_id)
-      ? 0 : caseRevenue(c, settings.defaultCasePrice)), 0);
+  // Cash first, then the model for whoever Stripe cannot speak for. A payment
+  // lands in the week it was TAKEN, which is not always the week the case was
+  // submitted - that timing difference is real and is the point of using cash.
+  const revenue = stripeRevenueBetween(revenueFacts, weekAgoMs, nowMs)
+    + casesThisWeek.reduce((s, c) => {
+      const id = c.company_hubspot_id;
+      if (revenueFacts.ready && id && revenueFacts.inStripe.has(id)) return s;
+      if (id && planFirms.has(id)) return s;
+      return s + caseRevenue(c, settings.defaultCasePrice);
+    }, 0);
   // New customers = firms that BECAME a customer this week by ANY onset signal
   // (first case, app signup, subscription, or closed-won) - not just first case.
   // A firm signing up / subscribing without a case yet still counts.
@@ -1367,12 +1424,13 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
   const monthLabel = (i: number) => new Date(`${monthKey(i)}-01T00:00:00Z`)
     .toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 
-  const [{ data: companies }, { data: caseRows }] = await Promise.all([
+  const [{ data: companies }, { data: caseRows }, facts] = await Promise.all([
     // select(*) on purpose: subscription_ended_at only exists after migration
     // 0006 and naming a missing column would 400 the whole page.
     sb.from("companies").select("*"),
     sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount")
       .not("company_hubspot_id", "is", null),
+    loadRevenueFacts(),
   ]);
 
   const caseRev = new Map<string, Map<number, number>>();
@@ -1409,7 +1467,19 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
     const amount = onPlan ? firmPlanAmount(co) : 0;
     let rev: Map<number, number>;
     let billing: "subscription" | "transactional";
-    if (amount > 0) {
+    const collected = facts.ready && facts.inStripe.has(co.hubspot_id)
+      ? facts.byCompanyMonth.get(co.hubspot_id) : undefined;
+    if (collected) {
+      // Stripe billed this firm, so its curve is the cash it actually paid,
+      // month by month. Modelling it instead flattered exactly the firms this
+      // chart exists to judge: a plan that was refunded or lapsed kept drawing a
+      // full flat fee for every month since, which is the shape of perfect
+      // retention on a firm that had stopped paying.
+      if (!collected.size) continue;
+      rev = collected;
+      billing = onPlan || (facts.mrrByCompany.get(co.hubspot_id) ?? 0) > 0
+        ? "subscription" : "transactional";
+    } else if (amount > 0) {
       // A subscription bills the same every month it is live. No cancellation
       // date recorded = still live: the flat fee runs to today.
       const start = idxOf(co.subscribed_at) ??
@@ -1552,6 +1622,13 @@ export async function csDashboard(segment: CsSegment = "all") {
   }
   const attainmentVals = customers.map((c) => c.target_attainment_percent).filter((v): v is number => v != null);
 
+  // Stripe cash where it knows the firm, modelled pricing for the rest. Computed
+  // once: it reads three tables and both tiles below want the same answer.
+  const csRevenue = monthlyRevenue(
+    customers, monthCases, settings.defaultCasePrice,
+    await loadRevenueFacts(), monthIndexOf(monthStart.toISOString()) ?? undefined,
+  );
+
   // Signed up (app account) but no case submitted yet - activation cohort.
   const signedUpNoCase = customers.filter(
     (c) => c.signed_up_at && !c.first_case_at,
@@ -1573,8 +1650,8 @@ export async function csDashboard(segment: CsSegment = "all") {
     churnedFirms: health("churned").length,
     reactivationInProgress: deals.filter((d) => d.activation_stage === "reactivation_in_progress").length,
     casesThisMonth: monthCases.length,
-    revenueThisMonth: monthlyRevenue(customers, monthCases, settings.defaultCasePrice).total,
-    mrr: monthlyRevenue(customers, monthCases, settings.defaultCasePrice).mrr,
+    revenueThisMonth: csRevenue.total,
+    mrr: csRevenue.mrr,
     expertReviewsOffered: casesForCust.filter((c) => c.expert_review_offered).length,
     expertReviewsBooked: casesForCust.filter((c) => c.expert_review_booked).length,
     expertReviewsCompleted: casesForCust.filter((c) => c.expert_review_completed).length,

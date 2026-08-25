@@ -4,10 +4,11 @@ import { syncHubSpot } from "@/lib/sync/hubspot";
 import { syncCalendly } from "@/lib/sync/calendly";
 import { computeRollups, syncCases } from "@/lib/sync/cases";
 import { syncQuo } from "@/lib/sync/quo";
+import { syncStripe } from "@/lib/sync/stripe";
 
 export type SyncKind =
   | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup"
-  | "quo" | "quo_full" | "quo_messages_full";
+  | "quo" | "quo_full" | "quo_messages_full" | "stripe";
 
 export async function runSync(kinds: SyncKind[]) {
   const sb = supabaseService();
@@ -52,6 +53,11 @@ export async function runSync(kinds: SyncKind[]) {
         // line) does not fit in the 300s function limit, but the message walk
         // is one request per thread and comfortably does.
         stats = await syncQuo(sinceMs, { skipCalls: kind === "quo_messages_full" });
+      } else if (kind === "stripe") {
+        // Always a full pull: the whole account is ~50 customers and a few
+        // hundred charges, and refunds mutate rows that are already synced, so
+        // an incremental window would miss money coming back out.
+        stats = await syncStripe();
       } else if (kind === "cases") {
         stats = await syncCases();
       } else if (kind === "rollup") {
