@@ -41,7 +41,11 @@ export default async function ExecutivePage() {
             label="Revenue (month)"
             value={fmtMoney(kpis.estRevenueThisMonth)}
             tone="good"
-            sub={`${fmtMoney(kpis.mrr)} subscription + ${fmtMoney(kpis.transactionalRevenueThisMonth)} per-case`}
+            sub={kpis.actualRevenueThisMonth == null
+              ? `${fmtMoney(kpis.mrr)} subscription + ${fmtMoney(kpis.transactionalRevenueThisMonth)} per-case`
+              // Say which part is money and which is still a guess: the two are
+              // not equally trustworthy and the total hides that.
+              : `${fmtMoney(kpis.actualRevenueThisMonth)} collected in Stripe + ${fmtMoney(kpis.modelledRevenueThisMonth ?? 0)} estimated`}
           />
           <Stat
             label="MRR (subscriptions)"

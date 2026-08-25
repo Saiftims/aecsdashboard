@@ -495,7 +495,10 @@ export async function execOverview() {
       mrr: monthRevenue.mrr,
       transactionalRevenueThisMonth: monthRevenue.transactional,
       subscriptionFirms: monthRevenue.subscriptionFirms,
-      actualRevenueThisMonth: null as number | null, // no invoice source yet
+      // Cash Stripe actually took this month. The rest of the total is still
+      // modelled, for the firms Stripe has never billed.
+      actualRevenueThisMonth: revenueFacts.ready ? monthRevenue.collected : null,
+      modelledRevenueThisMonth: revenueFacts.ready ? monthRevenue.modelled : null,
       avgCasesPerActiveFirm: activeFirms.length
         ? Math.round((activeFirms.reduce((s, c) => s + c.cases_30d, 0) / activeFirms.length) * 10) / 10
         : 0,
