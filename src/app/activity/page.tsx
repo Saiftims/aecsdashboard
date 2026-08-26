@@ -277,7 +277,15 @@ export default async function ActivityPage() {
           Cohort retention — grouped by first-case month
         </h2>
         <Card>
-          <CardHeader title="Retention curve (% of cohort still submitting)" />
+          <CardHeader
+            title="Retention curve (% of cohort still submitting)"
+            action={billing.partialMonth ? (
+              <span className="text-xs text-amber-600">
+                {billing.partialMonthLabel} is still running — whichever month
+                lands on it is understated
+              </span>
+            ) : null}
+          />
           <div className="p-4">
             <RetentionChart cohorts={retention.cohorts} monthCols={retention.monthCols} />
           </div>
@@ -297,6 +305,11 @@ export default async function ActivityPage() {
         <p className="mt-2 text-xs text-zinc-400">
           Each cohort = firms whose first case landed that month. Month N = % of the cohort that
           submitted a case N calendar months later. &ldquo;—&rdquo; = that month hasn&apos;t elapsed yet.
+          {billing.partialMonth ? ` The column landing on ${billing.partialMonthLabel} is measured against an unfinished month, so it can only go up.` : ""}{" "}
+          A steep month-1 drop is expected while most firms arrive with a single
+          case: one case is a trial, not yet a habit, so this reads as &ldquo;came
+          back&rdquo; against &ldquo;tried once&rdquo; rather than as churn of
+          established accounts.
         </p>
       </section>
 
