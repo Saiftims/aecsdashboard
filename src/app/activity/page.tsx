@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   BillingRetentionChart, DailyActivityChart, FunnelChart, MonthlyBarChart,
-  MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
+  MonthlyFirmsChart, MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
@@ -210,6 +210,34 @@ export default async function ActivityPage() {
           <div className="p-4">
             <MonthlyBarChart data={retention.monthlyCases} />
           </div>
+        </Card>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Monthly new firms
+        </h2>
+        <Card>
+          <CardHeader
+            title="New firms per month"
+            action={
+              <span className="text-xs text-zinc-500">
+                {retention.monthlyNewFirms.reduce((s, m) => s + m.count, 0)} firms all-time
+              </span>
+            }
+          />
+          <div className="p-4">
+            <MonthlyFirmsChart data={retention.monthlyNewFirms} />
+          </div>
+          <p className="px-4 pb-4 text-xs text-zinc-500">
+            A firm counts in the month it first became a customer, by whichever
+            came first: an app signup, its deal closing won, its first case, or
+            a plan starting. That is the same rule as the New customers card
+            above, so the two agree. The pale block is firms with no app account
+            of their own {"\u2014"} a deal Chris closed, or a case that arrived
+            through an intake form {"\u2014"} which counting signups alone would
+            miss. Each firm appears once, in its first month only.
+          </p>
         </Card>
       </section>
 

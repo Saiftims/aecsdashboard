@@ -1109,11 +1109,23 @@ export interface MonthlyRevenueRow {
   total: number;
 }
 
+/** One month of firms that became customers, split by what made them one.
+ * `signup` is a firm that created an app account; `other` reached us a
+ * different way - a first case through an intake form, or a plan starting -
+ * without an app signup of its own. */
+export interface MonthlyFirmsRow {
+  month: string;
+  signup: number;
+  other: number;
+  count: number;
+}
+
 export interface RetentionReport {
   funnel: FunnelStep[];
   cohorts: CohortRow[];
   monthCols: number;
   monthlyCases: { month: string; count: number }[];
+  monthlyNewFirms: MonthlyFirmsRow[];
   monthlyRevenue: MonthlyRevenueRow[];
   frequency: {
     activatedFirms: number;
@@ -1213,9 +1225,14 @@ export async function retentionReport(): Promise<RetentionReport> {
   };
   const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
 
-  const { data: caseRows } = await sb.from("cases")
-    .select("company_hubspot_id, submitted_date")
-    .not("company_hubspot_id", "is", null);
+  const [{ data: caseRows }, { data: firmRows }, { data: dealRows }] = await Promise.all([
+    sb.from("cases").select("company_hubspot_id, submitted_date")
+      .not("company_hubspot_id", "is", null),
+    sb.from("companies")
+      .select("hubspot_id, signed_up_at, first_case_at, subscribed_at"),
+    sb.from("deals").select("company_hubspot_id, stage, closed_at")
+      .eq("stage", SALES_STAGES.closedWon),
+  ]);
 
   // firm -> ascending submitted timestamps
   const byFirm = new Map<string, number[]>();
@@ -1242,6 +1259,51 @@ export async function retentionReport(): Promise<RetentionReport> {
     .map(([k, count]) => ({
       month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
       count,
+    }));
+
+  // ---- new firms per calendar month ----
+  // A firm counts from the moment it first became a customer by ANY signal, on
+  // the same rule as the "New customers" card, so the two agree. Most arrive by
+  // signing up in the app, but a firm can reach us through an intake form or
+  // start a plan without ever creating an account - dating those off the signup
+  // alone would leave them out of the growth picture entirely.
+  const earliestWon = new Map<string, number>();
+  for (const d of dealRows ?? []) {
+    if (!d.closed_at || !d.company_hubspot_id) continue;
+    const t = new Date(d.closed_at).getTime();
+    if (Number.isNaN(t)) continue;
+    const prev = earliestWon.get(d.company_hubspot_id);
+    if (prev == null || t < prev) earliestWon.set(d.company_hubspot_id, t);
+  }
+  const firmMonths = new Map<string, { signup: number; other: number }>();
+  for (const c of firmRows ?? []) {
+    const candidates: { t: number; signup: boolean }[] = [];
+    const push = (iso: string | null, signup: boolean) => {
+      if (!iso) return;
+      const t = new Date(iso).getTime();
+      if (!Number.isNaN(t)) candidates.push({ t, signup });
+    };
+    push(c.signed_up_at, true);
+    push(c.first_case_at, false);
+    push(c.subscribed_at, false);
+    const won = earliestWon.get(c.hubspot_id);
+    if (won != null) candidates.push({ t: won, signup: false });
+    if (!candidates.length) continue;
+    const onset = candidates.reduce((a, b) => (b.t < a.t ? b : a));
+    const d = new Date(onset.t);
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const bucket = firmMonths.get(key) ?? { signup: 0, other: 0 };
+    if (onset.signup) bucket.signup += 1;
+    else bucket.other += 1;
+    firmMonths.set(key, bucket);
+  }
+  const monthlyNewFirms: MonthlyFirmsRow[] = [...firmMonths.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => ({
+      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+      signup: v.signup,
+      other: v.other,
+      count: v.signup + v.other,
     }));
 
   const monthlyRevenue = await monthlyRevenueSeries();
@@ -1302,7 +1364,7 @@ export async function retentionReport(): Promise<RetentionReport> {
   const round1 = (n: number) => Math.round(n * 10) / 10;
 
   return {
-    funnel, cohorts, monthCols, monthlyCases, monthlyRevenue,
+    funnel, cohorts, monthCols, monthlyCases, monthlyNewFirms, monthlyRevenue,
     frequency: {
       activatedFirms: activated,
       totalCases,

@@ -247,6 +247,33 @@ export function MonthlyRevenueChart({
   );
 }
 
+/** New firms per month, stacked by how they arrived. The solid block signed up
+ * in the app; the pale block became customers another way - a deal closing, a
+ * case through an intake form, a plan starting - and a signup-only count would
+ * miss them entirely. */
+export function MonthlyFirmsChart({
+  data,
+}: {
+  data: { month: string; signup: number; other: number; count: number }[];
+}) {
+  const hasOther = data.some((d) => d.other > 0);
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+        <YAxis allowDecimals={false} width={28} />
+        <Tooltip />
+        {hasOther && <Legend wrapperStyle={{ fontSize: 11 }} />}
+        <Bar dataKey="signup" stackId="firms" name="Signed up in app"
+             fill="hsl(265 60% 55%)" radius={hasOther ? undefined : [4, 4, 0, 0]} />
+        <Bar dataKey="other" stackId="firms" name="No app signup"
+             fill="hsl(265 45% 78%)" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 export function MonthlyBarChart({
   data,
 }: {
