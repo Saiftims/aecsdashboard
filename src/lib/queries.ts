@@ -1109,23 +1109,13 @@ export interface MonthlyRevenueRow {
   total: number;
 }
 
-/** One month of firms that became customers, split by what made them one.
- * `signup` is a firm that created an app account; `other` reached us a
- * different way - a first case through an intake form, or a plan starting -
- * without an app signup of its own. */
-export interface MonthlyFirmsRow {
-  month: string;
-  signup: number;
-  other: number;
-  count: number;
-}
-
 export interface RetentionReport {
   funnel: FunnelStep[];
   cohorts: CohortRow[];
   monthCols: number;
   monthlyCases: { month: string; count: number }[];
-  monthlyNewFirms: MonthlyFirmsRow[];
+  monthlyNewFirms: { month: string; count: number }[];
+  monthlyDemos: { month: string; count: number }[];
   monthlyRevenue: MonthlyRevenueRow[];
   frequency: {
     activatedFirms: number;
@@ -1225,14 +1215,20 @@ export async function retentionReport(): Promise<RetentionReport> {
   };
   const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
 
-  const [{ data: caseRows }, { data: firmRows }, { data: dealRows }] = await Promise.all([
+  const [{ data: caseRows }, { data: demoRows }, { data: statusRows }] = await Promise.all([
     sb.from("cases").select("company_hubspot_id, submitted_date")
       .not("company_hubspot_id", "is", null),
-    sb.from("companies")
-      .select("hubspot_id, signed_up_at, first_case_at, subscribed_at"),
-    sb.from("deals").select("company_hubspot_id, stage, closed_at")
-      .eq("stage", SALES_STAGES.closedWon),
+    sb.from("deals").select("hubspot_id, properties"),
+    sb.from("companies").select("hubspot_id, status:properties->>sw_customer_status"),
   ]);
+  // Trial firms (sw_customer_status='trial' on the HubSpot company, e.g.
+  // Wheatley and Amy P. Lee Law, owner-confirmed 2026-08-31) try the product
+  // for free. Their cases are real work and stay in case counts, revenue and
+  // new-firm numbers - but they never had a paying relationship to retain, so
+  // they are left out of the retention cohorts, which they would only drag down.
+  const trialFirms = new Set(
+    (statusRows ?? []).filter((r) => r.status === "trial").map((r) => r.hubspot_id),
+  );
 
   // firm -> ascending submitted timestamps
   const byFirm = new Map<string, number[]>();
@@ -1262,48 +1258,45 @@ export async function retentionReport(): Promise<RetentionReport> {
     }));
 
   // ---- new firms per calendar month ----
-  // A firm counts from the moment it first became a customer by ANY signal, on
-  // the same rule as the "New customers" card, so the two agree. Most arrive by
-  // signing up in the app, but a firm can reach us through an intake form or
-  // start a plan without ever creating an account - dating those off the signup
-  // alone would leave them out of the growth picture entirely.
-  const earliestWon = new Map<string, number>();
-  for (const d of dealRows ?? []) {
-    if (!d.closed_at || !d.company_hubspot_id) continue;
-    const t = new Date(d.closed_at).getTime();
-    if (Number.isNaN(t)) continue;
-    const prev = earliestWon.get(d.company_hubspot_id);
-    if (prev == null || t < prev) earliestWon.set(d.company_hubspot_id, t);
-  }
-  const firmMonths = new Map<string, { signup: number; other: number }>();
-  for (const c of firmRows ?? []) {
-    const candidates: { t: number; signup: boolean }[] = [];
-    const push = (iso: string | null, signup: boolean) => {
-      if (!iso) return;
-      const t = new Date(iso).getTime();
-      if (!Number.isNaN(t)) candidates.push({ t, signup });
-    };
-    push(c.signed_up_at, true);
-    push(c.first_case_at, false);
-    push(c.subscribed_at, false);
-    const won = earliestWon.get(c.hubspot_id);
-    if (won != null) candidates.push({ t: won, signup: false });
-    if (!candidates.length) continue;
-    const onset = candidates.reduce((a, b) => (b.t < a.t ? b : a));
-    const d = new Date(onset.t);
+  // A firm is new in the month its FIRST case landed - the owner counts firms
+  // by when they started actually using us, not by signups or deal paperwork
+  // (owner-confirmed 2026-08-28: signup-only and closed-won-only firms are
+  // pipeline, not new firms). Same first-case month the cohort tables use.
+  const firmMonths = new Map<string, number>();
+  for (const timestamps of firms) {
+    const d = new Date(timestamps[0]);
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    const bucket = firmMonths.get(key) ?? { signup: 0, other: 0 };
-    if (onset.signup) bucket.signup += 1;
-    else bucket.other += 1;
-    firmMonths.set(key, bucket);
+    firmMonths.set(key, (firmMonths.get(key) ?? 0) + 1);
   }
-  const monthlyNewFirms: MonthlyFirmsRow[] = [...firmMonths.entries()]
+  const monthlyNewFirms = [...firmMonths.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => ({
+    .map(([k, count]) => ({
       month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
-      signup: v.signup,
-      other: v.other,
-      count: v.signup + v.other,
+      count,
+    }));
+
+  // ---- demos run per calendar month ----
+  // sw_demo_completed is the single evidence a demo ran: the Calendly sync
+  // stamps it on attendance, and also stamps deals the CSM hand-moves into
+  // Demo Completed for demos that happened off Calendly (owner-confirmed
+  // 2026-08-28). A no-show gets no stamp and never counts here. Future-dated
+  // demos are bookings, not demos run, and are dropped.
+  const demoMonths = new Map<string, number>();
+  for (const d of demoRows ?? []) {
+    const props = (d.properties ?? {}) as Record<string, unknown>;
+    if (String(props.sw_demo_completed ?? "").toLowerCase() !== "true") continue;
+    const raw = props.sw_demo_date;
+    if (typeof raw !== "string" || !raw) continue;
+    const when = new Date(raw);
+    if (Number.isNaN(when.getTime()) || when.getTime() > nowMs) continue;
+    const key = `${when.getUTCFullYear()}-${String(when.getUTCMonth() + 1).padStart(2, "0")}`;
+    demoMonths.set(key, (demoMonths.get(key) ?? 0) + 1);
+  }
+  const monthlyDemos = [...demoMonths.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, count]) => ({
+      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+      count,
     }));
 
   const monthlyRevenue = await monthlyRevenueSeries();
@@ -1329,9 +1322,11 @@ export async function retentionReport(): Promise<RetentionReport> {
     step("Active in 90-day window", ret90, ret60),
   ];
 
-  // ---- first-case cohorts (calendar month) ----
+  // ---- first-case cohorts (calendar month), trial firms excluded ----
   const cohortMap = new Map<string, { first: number; active: Set<number> }[]>();
-  for (const f of firms) {
+  for (const [firmId, raw] of byFirm) {
+    if (trialFirms.has(firmId)) continue;
+    const f = [...raw].sort((x, y) => x - y);
     const d = new Date(f[0]);
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     const entry = { first: monthIdx(f[0]), active: new Set(f.map(monthIdx)) };
@@ -1364,7 +1359,8 @@ export async function retentionReport(): Promise<RetentionReport> {
   const round1 = (n: number) => Math.round(n * 10) / 10;
 
   return {
-    funnel, cohorts, monthCols, monthlyCases, monthlyNewFirms, monthlyRevenue,
+    funnel, cohorts, monthCols, monthlyCases, monthlyNewFirms, monthlyDemos,
+    monthlyRevenue,
     frequency: {
       activatedFirms: activated,
       totalCases,
@@ -1609,6 +1605,9 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
     mrr += facts.ready && facts.inStripe.has(co.hubspot_id)
       ? facts.mrrByCompany.get(co.hubspot_id) ?? 0
       : firmMrr(co);
+    // Trial firms (sw_customer_status='trial') never had a paying relationship
+    // to retain - keep them out of both retention lenses entirely.
+    if ((co.properties as Record<string, unknown> | null)?.sw_customer_status === "trial") continue;
     const cases = caseRev.get(co.hubspot_id) ?? new Map<number, number>();
     const name = co.name ?? co.domain ?? co.hubspot_id;
     // Usage is billing-agnostic: cases are cases whether they were paid for per

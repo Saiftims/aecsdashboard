@@ -57,6 +57,10 @@ const DEAL_PROPS = [
   "sw_cases_last_30_days", "sw_cases_lifetime", "sw_usage_status",
   "sw_health_score", "sw_at_risk_reason", "sw_reactivation_status",
   "sw_handoff_summary", "sw_demo_recording_url",
+  // When the deal entered its CURRENT stage. The per-stage-id variants
+  // (hs_v2_date_entered_<stageId>) do not exist on this portal; this generic
+  // one does, and dates hand-moved Demo Completed deals for demo stamping.
+  "hs_v2_date_entered_current_stage",
 ];
 
 const ENGAGEMENTS: Record<string, string[]> = {

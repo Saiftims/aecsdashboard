@@ -441,6 +441,9 @@ function cohortMetric(key: string): { label: string; rows: (ctx: Ctx) => DrillRo
     rows: (ctx) => ctx.companies
       .filter((c) => {
         if (!c.first_case_at) return false;
+        // Trial firms are excluded from the cohort table, so keep the
+        // drill-down membership consistent with it.
+        if ((c.properties as Record<string, unknown> | null)?.sw_customer_status === "trial") return false;
         const d = new Date(c.first_case_at);
         return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}` === key;
       })

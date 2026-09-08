@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   BillingRetentionChart, DailyActivityChart, FunnelChart, MonthlyBarChart,
-  MonthlyFirmsChart, MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
+  MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
@@ -200,16 +200,25 @@ export default async function ActivityPage() {
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Monthly case volume
+          Monthly demos
         </h2>
         <Card>
           <CardHeader
-            title="Total cases submitted per month"
-            action={<span className="text-xs text-zinc-500">{retention.monthlyCases.reduce((s, m) => s + m.count, 0)} cases all-time</span>}
+            title="Demos run per month"
+            action={
+              <span className="text-xs text-zinc-500">
+                {retention.monthlyDemos.reduce((s, m) => s + m.count, 0)} demos all-time
+              </span>
+            }
           />
           <div className="p-4">
-            <MonthlyBarChart data={retention.monthlyCases} />
+            <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42%)" />
           </div>
+          <p className="px-4 pb-4 text-xs text-zinc-500">
+            A demo counts only once someone actually attended it. Calendly is the
+            source of truth: a no-show stays a booking and never lands here, and
+            demos still on the calendar are not counted until they happen.
+          </p>
         </Card>
       </section>
 
@@ -227,17 +236,30 @@ export default async function ActivityPage() {
             }
           />
           <div className="p-4">
-            <MonthlyFirmsChart data={retention.monthlyNewFirms} />
+            <MonthlyBarChart data={retention.monthlyNewFirms} color="hsl(265 60% 55%)" />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
-            A firm counts in the month it first became a customer, by whichever
-            came first: an app signup, its deal closing won, its first case, or
-            a plan starting. That is the same rule as the New customers card
-            above, so the two agree. The pale block is firms with no app account
-            of their own {"\u2014"} a deal Chris closed, or a case that arrived
-            through an intake form {"\u2014"} which counting signups alone would
-            miss. Each firm appears once, in its first month only.
+            A firm counts in the month its first case landed {"\u2014"} the
+            moment it started actually using us. Firms that have only signed up
+            or closed a deal but have not submitted a case yet are pipeline, not
+            new firms, and show up here the month their first case arrives. Each
+            firm appears once.
           </p>
+        </Card>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Monthly case volume
+        </h2>
+        <Card>
+          <CardHeader
+            title="Total cases submitted per month"
+            action={<span className="text-xs text-zinc-500">{retention.monthlyCases.reduce((s, m) => s + m.count, 0)} cases all-time</span>}
+          />
+          <div className="p-4">
+            <MonthlyBarChart data={retention.monthlyCases} />
+          </div>
         </Card>
       </section>
 
@@ -337,7 +359,9 @@ export default async function ActivityPage() {
           A steep month-1 drop is expected while most firms arrive with a single
           case: one case is a trial, not yet a habit, so this reads as &ldquo;came
           back&rdquo; against &ldquo;tried once&rdquo; rather than as churn of
-          established accounts.
+          established accounts. Firms marked Trial in HubSpot are excluded here
+          and from the retention charts below {"\u2014"} they never had a paying
+          relationship to retain.
         </p>
       </section>
 
