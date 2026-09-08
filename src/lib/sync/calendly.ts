@@ -7,6 +7,7 @@
  * Python reconcile agent - this only keeps demo DATES fresh.
  */
 import { hsUpdateProperties } from "@/lib/hubspot/client";
+import { SALES_STAGES } from "@/lib/hubspot/stages";
 import { supabaseService } from "@/lib/supabase/server";
 
 const BASE = "https://api.calendly.com";
@@ -44,21 +45,24 @@ export async function syncCalendly() {
   const now = new Date();
   const minStart = new Date(now.getTime() - 60 * 24 * 3600 * 1000).toISOString();
 
-  // 1. events (active only, recent + upcoming)
+  // 1. events (active only, recent + upcoming). Calendly rejects page_token
+  // when the original filter params are re-sent with it (started ~2026-09),
+  // so follow the ready-made next_page URL instead of rebuilding the query.
   const events: CalendlyEvent[] = [];
-  let page: string | undefined;
-  do {
-    const data = await calGet<{
+  let next: string | null = "/scheduled_events";
+  let firstParams: Record<string, string> | null = {
+    organization: org, count: "100", status: "active",
+    min_start_time: minStart,
+  };
+  while (next) {
+    const data: {
       collection: CalendlyEvent[];
-      pagination: { next_page_token?: string };
-    }>("/scheduled_events", {
-      organization: org, count: "100", status: "active",
-      min_start_time: minStart,
-      ...(page ? { page_token: page } : {}),
-    });
+      pagination?: { next_page?: string | null };
+    } = await calGet(next, firstParams ?? {});
+    firstParams = null;
     events.push(...data.collection);
-    page = data.pagination?.next_page_token;
-  } while (page);
+    next = data.pagination?.next_page ?? null;
+  }
 
   // 2. invitees per event -> per-email aggregation
   const people = new Map<string, { nextUpcoming: Date | null; lastAttended: Date | null }>();
@@ -120,5 +124,33 @@ export async function syncCalendly() {
       }).eq("hubspot_id", deal.hubspot_id);
     }
   }
-  return { events: events.length, invitees: people.size, demoDatesUpdated: updated };
+  // 4. hand-moved demos: a deal the CSM put in Demo Completed with no attended
+  // Calendly event behind it still ran a demo - ad-hoc Zoom, phone - and the
+  // stage move is the only record of it (owner-confirmed 2026-08-28). Stamp it
+  // like an attended demo, dated by when the deal entered the stage, so every
+  // consumer of sw_demo_completed sees one consistent truth. Write-once: an
+  // existing stamp or demo date is never overwritten, and the stage itself is
+  // never touched - the pipeline stays the CSM's.
+  let handMoved = 0;
+  for (const d of deals ?? []) {
+    if (d.stage !== SALES_STAGES.demoCompleted) continue;
+    const props = (d.properties ?? {}) as Record<string, unknown>;
+    if (String(props.sw_demo_completed ?? "") === "true") continue;
+    const entered = props.hs_v2_date_entered_current_stage;
+    if (typeof entered !== "string" || !entered) continue;
+    const upd: Record<string, string> = { sw_demo_completed: "true" };
+    if (!props.sw_demo_date) upd.sw_demo_date = entered.slice(0, 10);
+    const res = await hsUpdateProperties("deals", d.hubspot_id, upd);
+    if (res.ok) {
+      handMoved += 1;
+      await sb.from("deals").update({
+        properties: { ...props, ...upd },
+      }).eq("hubspot_id", d.hubspot_id);
+    }
+  }
+
+  return {
+    events: events.length, invitees: people.size, demoDatesUpdated: updated,
+    handMovedStamped: handMoved,
+  };
 }
