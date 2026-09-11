@@ -27,6 +27,9 @@ const COMPANY_PROPS = [
   // a rep changes in HubSpot, so the dashboard would keep serving the stale
   // firm_segment column forever.
   "sw_firm_segment", "numberofemployees",
+  // The human-set monthly case target. Must be cached: the rollup treats it as
+  // the one true override and derives from the segment when it is absent.
+  "sw_monthly_case_target",
   "sw_subscription_monthly_amount", "sw_subscription_end_date",
   "sw_active_champion", "sw_onboarding_status",
   "sw_expansion_potential", "sw_at_risk_reason", "sw_health_override",

@@ -623,11 +623,17 @@ export async function computeRollups() {
     const segment = (company.firm_segment ??
       (company.properties?.sw_firm_segment as string | null) ?? null) as FirmSegment | null;
     const rule = segRule(segment);
-    const overrideTarget = company.monthly_case_target != null
-      ? Number(company.monthly_case_target)
-      : (company.properties?.sw_monthly_case_target != null
-          ? Number(company.properties.sw_monthly_case_target) : null);
-    const monthlyTarget = overrideTarget ?? rule.monthlyTarget;
+    // The override is read ONLY from HubSpot, where a human sets it (the
+    // firm-page "target" input writes both places). The Supabase column is a
+    // cache of the EFFECTIVE target for display, and this rollup writes it - so
+    // reading the override from there made every derived value sticky: a firm
+    // segmented up to mid_size/large kept the small default it was first
+    // stamped with, and the segment could never take effect.
+    const overrideTarget = company.properties?.sw_monthly_case_target != null
+      && company.properties.sw_monthly_case_target !== ""
+      ? Number(company.properties.sw_monthly_case_target) : null;
+    const monthlyTarget = Number.isFinite(overrideTarget as number)
+      ? (overrideTarget as number) : rule.monthlyTarget;
 
     const usage = computeFirmUsage(
       firmCases.map((c) => ({
@@ -718,7 +724,9 @@ export async function computeRollups() {
     const wb = await hsUpdateProperties("companies", company.hubspot_id, {
       sw_account_health: health.status,
       sw_firm_segment: segment ?? undefined,
-      sw_monthly_case_target: monthlyTarget ?? undefined,
+      // sw_monthly_case_target is deliberately NOT written here: it holds the
+      // human's override and this rollup would otherwise overwrite it with the
+      // value it just derived, making the segment default permanent.
       sw_target_attainment_percent: attainment ?? undefined,
       sw_open_issue_count: openIssueCount,
       sw_total_lifetime_cases: usage.casesLifetime,
