@@ -23,6 +23,10 @@ const COMPANY_PROPS = [
   "name", "domain", "hubspot_owner_id",
   "sw_internal_firm_id", "sw_customer_status", "sw_cs_owner_id", "sw_ae_owner_id",
   "sw_estimated_monthly_case_volume", "sw_case_volume_tier",
+  // Size segment + headcount. Without these the cache can never see a segment
+  // a rep changes in HubSpot, so the dashboard would keep serving the stale
+  // firm_segment column forever.
+  "sw_firm_segment", "numberofemployees",
   "sw_subscription_monthly_amount", "sw_subscription_end_date",
   "sw_active_champion", "sw_onboarding_status",
   "sw_expansion_potential", "sw_at_risk_reason", "sw_health_override",
