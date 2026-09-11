@@ -89,10 +89,15 @@ export class SilentWitnessProvider implements CaseDataProvider {
 // creator's email. Test/internal accounts are excluded.
 // ---------------------------------------------------------------------------
 
-/** Internal/test accounts to exclude from ingestion (email or acc id). */
+/** Internal/test accounts to exclude from ingestion (email or acc id).
+ *
+ * OWNER RULE (2026-09-11): a consumer-email (gmail etc.) case actor is a REAL
+ * customer unless the email is a sachi / diego / saif variation or Silent
+ * Witness's own demo login. Real firms routinely run on personal gmail
+ * (Roxell Richards, Nelson & Crouse, Trdatyan, Amy Lee, Wheatley), so do NOT
+ * re-add generic prefixes like "demo"/"test" here - they eat real cases. */
 export const TEST_EMAIL_DOMAINS = ["silentwitness.ai", "das.es"];
 export const TEST_EMAILS = [
-  "diegodf@gmail.com", "saif.altimims@gmail.com", "sheikhrobertomanagement@gmail.com",
   // Silent Witness's own demo login - it signs into customer orgs, so it must
   // never be treated as the creator of a real firm's case.
   "silentwitnessdemo@gmail.com",
@@ -112,9 +117,10 @@ export const TEST_ACCOUNT_IDS = [
   "acc_d9a5094383384e00a5aafb15225d5f78", // diegodf (dev)
 ];
 
-/** Local-part prefixes (before @) that mark internal/dev gmail accounts,
- * incl. plus-addressing like diegodf+30@, diego+asda@, saif+1@. */
-const TEST_LOCAL_PREFIXES = ["saif+", "saif.", "diego+", "diegodf+", "demo", "test"];
+/** Local-part prefixes (before @) marking the three internal people, in any
+ * variation: diegodf@, diego+asda@, diegodf+30@, saif+1@, saif.altimims@,
+ * sachi*@. Prefix (not substring) so real firms like sandiegolaw@ never match. */
+const TEST_LOCAL_PREFIXES = ["sachi", "diego", "saif"];
 
 export function isTestCaseActor(email: string | null, accountId: string | null): boolean {
   const e = (email ?? "").trim().toLowerCase();

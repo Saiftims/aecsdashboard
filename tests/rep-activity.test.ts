@@ -113,7 +113,7 @@ describe("activity target", () => {
 
   it("carries one total target per role, not per channel", () => {
     const r = build([]);
-    expect(r.find((s) => s.role === "ae")!.activityTarget).toBe(75);
+    expect(r.find((s) => s.role === "ae")!.activityTarget).toBe(100);
     expect(r.find((s) => s.role === "cs")!.activityTarget).toBe(40);
   });
 

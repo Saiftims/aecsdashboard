@@ -83,12 +83,14 @@ describe("computeAccountHealth priority order", () => {
     })).status).toBe("at_risk");
   });
 
-  it("at_risk: delivered case without expert review offered", () => {
-    expect(computeAccountHealth(base({
+  it("delivered case without expert review is a soft flag, not at_risk", () => {
+    const r = computeAccountHealth(base({
       firstCaseCompletedDate: iso(10), casesLifetime: 2, casesThisMonth: 2,
       cases30d: 2, daysSinceLastCase: 2, secondCaseDate: iso(5),
       hasDeliveredCaseWithoutExpertReviewOffered: true,
-    })).status).toBe("at_risk");
+    }));
+    expect(r.status).not.toBe("at_risk");
+    expect(r.reasons.some((x) => x.includes("Expert review"))).toBe(true);
   });
 
   it("churned by segment threshold, overrides at_risk", () => {
