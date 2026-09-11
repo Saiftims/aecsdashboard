@@ -151,6 +151,11 @@ export const CASE_START_EVENTS = [
   "intake_submission_completed", "evidence_classification_status",
 ];
 export const CASE_DELIVER_EVENTS = ["report_downloaded", "invoice_downloaded"];
+/** Events that prove an account exists in the product - see listSignups(). */
+export const SIGNUP_EVENTS = [
+  "signup_completed", "invitation_acceptance_completed",
+  "payment_method_added", "subscription_created",
+];
 export const CASE_EVENTS = [
   ...CASE_START_EVENTS,
   "report_generation_completed",
@@ -485,17 +490,26 @@ export class PostHogProvider {
     }));
   }
 
-  /** One row per account that completed signup, with first signup + first
-   * subscription timestamps. Anonymous (no group) rows are dropped. */
+  /** One row per account that reached the product, with first signup + first
+   * subscription timestamps. Anonymous (no group) rows are dropped.
+   *
+   * `signup_completed` alone MISSES most firms: an account created any other way
+   * never fires it, and subscribes or accepts an invite instead. Every September
+   * 2026 subscriber came in that way (Zeytuntsyan, Ghozland, Paronyan, Perez,
+   * Nelson & Crouse), so the funnel read zero signups in a month that sold five
+   * plans. Signup is therefore the EARLIEST of any "this is a real account"
+   * signal. `subscription_wizard_step_viewed` is deliberately not one of them -
+   * that is someone browsing the plans, not an account. */
   async listSignups(sinceDays = 400): Promise<PostHogSignup[]> {
+    const SIGNUP = SIGNUP_EVENTS.map((e) => `'${e}'`).join(",");
     const hogql = `
       select
         properties.$group_0 as account_id,
         max(person.properties.email) as email,
-        minIf(timestamp, event = 'signup_completed') as signed_up_at,
+        min(timestamp) as signed_up_at,
         minIf(timestamp, event = 'subscription_created') as subscribed_at
       from events
-      where event in ('signup_completed','subscription_created')
+      where event in (${SIGNUP})
         and properties.$group_0 is not null
         and timestamp > now() - interval ${sinceDays} day
       group by properties.$group_0

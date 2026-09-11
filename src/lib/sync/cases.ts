@@ -527,10 +527,12 @@ export async function syncCases() {
     // a subscriber manually (billing_type/subscription) without PostHog ever
     // emitting subscription_created.
     const row: Record<string, unknown> = {
-      signed_up_at: s.signedUpAt,
       signup_account_id: s.accountId,
       updated_at: new Date().toISOString(),
     };
+    // Omit rather than null: a null would erase a signup date we already hold,
+    // the same way a failed association must never write null over a live link.
+    if (s.signedUpAt) row.signed_up_at = s.signedUpAt;
     if (s.subscribedAt) row.subscribed_at = s.subscribedAt;
     await sb.from("companies").update(row).eq("hubspot_id", companyId)
       .then(() => undefined, () => undefined);
