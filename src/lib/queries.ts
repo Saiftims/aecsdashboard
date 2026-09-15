@@ -1216,8 +1216,11 @@ export async function retentionReport(): Promise<RetentionReport> {
   const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
 
   const [{ data: caseRows }, { data: demoRows }, { data: statusRows }] = await Promise.all([
-    sb.from("cases").select("company_hubspot_id, submitted_date")
-      .not("company_hubspot_id", "is", null),
+    // Include unattributed rows (company_hubspot_id null). Those are
+    // analyst-worked matters the firm cannot be named from telemetry; they
+    // still count in monthly volume and revenue. Cohorts / new-firms below
+    // skip them because they have no firm to retain.
+    sb.from("cases").select("company_hubspot_id, submitted_date"),
     sb.from("deals").select("hubspot_id, properties"),
     sb.from("companies").select("hubspot_id, status:properties->>sw_customer_status"),
   ]);
@@ -1233,15 +1236,17 @@ export async function retentionReport(): Promise<RetentionReport> {
   // firm -> ascending submitted timestamps
   const byFirm = new Map<string, number[]>();
   for (const c of caseRows ?? []) {
-    if (!c.submitted_date) continue;
+    if (!c.submitted_date || !c.company_hubspot_id) continue;
     const t = new Date(c.submitted_date).getTime();
     if (Number.isNaN(t)) continue;
-    byFirm.set(c.company_hubspot_id!, [...(byFirm.get(c.company_hubspot_id!) ?? []), t]);
+    byFirm.set(c.company_hubspot_id, [...(byFirm.get(c.company_hubspot_id) ?? []), t]);
   }
   const firms = [...byFirm.values()].map((a) => a.sort((x, y) => x - y));
   const activated = firms.length;
 
-  // monthly case volume (all cases with a date), ascending
+  // monthly case volume (ALL dated cases, including unattributed analyst-worked
+  // rows with no firm). Those still count in the month total; they are excluded
+  // from byFirm above so they cannot create a phantom cohort.
   const monthCount = new Map<string, number>();
   for (const c of caseRows ?? []) {
     if (!c.submitted_date) continue;
