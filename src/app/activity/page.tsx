@@ -44,6 +44,14 @@ export default async function ActivityPage() {
   const freq = retention.frequency;
   const scope = user.role === "ae" ? "your" : "team";
   const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  // Same label format the monthly series use, so the current month can be found.
+  const thisMonthLabel = new Date().toLocaleString("en-US", {
+    month: "short", year: "numeric", timeZone: "UTC",
+  });
+  const thisMonth = <T extends { month: string }>(rows: T[]) =>
+    rows.find((r) => r.month === thisMonthLabel);
+  const progress = (value: number, target: number, fmt = (n: number) => String(n)) =>
+    `${fmt(value)} of ${fmt(target)} this month (${Math.round((value / target) * 100)}%)`;
   // Only the networks actually used, so a quiet week isn't a row of zeroes.
   const dmSplit = OTHER_CHANNELS
     .filter((c) => activityTotals.byChannel[c] > 0)
@@ -207,12 +215,15 @@ export default async function ActivityPage() {
             title="Demos run per month"
             action={
               <span className="text-xs text-zinc-500">
+                {progress(thisMonth(retention.monthlyDemos)?.count ?? 0, settings.monthlyDemosTarget)}
+                {" \u00b7 "}
                 {retention.monthlyDemos.reduce((s, m) => s + m.count, 0)} demos all-time
               </span>
             }
           />
           <div className="p-4">
-            <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42%)" />
+            <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42%)"
+              target={settings.monthlyDemosTarget} />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             A demo counts only once someone actually attended it. Calendly is the
@@ -231,12 +242,15 @@ export default async function ActivityPage() {
             title="New firms per month"
             action={
               <span className="text-xs text-zinc-500">
+                {progress(thisMonth(retention.monthlyNewFirms)?.count ?? 0, settings.monthlyNewFirmsTarget)}
+                {" \u00b7 "}
                 {retention.monthlyNewFirms.reduce((s, m) => s + m.count, 0)} firms all-time
               </span>
             }
           />
           <div className="p-4">
-            <MonthlyBarChart data={retention.monthlyNewFirms} color="hsl(265 60% 55%)" />
+            <MonthlyBarChart data={retention.monthlyNewFirms} color="hsl(265 60% 55%)"
+              target={settings.monthlyNewFirmsTarget} />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             A firm counts in the month its first case landed {"\u2014"} the
@@ -255,10 +269,16 @@ export default async function ActivityPage() {
         <Card>
           <CardHeader
             title="Total cases submitted per month"
-            action={<span className="text-xs text-zinc-500">{retention.monthlyCases.reduce((s, m) => s + m.count, 0)} cases all-time</span>}
+            action={
+              <span className="text-xs text-zinc-500">
+                {progress(thisMonth(retention.monthlyCases)?.count ?? 0, settings.monthlyCasesTarget)}
+                {" \u00b7 "}
+                {retention.monthlyCases.reduce((s, m) => s + m.count, 0)} cases all-time
+              </span>
+            }
           />
           <div className="p-4">
-            <MonthlyBarChart data={retention.monthlyCases} />
+            <MonthlyBarChart data={retention.monthlyCases} target={settings.monthlyCasesTarget} />
           </div>
         </Card>
       </section>
@@ -272,12 +292,14 @@ export default async function ActivityPage() {
             title="Revenue per month"
             action={
               <span className="text-xs text-zinc-500">
+                {progress(thisMonth(retention.monthlyRevenue)?.total ?? 0, settings.monthlyRevenueTarget, money)}
+                {" \u00b7 "}
                 {money(retention.monthlyRevenue.reduce((s, m) => s + m.total, 0))} all-time
               </span>
             }
           />
           <div className="p-4">
-            <MonthlyRevenueChart data={retention.monthlyRevenue} />
+            <MonthlyRevenueChart data={retention.monthlyRevenue} target={settings.monthlyRevenueTarget} />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             The solid bar is cash Stripe actually collected that month, net of

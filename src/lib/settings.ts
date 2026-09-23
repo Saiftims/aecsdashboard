@@ -14,6 +14,12 @@ export interface GtmSettings {
    * the number by texting instead of dialling has still done the day's work. */
   aeDailyActivityTarget: number;
   csDailyActivityTarget: number;
+  /** Company-wide monthly goals, drawn as a dotted line on the Activity page's
+   * monthly charts. Revenue is in dollars. */
+  monthlyDemosTarget: number;
+  monthlyNewFirmsTarget: number;
+  monthlyCasesTarget: number;
+  monthlyRevenueTarget: number;
   /** Per-channel daily targets. Reference only since the activity target above
    * replaced them - nothing is measured against these. */
   dailyCallsTarget: number;
@@ -46,6 +52,10 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   slaFirstContactHours: 2,
   aeDailyActivityTarget: 100,
   csDailyActivityTarget: 40,
+  monthlyDemosTarget: 51,
+  monthlyNewFirmsTarget: 22,
+  monthlyCasesTarget: 60,
+  monthlyRevenueTarget: 12000,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
   aeDailyCallsTarget: 50,
@@ -84,6 +94,10 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   sla_first_contact_hours: "slaFirstContactHours",
   ae_daily_activity_target: "aeDailyActivityTarget",
   cs_daily_activity_target: "csDailyActivityTarget",
+  monthly_demos_target: "monthlyDemosTarget",
+  monthly_new_firms_target: "monthlyNewFirmsTarget",
+  monthly_cases_target: "monthlyCasesTarget",
+  monthly_revenue_target: "monthlyRevenueTarget",
   daily_calls_target: "dailyCallsTarget",
   daily_emails_target: "dailyEmailsTarget",
   ae_daily_calls_target: "aeDailyCallsTarget",
@@ -119,6 +133,10 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.slaFirstContactHours = Number(out.slaFirstContactHours) || 2;
   out.aeDailyActivityTarget = Number(out.aeDailyActivityTarget) || 100;
   out.csDailyActivityTarget = Number(out.csDailyActivityTarget) || 40;
+  out.monthlyDemosTarget = Number(out.monthlyDemosTarget) || 51;
+  out.monthlyNewFirmsTarget = Number(out.monthlyNewFirmsTarget) || 22;
+  out.monthlyCasesTarget = Number(out.monthlyCasesTarget) || 60;
+  out.monthlyRevenueTarget = Number(out.monthlyRevenueTarget) || 12000;
   out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
   out.aeDailyCallsTarget = Number(out.aeDailyCallsTarget) || 50;

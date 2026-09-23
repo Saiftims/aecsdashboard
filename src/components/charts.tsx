@@ -224,18 +224,22 @@ export function BillingRetentionChart({
  * has never billed, still priced by the old per-case/flat-fee rules. */
 export function MonthlyRevenueChart({
   data,
+  target,
 }: {
   data: { month: string; collected: number; modelled: number; total: number }[];
+  target?: number;
 }) {
   const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
   const hasModelled = data.some((d) => d.modelled > 0);
+  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.total), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data}>
+      <BarChart data={data} margin={{ top: 8, right: target ? 72 : 8 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-        <YAxis width={58} tick={{ fontSize: 11 }}
+        <YAxis width={58} tick={{ fontSize: 11 }} domain={[0, Math.ceil(maxVal * 1.15)]}
                tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
+        {target ? targetLine(target, `Target ${money(target)}`) : null}
         <Tooltip formatter={(v, name) => [money(Number(v)), name]} />
         {hasModelled && <Legend wrapperStyle={{ fontSize: 11 }} />}
         <Bar dataKey="collected" stackId="rev" name="Collected (Stripe)"
@@ -247,21 +251,39 @@ export function MonthlyRevenueChart({
   );
 }
 
+/** Called as a function, not rendered as a component: recharts only draws
+ * a ReferenceLine that is a direct child of the chart. */
+function targetLine(y: number, label: string) {
+  return (
+    <ReferenceLine
+      y={y}
+      stroke="hsl(220 9% 40%)"
+      strokeDasharray="5 4"
+      ifOverflow="extendDomain"
+      label={{ value: label, position: "right", fontSize: 10, fill: "hsl(220 9% 40%)" }}
+    />
+  );
+}
+
 export function MonthlyBarChart({
   data,
   color = "hsl(210 70% 50%)",
+  target,
 }: {
   data: { month: string; count: number }[];
   color?: string;
+  target?: number;
 }) {
+  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data}>
+      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-        <YAxis allowDecimals={false} width={28} />
+        <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
         <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} />
+        {target ? targetLine(target, `Target ${target}`) : null}
       </BarChart>
     </ResponsiveContainer>
   );

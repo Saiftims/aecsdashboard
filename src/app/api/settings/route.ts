@@ -12,6 +12,10 @@ const ALLOWED_KEYS = new Set([
   "dashboard_timezone", "sla_first_contact_hours",
   "daily_calls_target", "daily_emails_target", "daily_followups_target",
   "daily_new_leads_target", "daily_tasks_target",
+  "ae_daily_activity_target", "cs_daily_activity_target",
+  "ae_daily_calls_target", "ae_daily_emails_target",
+  "monthly_demos_target", "monthly_new_firms_target",
+  "monthly_cases_target", "monthly_revenue_target",
 ]);
 
 const schema = z.object({ key: z.string(), value: z.unknown() });

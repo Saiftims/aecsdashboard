@@ -80,6 +80,20 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
+          <CardHeader title="Monthly targets" />
+          <div className="space-y-3 p-4">
+            <p className="text-xs text-zinc-500">
+              Company-wide goals for each calendar month, drawn as a dotted line
+              on the Activity page&apos;s monthly charts.
+            </p>
+            <SettingField settingKey="monthly_demos_target" label="Demos run per month" defaultValue={settings.monthlyDemosTarget} />
+            <SettingField settingKey="monthly_new_firms_target" label="New firms (first case) per month" defaultValue={settings.monthlyNewFirmsTarget} />
+            <SettingField settingKey="monthly_cases_target" label="Cases submitted per month" defaultValue={settings.monthlyCasesTarget} />
+            <SettingField settingKey="monthly_revenue_target" label="Revenue per month ($)" defaultValue={settings.monthlyRevenueTarget} />
+          </div>
+        </Card>
+
+        <Card>
           <CardHeader title="HubSpot" />
           <div className="space-y-3 p-4">
             <SettingField settingKey="hubspot_portal_id" label="Portal ID" defaultValue={settings.hubspotPortalId} type="text" />
