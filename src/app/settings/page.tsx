@@ -96,7 +96,7 @@ export default async function SettingsPage() {
             </p>
             <SettingField settingKey="monthly_ad_spend" label="Ad spend this month ($)" defaultValue={settings.monthlyAdSpend} />
             <SettingField settingKey="ad_lead_share_pct" label="Share of MQLs from paid ads (%)" defaultValue={settings.adLeadSharePct} />
-            <SettingField settingKey="monthly_team_cost" label="Growth team cost per month ($, excl. founders)" defaultValue={settings.monthlyTeamCost} />
+            <SettingField settingKey="monthly_team_cost" label="Total GTM team cost per month ($)" defaultValue={settings.monthlyTeamCost} />
             <SettingField settingKey="gross_margin_pct" label="Gross margin (%)" defaultValue={settings.grossMarginPct} />
           </div>
         </Card>

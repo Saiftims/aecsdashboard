@@ -35,7 +35,7 @@ export default async function ActivityPage() {
     retentionReport(),
     billingRetentionReport(),
     demoCreditReport(),
-    unitEconomicsSnapshot(),
+    user.role === "executive" ? unitEconomicsSnapshot() : null,
   ]);
   const revRetention = billing.revenue;
   const {
@@ -470,12 +470,14 @@ export default async function ActivityPage() {
         </div>
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Unit economics — paid acquisition payback, {unitEcon.monthLabel}
-        </h2>
-        <UnitEconomics snap={unitEcon} />
-      </section>
+      {unitEcon ? (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            Unit economics — paid acquisition payback, {unitEcon.monthLabel}
+          </h2>
+          <UnitEconomics snap={unitEcon} />
+        </section>
+      ) : null}
 
       <p className="text-xs text-zinc-400">
         Funnel cohort = deals created in the last 7 days, shown at the furthest stage

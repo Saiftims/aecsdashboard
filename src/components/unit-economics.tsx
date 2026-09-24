@@ -170,7 +170,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Stat label="Fully loaded CAC" value={usd(fullCac)} tone="warn"
-          sub={`${usd(adCac)} ads + ${usd(teamCac)} team`} />
+          sub={`${usd(adCac)} ads + ${usd(teamCac)} GTM team`} />
         <Stat label="Ad-only CAC" value={usd(adCac)}
           sub={`${usd(snap.adSpend)} ÷ ${adSubs.toFixed(1)} ad-sourced subs`} />
         <Stat label={`Solo payback · fully loaded`} value={mo(soloFull)}
@@ -288,8 +288,8 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       <p className="text-xs text-zinc-500">
         {snap.monthLabel} to date{partial ? ` (day ${snap.daysElapsed} of ${snap.daysInMonth})` : ""}.
         Ad-only CAC = ad spend ÷ (new paying subscribers × share of MQLs from ads): {usd(snap.adSpend)} ÷ ({snap.newSubscribers} ×{" "}
-        {Math.round(snap.adLeadShare * 100)}%) — use it to judge the next ad dollar. Fully loaded adds the growth team&apos;s{" "}
-        {usd(snap.teamCost)}/mo (founders excluded) spread over all {snap.newSubscribers} new subscribers — use it to judge
+        {Math.round(snap.adLeadShare * 100)}%) — use it to judge the next ad dollar. Fully loaded adds the total GTM team cost of{" "}
+        {usd(snap.teamCost)}/mo, spread over all {snap.newSubscribers} new subscribers — use it to judge
         whether go-to-market pays for itself. Payback is on gross margin, not revenue. Spend, team cost and margin are set in
         Settings. Blended is{" "}
         {usd(snap.liveMrr)} live billed MRR across {snap.activeSubscribers} paying subscribers, after

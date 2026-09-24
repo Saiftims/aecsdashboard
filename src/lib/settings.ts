@@ -24,8 +24,8 @@ export interface GtmSettings {
    * subscribers) those ads get credit for. Drives CAC in the unit economics. */
   monthlyAdSpend: number;
   adLeadSharePct: number;
-  /** Monthly cost of the people who win customers (reps' pay, not founders'),
-   * spread over every new subscriber for the fully loaded CAC. */
+  /** Total monthly GTM team cost, spread over every new subscriber for the
+   * fully loaded CAC. Executive-only: never render it to a rep. */
   monthlyTeamCost: number;
   grossMarginPct: number;
   /** Per-channel daily targets. Reference only since the activity target above
