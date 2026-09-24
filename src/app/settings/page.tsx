@@ -90,6 +90,12 @@ export default async function SettingsPage() {
             <SettingField settingKey="monthly_new_firms_target" label="New firms (first case) per month" defaultValue={settings.monthlyNewFirmsTarget} />
             <SettingField settingKey="monthly_cases_target" label="Cases submitted per month" defaultValue={settings.monthlyCasesTarget} />
             <SettingField settingKey="monthly_revenue_target" label="Revenue per month ($)" defaultValue={settings.monthlyRevenueTarget} />
+            <p className="pt-2 text-xs text-zinc-500">
+              Paid acquisition, for the unit economics at the bottom of the
+              Activity page. Update the spend each month.
+            </p>
+            <SettingField settingKey="monthly_ad_spend" label="Ad spend this month ($)" defaultValue={settings.monthlyAdSpend} />
+            <SettingField settingKey="ad_lead_share_pct" label="Share of MQLs from paid ads (%)" defaultValue={settings.adLeadSharePct} />
           </div>
         </Card>
 

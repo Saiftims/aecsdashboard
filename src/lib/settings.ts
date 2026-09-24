@@ -20,6 +20,10 @@ export interface GtmSettings {
   monthlyNewFirmsTarget: number;
   monthlyCasesTarget: number;
   monthlyRevenueTarget: number;
+  /** Paid-ads spend for the current month and the share of MQLs (and so of new
+   * subscribers) those ads get credit for. Drives CAC in the unit economics. */
+  monthlyAdSpend: number;
+  adLeadSharePct: number;
   /** Per-channel daily targets. Reference only since the activity target above
    * replaced them - nothing is measured against these. */
   dailyCallsTarget: number;
@@ -56,6 +60,8 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   monthlyNewFirmsTarget: 22,
   monthlyCasesTarget: 60,
   monthlyRevenueTarget: 12000,
+  monthlyAdSpend: 7500,
+  adLeadSharePct: 95,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
   aeDailyCallsTarget: 50,
@@ -98,6 +104,8 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   monthly_new_firms_target: "monthlyNewFirmsTarget",
   monthly_cases_target: "monthlyCasesTarget",
   monthly_revenue_target: "monthlyRevenueTarget",
+  monthly_ad_spend: "monthlyAdSpend",
+  ad_lead_share_pct: "adLeadSharePct",
   daily_calls_target: "dailyCallsTarget",
   daily_emails_target: "dailyEmailsTarget",
   ae_daily_calls_target: "aeDailyCallsTarget",
@@ -137,6 +145,8 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.monthlyNewFirmsTarget = Number(out.monthlyNewFirmsTarget) || 22;
   out.monthlyCasesTarget = Number(out.monthlyCasesTarget) || 60;
   out.monthlyRevenueTarget = Number(out.monthlyRevenueTarget) || 12000;
+  out.monthlyAdSpend = Number.isFinite(Number(out.monthlyAdSpend)) ? Number(out.monthlyAdSpend) : 7500;
+  out.adLeadSharePct = Number.isFinite(Number(out.adLeadSharePct)) ? Number(out.adLeadSharePct) : 95;
   out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
   out.aeDailyCallsTarget = Number(out.aeDailyCallsTarget) || 50;

@@ -5,11 +5,13 @@ import {
   MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
+import { UnitEconomics } from "@/components/unit-economics";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
 import {
   activityReport, billingRetentionReport, demoCreditReport, retentionReport,
 } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
+import { unitEconomicsSnapshot } from "@/lib/unit-economics";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +30,12 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention, billing, demoCredit] = await Promise.all([
+  const [report, retention, billing, demoCredit, unitEcon] = await Promise.all([
     activityReport(user.role === "ae" ? user.hubspot_owner_id : null),
     retentionReport(),
     billingRetentionReport(),
     demoCreditReport(),
+    unitEconomicsSnapshot(),
   ]);
   const revRetention = billing.revenue;
   const useRetention = billing.usage;
@@ -601,6 +604,13 @@ export default async function ActivityPage() {
           <Stat label="Three-plus cases" value={freq.threePlusCases} tone="good" />
           <Stat label="Active 2+ consecutive months" value={freq.activeTwoPlusConsecutiveMonths} tone="good" />
         </div>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Unit economics — paid acquisition payback, {unitEcon.monthLabel}
+        </h2>
+        <UnitEconomics snap={unitEcon} />
       </section>
 
       <p className="text-xs text-zinc-400">
