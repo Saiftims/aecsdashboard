@@ -13,6 +13,8 @@ export interface UnitEconomicsSnapshot {
   daysInMonth: number;
   adSpend: number;
   adLeadShare: number;
+  teamCost: number;
+  grossMargin: number;
   mqls: number;
   newSubscribers: number;
   newSubscriberMrr: number;
@@ -63,6 +65,8 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     daysInMonth,
     adSpend: settings.monthlyAdSpend,
     adLeadShare: settings.adLeadSharePct / 100,
+    teamCost: settings.monthlyTeamCost,
+    grossMargin: settings.grossMarginPct / 100,
     mqls,
     newSubscribers,
     newSubscriberMrr,

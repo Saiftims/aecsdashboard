@@ -107,14 +107,22 @@ function Grid({ headers, rows, highlight }: {
 }
 
 export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
-  const [marginS, setMargin] = useState("100");
+  const defaultMargin = String(Math.round(snap.grossMargin * 100));
+  const [marginS, setMargin] = useState(defaultMargin);
   const [focus, setFocus] = useState("base");
+  const [basis, setBasis] = useState<"full" | "ads">("full");
   const [custom, setCustom] = useState<string[]>(["10", "5", "3", "2"]);
 
-  const margin = num(marginS, 100) / 100;
+  const margin = num(marginS, snap.grossMargin * 100) / 100;
   const adSubs = snap.newSubscribers * snap.adLeadShare;
   const adMqls = snap.mqls * snap.adLeadShare;
-  const cac = adSubs > 0 ? snap.adSpend / adSubs : Infinity;
+  const adCac = adSubs > 0 ? snap.adSpend / adSubs : Infinity;
+  // Ads are credited only with the subscribers they sourced; the team works
+  // every new subscriber, whatever the source.
+  const teamCac = snap.newSubscribers > 0 ? snap.teamCost / snap.newSubscribers : Infinity;
+  const fullCac = adCac + teamCac;
+  const cac = basis === "full" ? fullCac : adCac;
+  const basisLabel = basis === "full" ? "fully loaded" : "ads only";
   const costPerMql = adMqls > 0 ? snap.adSpend / adMqls : Infinity;
   const conversion = snap.mqls > 0 ? snap.newSubscribers / snap.mqls : 0;
   const arpa = snap.activeSubscribers ? snap.liveMrr / snap.activeSubscribers : 0;
@@ -130,7 +138,9 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
     { label: `Blended $${Math.round(arpa)}`, name: "Blended", price: arpa },
   ].map((p) => ({ ...p, contribution: p.price * margin }));
   const blended = packages[packages.length - 1];
-  const blendedPayback = payback(cac, blended.contribution, active.s);
+  const solo = packages[0];
+  const soloFull = payback(fullCac, solo.contribution, active.s);
+  const soloAds = payback(adCac, solo.contribution, active.s);
   const blendedLife = value(blended.contribution, active.s, HORIZON);
 
   const survivalData = Array.from({ length: 13 }, (_, m) => {
@@ -148,7 +158,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
   });
   const partial = snap.daysElapsed < snap.daysInMonth;
 
-  if (!Number.isFinite(cac)) {
+  if (!Number.isFinite(fullCac)) {
     return (
       <Card className="p-4 text-sm text-zinc-500">
         No new paying subscribers yet in {snap.monthLabel}, so there is no CAC to pay back.
@@ -158,20 +168,25 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="CAC per new subscriber" value={usd(cac)} tone="warn"
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <Stat label="Fully loaded CAC" value={usd(fullCac)} tone="warn"
+          sub={`${usd(adCac)} ads + ${usd(teamCac)} team`} />
+        <Stat label="Ad-only CAC" value={usd(adCac)}
           sub={`${usd(snap.adSpend)} ÷ ${adSubs.toFixed(1)} ad-sourced subs`} />
-        <Stat label={`Blended payback · ${active.label}`} value={mo(blendedPayback)} tone="good"
-          sub={`on ${usd(blended.contribution)}/mo per firm`} />
+        <Stat label={`Solo payback · fully loaded`} value={mo(soloFull)}
+          tone={soloFull <= 12 ? "good" : "bad"}
+          sub={`${active.label} churn · ${usd(solo.contribution)}/mo margin`} />
+        <Stat label={`Solo payback · ads only`} value={mo(soloAds)} tone="good"
+          sub="the next ad dollar" />
         <Stat label="Ad cost per MQL" value={usd(costPerMql)}
-          sub={`${snap.mqls} MQLs · ${Math.round(snap.adLeadShare * 100)}% from ads`} />
-        <Stat label={`Lifetime value · ${active.label}`} value={usd(blendedLife)}
-          sub={`${(blendedLife / cac).toFixed(1)}x CAC · ${Math.round(conversion * 100)}% MQL → sub`} />
+          sub={`${snap.mqls} MQLs · ${Math.round(conversion * 100)}% MQL → sub`} />
+        <Stat label={`Lifetime : CAC · ${active.label}`} value={`${(blendedLife / fullCac).toFixed(1)}x`}
+          sub={`${usd(blendedLife)} blended margin, fully loaded`} />
       </div>
 
       <Card>
         <CardHeader title="Payback by package and churn scenario"
-          action={<span className="text-xs text-zinc-500">months to earn back {usd(cac)}</span>} />
+          action={<span className="text-xs text-zinc-500">months of gross margin to earn back {usd(cac)} ({basisLabel})</span>} />
         <Grid
           headers={["Scenario", "Churn M1 / M2 / M3 / M4+", ...packages.map((p) => p.label)]}
           rows={scenarios.map((sc) => [
@@ -183,7 +198,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       </Card>
 
       <Card>
-        <CardHeader title="Value per acquired firm (blended)" />
+        <CardHeader title={`Gross margin per acquired firm (blended) vs ${basisLabel} CAC`} />
         <Grid
           headers={["Scenario", "Still paying at M12", "12-mo value", "24-mo value", "Lifetime value", "Lifetime : CAC", "Solo lifetime : CAC"]}
           rows={scenarios.map((sc) => {
@@ -223,7 +238,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           </div>
         </Card>
         <Card>
-          <CardHeader title={`Cumulative revenue per firm vs CAC · ${active.label} churn`} />
+          <CardHeader title={`Cumulative gross margin per firm vs ${basisLabel} CAC · ${active.label} churn`} />
           <div className="p-4">
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={cumData} margin={{ right: 56 }}>
@@ -244,7 +259,15 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       </div>
 
       <Card className="p-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-7">
+          <label className="block text-xs">
+            <span className="font-medium text-zinc-600 dark:text-zinc-300">CAC basis</span>
+            <select value={basis} onChange={(e) => setBasis(e.target.value as "full" | "ads")}
+              className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="full">Fully loaded ({usd(fullCac)})</option>
+              <option value="ads">Ads only ({usd(adCac)})</option>
+            </select>
+          </label>
           <label className="block text-xs">
             <span className="font-medium text-zinc-600 dark:text-zinc-300">Highlighted scenario</span>
             <select value={focus} onChange={(e) => setFocus(e.target.value)}
@@ -252,7 +275,8 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
               {scenarios.map((sc) => <option key={sc.key} value={sc.key}>{sc.label}</option>)}
             </select>
           </label>
-          <Input label="Gross margin (%)" value={marginS} onChange={setMargin} hint="100 = revenue payback" />
+          <Input label="Gross margin (%)" value={marginS} onChange={setMargin}
+            hint={`default ${defaultMargin}% from Settings`} />
           {["M1", "M2", "M3", "M4+"].map((l, i) => (
             <Input key={l} label={`Custom ${l} churn (%)`} value={custom[i]}
               onChange={(v) => setCustom((c) => c.map((x, j) => (j === i ? v : x)))}
@@ -263,8 +287,11 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
 
       <p className="text-xs text-zinc-500">
         {snap.monthLabel} to date{partial ? ` (day ${snap.daysElapsed} of ${snap.daysInMonth})` : ""}.
-        CAC = ad spend ÷ (new paying subscribers × share of MQLs from ads): {usd(snap.adSpend)} ÷ ({snap.newSubscribers} ×{" "}
-        {Math.round(snap.adLeadShare * 100)}%). Ad spend and the ad share are set in Settings. Blended is{" "}
+        Ad-only CAC = ad spend ÷ (new paying subscribers × share of MQLs from ads): {usd(snap.adSpend)} ÷ ({snap.newSubscribers} ×{" "}
+        {Math.round(snap.adLeadShare * 100)}%) — use it to judge the next ad dollar. Fully loaded adds the growth team&apos;s{" "}
+        {usd(snap.teamCost)}/mo (founders excluded) spread over all {snap.newSubscribers} new subscribers — use it to judge
+        whether go-to-market pays for itself. Payback is on gross margin, not revenue. Spend, team cost and margin are set in
+        Settings. Blended is{" "}
         {usd(snap.liveMrr)} live billed MRR across {snap.activeSubscribers} paying subscribers, after
         discounts. New subscribers this month average {usd(snap.newSubscriberMrr / Math.max(snap.newSubscribers, 1))}/mo;
         Boutique and Growth assume the same CAC would land a bigger plan. Revenue is subscription only, so
