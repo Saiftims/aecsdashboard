@@ -114,17 +114,9 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
   const [custom, setCustom] = useState<string[]>(["10", "5", "3", "2"]);
 
   const margin = num(marginS, snap.grossMargin * 100) / 100;
-  const adSubs = snap.newSubscribers * snap.adLeadShare;
-  const adMqls = snap.mqls * snap.adLeadShare;
-  const adCac = adSubs > 0 ? snap.adSpend / adSubs : Infinity;
-  // Ads are credited only with the subscribers they sourced; the team works
-  // every new subscriber, whatever the source.
-  const teamCac = snap.newSubscribers > 0 ? snap.teamCost / snap.newSubscribers : Infinity;
-  const fullCac = adCac + teamCac;
+  const { adCac, teamPerSubscriber: teamCac, fullCac, costPerMql, mqlToSub: conversion } = snap.headline;
   const cac = basis === "full" ? fullCac : adCac;
   const basisLabel = basis === "full" ? "fully loaded" : "ads only";
-  const costPerMql = adMqls > 0 ? snap.adSpend / adMqls : Infinity;
-  const conversion = snap.mqls > 0 ? snap.newSubscribers / snap.mqls : 0;
   const arpa = snap.activeSubscribers ? snap.liveMrr / snap.activeSubscribers : 0;
 
   const customBands = custom.map((c, i) => num(c, [10, 5, 3, 2][i])) as Bands;
@@ -141,7 +133,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
   const solo = packages[0];
   const soloFull = payback(fullCac, solo.contribution, active.s);
   const soloAds = payback(adCac, solo.contribution, active.s);
-  const blendedLife = value(blended.contribution, active.s, HORIZON);
+  const soloLife = value(solo.contribution, active.s, HORIZON);
 
   const survivalData = Array.from({ length: 13 }, (_, m) => {
     const row: Record<string, number | string> = { month: `M${m}` };
@@ -156,12 +148,10 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
     for (const p of packages) row[p.name] = Math.round(value(p.contribution, active.s, m));
     return row;
   });
-  const partial = snap.daysElapsed < snap.daysInMonth;
-
   if (!Number.isFinite(fullCac)) {
     return (
       <Card className="p-4 text-sm text-zinc-500">
-        No new paying subscribers yet in {snap.monthLabel}, so there is no CAC to pay back.
+        No subscription-era lead has converted yet, so there is no CAC to pay back.
       </Card>
     );
   }
@@ -172,17 +162,32 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
         <Stat label="Fully loaded CAC" value={usd(fullCac)} tone="warn"
           sub={`${usd(adCac)} ads + ${usd(teamCac)} GTM team`} />
         <Stat label="Ad-only CAC" value={usd(adCac)}
-          sub={`${usd(snap.adSpend)} ÷ ${adSubs.toFixed(1)} ad-sourced subs`} />
+          sub={`lead cohort: ${snap.headline.basis}`} />
         <Stat label={`Solo payback · fully loaded`} value={mo(soloFull)}
           tone={soloFull <= 12 ? "good" : "bad"}
           sub={`${active.label} churn · ${usd(solo.contribution)}/mo margin`} />
         <Stat label={`Solo payback · ads only`} value={mo(soloAds)} tone="good"
           sub="the next ad dollar" />
         <Stat label="Ad cost per MQL" value={usd(costPerMql)}
-          sub={`${snap.mqls} MQLs · ${Math.round(conversion * 100)}% MQL → sub`} />
-        <Stat label={`Lifetime : CAC · ${active.label}`} value={`${(blendedLife / fullCac).toFixed(1)}x`}
-          sub={`${usd(blendedLife)} blended margin, fully loaded`} />
+          sub={`${Math.round(conversion * 100)}% of MQLs subscribed`} />
+        <Stat label={`Solo lifetime : CAC · ${active.label}`} value={`${(soloLife / fullCac).toFixed(1)}x`}
+          sub={`${usd(soloLife)} margin, fully loaded · ${(soloLife / adCac).toFixed(1)}x ads only`} />
       </div>
+
+      <Card>
+        <CardHeader title="CAC by lead cohort (subscription plans only)"
+          action={<span className="text-xs text-zinc-500">each subscriber dated back to the lead that converted</span>} />
+        <Grid
+          headers={["Lead month", "Subscribed firms", "Ad spend", "MQLs", "Subscribers", "Ad CAC", "Fully loaded"]}
+          rows={snap.cohorts.map((c) => [
+            c.label + (c.mature ? "" : " · still converting"),
+            c.firms.join(", ") || "—",
+            usd(c.spend) + (c.spendFromLedger ? "" : " planned"),
+            String(c.mqls), String(c.subscribers), usd(c.adCac), usd(c.fullCac),
+          ])}
+          highlight={-1}
+        />
+      </Card>
 
       <Card>
         <CardHeader title="Payback by package and churn scenario"
@@ -286,18 +291,18 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       </Card>
 
       <p className="text-xs text-zinc-500">
-        {snap.monthLabel} to date{partial ? ` (day ${snap.daysElapsed} of ${snap.daysInMonth})` : ""}.
-        Ad-only CAC = ad spend ÷ (new paying subscribers × share of MQLs from ads): {usd(snap.adSpend)} ÷ ({snap.newSubscribers} ×{" "}
-        {Math.round(snap.adLeadShare * 100)}%) — use it to judge the next ad dollar. Fully loaded adds the total GTM team cost of{" "}
-        {usd(snap.teamCost)}/mo, spread over all {snap.newSubscribers} new subscribers — use it to judge
-        whether go-to-market pays for itself. Payback is on gross margin, not revenue. Spend, team cost and margin are set in
-        Settings. Blended is{" "}
-        {usd(snap.liveMrr)} live billed MRR across {snap.activeSubscribers} paying subscribers, after
-        discounts. New subscribers this month average {usd(snap.newSubscriberMrr / Math.max(snap.newSubscribers, 1))}/mo;
-        Boutique and Growth assume the same CAC would land a bigger plan. Revenue is subscription only, so
-        per-case charges on top would shorten payback. Churn means subscription cancellations; every firm pays
-        month 1, so payback barely moves with churn while lifetime value does.
-        {partial ? " Spend is the whole month's but subscribers are to date, so CAC falls as the month fills in." : ""}
+        CAC is measured by lead cohort: every subscription since the August switch to plans is dated back to
+        the lead that converted and charged to that month&apos;s ad spend, with {Math.round(snap.adLeadShare * 100)}%
+        of subscribers credited to the ads. The headline uses {snap.headline.basis}; a lead month counts once
+        three weeks have passed since it ended, because younger leads are still converting and read CAC too
+        high. Ad-only CAC judges the next ad dollar; fully loaded adds the total GTM team cost of{" "}
+        {usd(snap.teamCost)}/mo spread over that month&apos;s subscribers, and judges whether go-to-market pays for
+        itself. Payback is on gross margin, not revenue. Spend by month, team cost and margin are set in
+        Settings. Blended is {usd(snap.liveMrr)} live billed MRR across {snap.activeSubscribers} paying
+        subscribers; new subscribers this month average{" "}
+        {usd(snap.newSubscriberMrr / Math.max(snap.newSubscribers, 1))}/mo, and Boutique and Growth assume the
+        same CAC would land a bigger plan. Revenue is subscription only: expert sign-offs and per-case charges
+        on top would shorten payback. Churn means subscription cancellations.
       </p>
     </div>
   );

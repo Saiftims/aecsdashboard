@@ -16,7 +16,7 @@ const ALLOWED_KEYS = new Set([
   "ae_daily_calls_target", "ae_daily_emails_target",
   "monthly_demos_target", "monthly_new_firms_target",
   "monthly_cases_target", "monthly_revenue_target",
-  "monthly_ad_spend", "ad_lead_share_pct", "monthly_team_cost", "gross_margin_pct",
+  "monthly_ad_spend", "ad_spend_by_month", "ad_lead_share_pct", "monthly_team_cost", "gross_margin_pct",
 ]);
 
 const schema = z.object({ key: z.string(), value: z.unknown() });

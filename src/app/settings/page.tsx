@@ -94,8 +94,9 @@ export default async function SettingsPage() {
               Paid acquisition, for the unit economics at the bottom of the
               Activity page. Update the spend each month.
             </p>
-            <SettingField settingKey="monthly_ad_spend" label="Ad spend this month ($)" defaultValue={settings.monthlyAdSpend} />
-            <SettingField settingKey="ad_lead_share_pct" label="Share of MQLs from paid ads (%)" defaultValue={settings.adLeadSharePct} />
+            <SettingField settingKey="ad_spend_by_month" type="text" label='Actual ad spend by month (JSON, e.g. {"2026-10": 10000})' defaultValue={JSON.stringify(settings.adSpendByMonth)} />
+            <SettingField settingKey="monthly_ad_spend" label="Planned ad spend for a month not listed above ($)" defaultValue={settings.monthlyAdSpend} />
+            <SettingField settingKey="ad_lead_share_pct" label="Share of MQLs and subscribers from paid ads (%)" defaultValue={settings.adLeadSharePct} />
             <SettingField settingKey="monthly_team_cost" label="Total GTM team cost per month ($)" defaultValue={settings.monthlyTeamCost} />
             <SettingField settingKey="gross_margin_pct" label="Gross margin (%)" defaultValue={settings.grossMarginPct} />
           </div>

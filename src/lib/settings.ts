@@ -23,6 +23,9 @@ export interface GtmSettings {
   /** Paid-ads spend for the current month and the share of MQLs (and so of new
    * subscribers) those ads get credit for. Drives CAC in the unit economics. */
   monthlyAdSpend: number;
+  /** Actual paid-ads spend by month ("YYYY-MM" -> dollars) from the Meta Ads
+   * account. A month missing here falls back to monthlyAdSpend, prorated. */
+  adSpendByMonth: Record<string, number>;
   adLeadSharePct: number;
   /** Total monthly GTM team cost, spread over every new subscriber for the
    * fully loaded CAC. Executive-only: never render it to a rep. */
@@ -65,9 +68,10 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   monthlyCasesTarget: 60,
   monthlyRevenueTarget: 12000,
   monthlyAdSpend: 7500,
+  adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4794 },
   adLeadSharePct: 95,
   monthlyTeamCost: 9500,
-  grossMarginPct: 85,
+  grossMarginPct: 93,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
   aeDailyCallsTarget: 50,
@@ -111,6 +115,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   monthly_cases_target: "monthlyCasesTarget",
   monthly_revenue_target: "monthlyRevenueTarget",
   monthly_ad_spend: "monthlyAdSpend",
+  ad_spend_by_month: "adSpendByMonth",
   ad_lead_share_pct: "adLeadSharePct",
   monthly_team_cost: "monthlyTeamCost",
   gross_margin_pct: "grossMarginPct",
@@ -156,7 +161,11 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.monthlyAdSpend = Number.isFinite(Number(out.monthlyAdSpend)) ? Number(out.monthlyAdSpend) : 7500;
   out.adLeadSharePct = Number.isFinite(Number(out.adLeadSharePct)) ? Number(out.adLeadSharePct) : 95;
   out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 9500;
-  out.grossMarginPct = Number(out.grossMarginPct) > 0 ? Number(out.grossMarginPct) : 85;
+  out.grossMarginPct = Number(out.grossMarginPct) > 0 ? Number(out.grossMarginPct) : 93;
+  if (typeof out.adSpendByMonth === "string") {
+    try { out.adSpendByMonth = JSON.parse(out.adSpendByMonth); } catch { out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth; }
+  }
+  if (!out.adSpendByMonth || typeof out.adSpendByMonth !== "object") out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth;
   out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
   out.aeDailyCallsTarget = Number(out.aeDailyCallsTarget) || 50;
