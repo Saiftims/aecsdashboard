@@ -27,8 +27,9 @@ export interface GtmSettings {
    * account. A month missing here falls back to monthlyAdSpend, prorated. */
   adSpendByMonth: Record<string, number>;
   adLeadSharePct: number;
-  /** Total monthly GTM team cost, spread over every new subscriber for the
-   * fully loaded CAC. Executive-only: never render it to a rep. */
+  /** Monthly SALES team cost (AEs only; customer success is not acquisition),
+   * spread over every new subscriber for the fully loaded CAC. Executive-only:
+   * never render it to a rep. */
   monthlyTeamCost: number;
   grossMarginPct: number;
   /** Per-channel daily targets. Reference only since the activity target above
@@ -68,9 +69,9 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   monthlyCasesTarget: 60,
   monthlyRevenueTarget: 12000,
   monthlyAdSpend: 7500,
-  adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4794 },
+  adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4810 },
   adLeadSharePct: 95,
-  monthlyTeamCost: 9500,
+  monthlyTeamCost: 3500,
   grossMarginPct: 93,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
@@ -160,7 +161,7 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.monthlyRevenueTarget = Number(out.monthlyRevenueTarget) || 12000;
   out.monthlyAdSpend = Number.isFinite(Number(out.monthlyAdSpend)) ? Number(out.monthlyAdSpend) : 7500;
   out.adLeadSharePct = Number.isFinite(Number(out.adLeadSharePct)) ? Number(out.adLeadSharePct) : 95;
-  out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 9500;
+  out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 3500;
   out.grossMarginPct = Number(out.grossMarginPct) > 0 ? Number(out.grossMarginPct) : 93;
   if (typeof out.adSpendByMonth === "string") {
     try { out.adSpendByMonth = JSON.parse(out.adSpendByMonth); } catch { out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth; }
