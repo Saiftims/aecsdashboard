@@ -1116,6 +1116,7 @@ export interface RetentionReport {
   monthlyCases: { month: string; count: number }[];
   monthlyNewFirms: { month: string; count: number }[];
   monthlyDemos: { month: string; count: number }[];
+  monthlyMqls: { month: string; count: number }[];
   monthlyRevenue: MonthlyRevenueRow[];
   frequency: {
     activatedFirms: number;
@@ -1221,7 +1222,7 @@ export async function retentionReport(): Promise<RetentionReport> {
     // still count in monthly volume and revenue. Cohorts / new-firms below
     // skip them because they have no firm to retain.
     sb.from("cases").select("company_hubspot_id, submitted_date"),
-    sb.from("deals").select("hubspot_id, properties"),
+    sb.from("deals").select("hubspot_id, name, is_activation, hs_created_at, properties"),
     sb.from("companies").select("hubspot_id, status:properties->>sw_customer_status"),
   ]);
   // Trial firms (sw_customer_status='trial' on the HubSpot company, e.g.
@@ -1274,6 +1275,27 @@ export async function retentionReport(): Promise<RetentionReport> {
     firmMonths.set(key, (firmMonths.get(key) ?? 0) + 1);
   }
   const monthlyNewFirms = [...firmMonths.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, count]) => ({
+      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+      count,
+    }));
+
+  // ---- MQLs per calendar month ----
+  // An MQL is a new deal in the sales pipeline, dated by when HubSpot created
+  // it. Contacts overstate demand (HubSpot auto-creates them for colleagues
+  // and email traffic), activation deals are post-sale, and "intake" deals
+  // are cases, not leads.
+  const mqlMonths = new Map<string, number>();
+  for (const d of demoRows ?? []) {
+    if (d.is_activation || !d.hs_created_at) continue;
+    if (/intake/i.test(d.name ?? "") || /silent\s?witness/i.test(d.name ?? "")) continue;
+    const when = new Date(d.hs_created_at);
+    if (Number.isNaN(when.getTime())) continue;
+    const key = `${when.getUTCFullYear()}-${String(when.getUTCMonth() + 1).padStart(2, "0")}`;
+    mqlMonths.set(key, (mqlMonths.get(key) ?? 0) + 1);
+  }
+  const monthlyMqls = [...mqlMonths.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, count]) => ({
       month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
@@ -1365,7 +1387,7 @@ export async function retentionReport(): Promise<RetentionReport> {
 
   return {
     funnel, cohorts, monthCols, monthlyCases, monthlyNewFirms, monthlyDemos,
-    monthlyRevenue,
+    monthlyMqls, monthlyRevenue,
     frequency: {
       activatedFirms: activated,
       totalCases,

@@ -210,6 +210,33 @@ export default async function ActivityPage() {
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Monthly MQLs
+        </h2>
+        <Card>
+          <CardHeader
+            title="MQLs per month"
+            action={
+              <span className="text-xs text-zinc-500">
+                {thisMonth(retention.monthlyMqls)?.count ?? 0} this month
+                {" \u00b7 "}
+                {retention.monthlyMqls.reduce((s, m) => s + m.count, 0)} MQLs all-time
+              </span>
+            }
+          />
+          <div className="p-4">
+            <MonthlyBarChart data={retention.monthlyMqls} color="hsl(210 70% 50%)" />
+          </div>
+          <p className="px-4 pb-4 text-xs text-zinc-500">
+            An MQL is a new deal in the sales pipeline, counted in the month HubSpot
+            created it {"\u2014"} ad-form leads, website and Calendly bookings, conference
+            lists and rep-added leads alike. New contacts are not counted, since HubSpot
+            also creates those for colleagues and email traffic.
+          </p>
+        </Card>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
           Monthly demos
         </h2>
         <Card>
