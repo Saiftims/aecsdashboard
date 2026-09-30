@@ -1,10 +1,14 @@
 import { loadSettings } from "@/lib/settings";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
-/** Subscription plans replaced per-case pricing in August 2026. Leads from
- * before this were bought by the transactional business, so they are left out
- * of every cohort even when they later subscribe (Traut, Portland). */
+/** Subscription plans replaced per-case pricing in August 2026; only
+ * subscriptions started since then are counted. */
 export const SUBSCRIPTION_ERA_START = "2026-08-01";
+
+/** First lead month reported. July leads were bought by July's ad spend and
+ * many subscribed once plans launched, so July is a cohort; leads from before
+ * it are listed but belong to no cohort. */
+export const FIRST_COHORT = "2026-07-01";
 
 /** A lead month is read as settled once this many days have passed since it
  * ended; before that its later conversions have not happened yet. */
@@ -34,7 +38,7 @@ export interface Subscriber {
   source: LeadSource;
   sourceDetail: string | null;
   plan: number;
-  /** Lead predates the subscription era; shown but never in a cohort. */
+  /** Lead predates the first cohort; shown but never in a cohort. */
   preSwitch: boolean;
 }
 
@@ -123,6 +127,9 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     if (s.is_internal) continue;
     const billed = (s.billed_cents ?? s.monthly_cents ?? 0) / 100;
     if (billed <= 0 || !s.started_at) continue;
+    // Stripe opens a subscription before its first payment clears; a failed
+    // card leaves it incomplete, and that firm was never acquired.
+    if (s.status === "incomplete" || s.status === "incomplete_expired") continue;
     if (s.status === "active") {
       activeSubscribers += 1;
       liveMrr += billed;
@@ -164,7 +171,7 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
       source: pick ? SOURCE_OF[pick.src!] ?? "other" : "unknown",
       sourceDetail: pick?.detail ?? null,
       plan,
-      preSwitch: lead < SUBSCRIPTION_ERA_START,
+      preSwitch: lead < FIRST_COHORT,
     });
   }
   subscribers.sort((a, b) => a.leadAt.localeCompare(b.leadAt));
@@ -173,7 +180,7 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
   for (const d of sales) mqlsByMonth.set(monthKey(d.hs_created_at), (mqlsByMonth.get(monthKey(d.hs_created_at)) ?? 0) + 1);
 
   const months: CohortMonth[] = [];
-  for (let m = new Date(SUBSCRIPTION_ERA_START + "T00:00:00Z"); m <= now; m = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1))) {
+  for (let m = new Date(FIRST_COHORT + "T00:00:00Z"); m <= now; m = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1))) {
     const key = m.toISOString().slice(0, 7);
     const end = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1));
     const daysIn = (end.getTime() - m.getTime()) / DAY;
