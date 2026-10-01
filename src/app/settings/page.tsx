@@ -86,6 +86,7 @@ export default async function SettingsPage() {
               Company-wide goals for each calendar month, drawn as a dotted line
               on the Activity page&apos;s monthly charts.
             </p>
+            <SettingField settingKey="monthly_mqls_target" label="MQLs per month" defaultValue={settings.monthlyMqlsTarget} />
             <SettingField settingKey="monthly_demos_target" label="Demos run per month" defaultValue={settings.monthlyDemosTarget} />
             <SettingField settingKey="monthly_new_firms_target" label="New firms (first case) per month" defaultValue={settings.monthlyNewFirmsTarget} />
             <SettingField settingKey="monthly_cases_target" label="Cases submitted per month" defaultValue={settings.monthlyCasesTarget} />

@@ -16,6 +16,7 @@ export interface GtmSettings {
   csDailyActivityTarget: number;
   /** Company-wide monthly goals, drawn as a dotted line on the Activity page's
    * monthly charts. Revenue is in dollars. */
+  monthlyMqlsTarget: number;
   monthlyDemosTarget: number;
   monthlyNewFirmsTarget: number;
   monthlyCasesTarget: number;
@@ -64,10 +65,11 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   slaFirstContactHours: 2,
   aeDailyActivityTarget: 100,
   csDailyActivityTarget: 40,
-  monthlyDemosTarget: 51,
-  monthlyNewFirmsTarget: 22,
-  monthlyCasesTarget: 60,
-  monthlyRevenueTarget: 12000,
+  monthlyMqlsTarget: 120,
+  monthlyDemosTarget: 60,
+  monthlyNewFirmsTarget: 30,
+  monthlyCasesTarget: 80,
+  monthlyRevenueTarget: 18000,
   monthlyAdSpend: 7500,
   adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4810 },
   adLeadSharePct: 95,
@@ -111,6 +113,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   sla_first_contact_hours: "slaFirstContactHours",
   ae_daily_activity_target: "aeDailyActivityTarget",
   cs_daily_activity_target: "csDailyActivityTarget",
+  monthly_mqls_target: "monthlyMqlsTarget",
   monthly_demos_target: "monthlyDemosTarget",
   monthly_new_firms_target: "monthlyNewFirmsTarget",
   monthly_cases_target: "monthlyCasesTarget",
@@ -155,10 +158,11 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.slaFirstContactHours = Number(out.slaFirstContactHours) || 2;
   out.aeDailyActivityTarget = Number(out.aeDailyActivityTarget) || 100;
   out.csDailyActivityTarget = Number(out.csDailyActivityTarget) || 40;
-  out.monthlyDemosTarget = Number(out.monthlyDemosTarget) || 51;
-  out.monthlyNewFirmsTarget = Number(out.monthlyNewFirmsTarget) || 22;
-  out.monthlyCasesTarget = Number(out.monthlyCasesTarget) || 60;
-  out.monthlyRevenueTarget = Number(out.monthlyRevenueTarget) || 12000;
+  out.monthlyMqlsTarget = Number(out.monthlyMqlsTarget) || 120;
+  out.monthlyDemosTarget = Number(out.monthlyDemosTarget) || 60;
+  out.monthlyNewFirmsTarget = Number(out.monthlyNewFirmsTarget) || 30;
+  out.monthlyCasesTarget = Number(out.monthlyCasesTarget) || 80;
+  out.monthlyRevenueTarget = Number(out.monthlyRevenueTarget) || 18000;
   out.monthlyAdSpend = Number.isFinite(Number(out.monthlyAdSpend)) ? Number(out.monthlyAdSpend) : 7500;
   out.adLeadSharePct = Number.isFinite(Number(out.adLeadSharePct)) ? Number(out.adLeadSharePct) : 95;
   out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 3500;
