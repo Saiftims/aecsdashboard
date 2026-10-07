@@ -391,6 +391,29 @@ export class PostHogProvider {
    * `submittedAt` is the first time the case URL was seen; for a case opened
    * straight after submission that is its creation time.
    */
+  /** Case ids with ANY activity in the last few minutes, by event caseId or
+   * /cases/<id> URL, with the (email, account) pairs seen on them. Reads only
+   * that window, so it is cheap enough to run every minute; it decides whether
+   * the full 400-day sync needs to run, and never attributes anything itself. */
+  async listRecentCaseActivity(minutes = 15): Promise<{ caseId: string; actors: [string | null, string | null][] }[]> {
+    const hogql = `
+      select cid, groupUniqArray(tuple(email, acc)) from (
+        select
+          coalesce(nullIf(toString(properties.caseId), ''),
+                   extract(toString(properties.$current_url), 'cases/(case_[0-9a-fA-F]{8,})')) as cid,
+          nullIf(toString(person.properties.email), '') as email,
+          nullIf(toString(properties.$group_0), '') as acc
+        from events
+        where timestamp > now() - interval ${Math.max(1, Math.round(minutes))} minute
+          and toString(properties.$current_url) not like '%staging%'
+      )
+      where cid like 'case_%'
+      group by cid
+      limit 2000`;
+    const rows = await this.query<[string, [string | null, string | null][]]>(hogql);
+    return rows.map(([caseId, actors]) => ({ caseId, actors: actors ?? [] }));
+  }
+
   async listCasesFromUrls(sinceDays = 400): Promise<PostHogCase[]> {
     // Staging is excluded: dev/QA work lives on app.staging.silentwitness.ai.
     //

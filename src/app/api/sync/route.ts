@@ -15,8 +15,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "full sync is executives only" }, { status: 403 });
 
   const kinds: SyncKind[] = body.full
-    ? ["hubspot_full", "calendly", "quo", "cases", "rollup"]
-    : ["hubspot_incremental", "calendly", "quo", "cases", "rollup"];
+    ? ["hubspot_full", "calendly", "quo", "cases", "rollup", "stripe"]
+    : ["hubspot_incremental", "calendly", "quo", "cases", "rollup", "stripe"];
   const results = await runSync(kinds);
   return NextResponse.json(results);
 }
