@@ -189,6 +189,12 @@ export interface PostHogIntake {
   /** The case this submission created. Present since 2026-07-30; before that the
    * submission and the case it produced cannot be linked. */
   caseId: string | null;
+  /** The customer account the case was filed INTO (`properties.accountId`), and
+   * that account's firm name. Differs from `accountId` ($group_0) when Silent
+   * Witness staff submit while impersonating a firm: $group_0 stays the staff
+   * member's own account, and this is the only field naming the customer. */
+  targetAccountId: string | null;
+  firmName: string | null;
 }
 
 export interface PostHogSignup {
@@ -494,7 +500,8 @@ export class PostHogProvider {
       select uuid, properties.$group_0 as account_id,
              person.properties.email as email, timestamp,
              properties.mode as mode, properties.fileCount as file_count,
-             toString(properties.$host) as host, properties.caseId as case_id
+             toString(properties.$host) as host, properties.caseId as case_id,
+             properties.accountId as target_account_id, properties.firmName as firm_name
       from events
       where event = 'intake_submission_completed'
         and timestamp > now() - interval ${sinceDays} day
@@ -510,6 +517,8 @@ export class PostHogProvider {
       fileCount: r[5] != null ? Number(r[5]) : null,
       portalSlug: portalSlug(r[6] as string | null),
       caseId: r[7] ? String(r[7]) : null,
+      targetAccountId: r[8] ? String(r[8]) : null,
+      firmName: r[9] ? String(r[9]).trim() : null,
     }));
   }
 

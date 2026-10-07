@@ -233,6 +233,29 @@ export async function syncCases() {
     const companyId = companyForSlug(it.portalSlug);
     if (companyId) portalCase.set(it.caseId, { companyId, submittedAt: it.submittedAt });
   }
+  // Cases staff file INTO a customer's account while impersonating it. Same
+  // failure as the portal: every actor is staff, so the case read as internal
+  // and was dropped (Megeredchian's two on 2026-10-01). The submission event
+  // names the target account and its firm, so it is attributed the same way
+  // and stored with no creator/account for the same reason. Only an exact firm
+  // match counts - an impersonated demo org ("Doe & Partners LLP") matches no
+  // company and stays out - and only with evidence attached: a zero-file
+  // submission is staff setting an account up (Adam M. Thompson, 2026-08-26).
+  for (const it of phIntakes) {
+    const target = it.targetAccountId;
+    if (!it.caseId || !target || target === it.accountId || portalCase.has(it.caseId)) continue;
+    if (!isTestCaseActor(it.email, it.accountId) || TEST_ACCOUNT_IDS.includes(target)) continue;
+    if (!(it.fileCount && it.fileCount > 0)) continue;
+    const byName = bySlug.get((it.firmName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")) || null;
+    const companyId = byAccount.get(target) ?? byName;
+    if (!companyId) continue;
+    if (!byAccount.has(target)) {
+      byAccount.set(target, companyId);
+      bootstrapMappings.push({ sw_account_id: target, hubspot_company_id: companyId, confirmed: false });
+      stats.bootstrapped += 1;
+    }
+    portalCase.set(it.caseId, { companyId, submittedAt: it.submittedAt });
+  }
   const phCaseIds = new Set(phCases.map((c) => c.caseId));
 
   // Oldest first: stand-in slots are single-use, so the pairing (and therefore
