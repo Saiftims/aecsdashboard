@@ -16,6 +16,7 @@ import {
   loadRevenueFacts, monthIndexOf, stripeRevenueBetween, type RevenueFacts,
 } from "@/lib/revenue";
 import { loadSettings } from "@/lib/settings";
+import { classifyMql, loadMetaLeadIndex, normName, type MqlSource } from "@/lib/meta-leads";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 export interface DealRow {
@@ -1116,7 +1117,9 @@ export interface RetentionReport {
   monthlyCases: { month: string; count: number }[];
   monthlyNewFirms: { month: string; count: number }[];
   monthlyDemos: { month: string; count: number }[];
-  monthlyMqls: { month: string; count: number }[];
+  monthlyMqls: { month: string; count: number; metaForm: number; metaBooking: number; other: number }[];
+  /** False when the Meta lead sheet could not be read; the split is then meaningless. */
+  mqlSourcesKnown: boolean;
   monthlyRevenue: MonthlyRevenueRow[];
   frequency: {
     activatedFirms: number;
@@ -1216,14 +1219,17 @@ export async function retentionReport(): Promise<RetentionReport> {
   };
   const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
 
-  const [{ data: caseRows }, { data: demoRows }, { data: statusRows }] = await Promise.all([
+  const [{ data: caseRows }, { data: demoRows }, { data: statusRows }, contactRows, metaIdx] = await Promise.all([
     // Include unattributed rows (company_hubspot_id null). Those are
     // analyst-worked matters the firm cannot be named from telemetry; they
     // still count in monthly volume and revenue. Cohorts / new-firms below
     // skip them because they have no firm to retain.
     sb.from("cases").select("company_hubspot_id, submitted_date"),
-    sb.from("deals").select("hubspot_id, name, is_activation, hs_created_at, properties"),
+    sb.from("deals").select("hubspot_id, name, is_activation, hs_created_at, primary_contact_id, properties"),
     sb.from("companies").select("hubspot_id, status:properties->>sw_customer_status"),
+    selectAll<{ hubspot_id: string; email: string | null; first_name: string | null; last_name: string | null; extra: string | null }>(
+      "contacts", "hubspot_id, email, first_name, last_name, extra:properties->>hs_additional_emails"),
+    loadMetaLeadIndex(),
   ]);
   // Trial firms (sw_customer_status='trial' on the HubSpot company, e.g.
   // Wheatley and Amy P. Lee Law, owner-confirmed 2026-08-31) try the product
@@ -1286,21 +1292,36 @@ export async function retentionReport(): Promise<RetentionReport> {
   // it. Contacts overstate demand (HubSpot auto-creates them for colleagues
   // and email traffic), activation deals are post-sale, and "intake" deals
   // are cases, not leads.
-  const mqlMonths = new Map<string, number>();
+  // Each MQL is split by where it came from, matched on the contact's email(s)
+  // or name against the marketing team's Meta lead sheet.
+  const contactById = new Map(contactRows.map((c) => [c.hubspot_id, c]));
+  const mqlMonths = new Map<string, Record<MqlSource, number>>();
   for (const d of demoRows ?? []) {
     if (d.is_activation || !d.hs_created_at) continue;
     if (/intake/i.test(d.name ?? "") || /silent\s?witness/i.test(d.name ?? "")) continue;
     const when = new Date(d.hs_created_at);
     if (Number.isNaN(when.getTime())) continue;
     const key = `${when.getUTCFullYear()}-${String(when.getUTCMonth() + 1).padStart(2, "0")}`;
-    mqlMonths.set(key, (mqlMonths.get(key) ?? 0) + 1);
+    let source: MqlSource = "other";
+    if (metaIdx) {
+      const c = d.primary_contact_id ? contactById.get(d.primary_contact_id) : undefined;
+      const emails = [c?.email, ...(c?.extra ?? "").split(";")]
+        .map((e) => (e ?? "").trim().toLowerCase()).filter(Boolean);
+      const names = [normName(`${c?.first_name ?? ""}${c?.last_name ?? ""}`), normName(d.name)].filter(Boolean);
+      source = classifyMql(metaIdx, emails, names);
+    }
+    const bucket = mqlMonths.get(key) ?? { metaForm: 0, metaBooking: 0, other: 0 };
+    bucket[source]++;
+    mqlMonths.set(key, bucket);
   }
   const monthlyMqls = [...mqlMonths.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, count]) => ({
+    .map(([k, b]) => ({
       month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
-      count,
+      count: b.metaForm + b.metaBooking + b.other,
+      ...b,
     }));
+  const mqlSourcesKnown = metaIdx !== null;
 
   // ---- demos run per calendar month ----
   // sw_demo_completed is the single evidence a demo ran: the Calendly sync
@@ -1387,7 +1408,7 @@ export async function retentionReport(): Promise<RetentionReport> {
 
   return {
     funnel, cohorts, monthCols, monthlyCases, monthlyNewFirms, monthlyDemos,
-    monthlyMqls, monthlyRevenue,
+    monthlyMqls, mqlSourcesKnown, monthlyRevenue,
     frequency: {
       activatedFirms: activated,
       totalCases,

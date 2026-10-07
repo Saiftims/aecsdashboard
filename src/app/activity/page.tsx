@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
-  DailyActivityChart, FunnelChart, MonthlyBarChart,
+  DailyActivityChart, FunnelChart, MonthlyBarChart, MonthlyMqlChart,
   MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
@@ -224,14 +224,22 @@ export default async function ActivityPage() {
             }
           />
           <div className="p-4">
-            <MonthlyBarChart data={retention.monthlyMqls} color="hsl(210 70% 50%)"
-              target={settings.monthlyMqlsTarget} />
+            {retention.mqlSourcesKnown ? (
+              <MonthlyMqlChart data={retention.monthlyMqls} target={settings.monthlyMqlsTarget} />
+            ) : (
+              <MonthlyBarChart data={retention.monthlyMqls} color="hsl(210 70% 50%)"
+                target={settings.monthlyMqlsTarget} />
+            )}
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             An MQL is a new deal in the sales pipeline, counted in the month HubSpot
-            created it {"\u2014"} ad-form leads, website and Calendly bookings, conference
-            lists and rep-added leads alike. New contacts are not counted, since HubSpot
-            also creates those for colleagues and email traffic.
+            created it. New contacts are not counted, since HubSpot also creates those
+            for colleagues and email traffic. The split comes from the marketing Meta lead
+            sheet: a deal whose contact appears on the form-fill tab is a Meta form fill,
+            one on the Calendly tab a Meta direct booking (form first if on both), and
+            everything else {"\u2014"} rep-added and cold leads, website contact forms,
+            conference lists {"\u2014"} is Other.
+            {!retention.mqlSourcesKnown && " The Meta lead sheet could not be read, so the split is hidden."}
           </p>
         </Card>
       </section>

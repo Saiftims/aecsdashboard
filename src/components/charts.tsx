@@ -251,6 +251,34 @@ export function MonthlyRevenueChart({
   );
 }
 
+/** MQLs per month, stacked by source so paid-social demand is visible apart
+ * from leads the reps added themselves or that arrived some other way. */
+export function MonthlyMqlChart({
+  data,
+  target,
+}: {
+  data: { month: string; count: number; metaForm: number; metaBooking: number; other: number }[];
+  target?: number;
+}) {
+  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+        <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
+        <Tooltip />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="metaForm" stackId="mql" name="Meta form fill" fill="hsl(210 70% 50%)" />
+        <Bar dataKey="metaBooking" stackId="mql" name="Meta direct booking" fill="hsl(265 55% 58%)" />
+        <Bar dataKey="other" stackId="mql" name="Other (rep-added, website, lists)" fill="hsl(220 9% 70%)"
+             radius={[4, 4, 0, 0]} />
+        {target ? targetLine(target, `Target ${target}`) : null}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 /** Called as a function, not rendered as a component: recharts only draws
  * a ReferenceLine that is a direct child of the chart. */
 function targetLine(y: number, label: string) {
