@@ -130,6 +130,35 @@ async function purgeStale(
   if (error) console.error(`purgeStale ${table}: ${error.message}`);
 }
 
+/** Incremental syncs only see records that still exist, so a deal deleted in
+ * HubSpot stayed in the cache and kept counting as a new MQL. The Calendly
+ * integration's bare re-created deals are deleted by the agent within hours,
+ * and 40 of those (Furmanski / Castillo, 7-8 Oct 2026) read as Meta form fills
+ * until purged. Recent deals are re-checked by id on every run; the whole
+ * table is still only reconciled on a full sync. */
+async function purgeDeletedRecentDeals(sb: ReturnType<typeof supabaseService>, days = 14) {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data, error } = await sb.from("deals").select("hubspot_id").gte("hs_created_at", since);
+  if (error || !data?.length) return 0;
+  const ids = data.map((d) => d.hubspot_id as string);
+  const alive = new Set<string>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const res = await hsRequest<{ results?: { id: string }[] }>(
+      "POST", "/crm/v3/objects/deals/batch/read",
+      { inputs: ids.slice(i, i + 100).map((id) => ({ id })), properties: ["dealname"] },
+    );
+    for (const r of res.results ?? []) alive.add(r.id);
+  }
+  const gone = ids.filter((id) => !alive.has(id));
+  if (!gone.length) return 0;
+  const { error: delErr } = await sb.from("deals").delete().in("hubspot_id", gone);
+  if (delErr) {
+    console.error(`purgeDeletedRecentDeals: ${delErr.message}`);
+    return 0;
+  }
+  return gone.length;
+}
+
 export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number) {
   const sb = supabaseService();
   const stats: Record<string, number> = {};
@@ -315,6 +344,12 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
     await purgeStale(sb, "deals", fetchedIds.deals ?? []);
     await purgeStale(sb, "contacts", fetchedIds.contacts ?? []);
     await purgeStale(sb, "companies", fetchedIds.companies ?? []);
+  } else {
+    try {
+      stats.deletedDealsPurged = await purgeDeletedRecentDeals(sb);
+    } catch (e) {
+      console.error("purgeDeletedRecentDeals:", e instanceof Error ? e.message : e);
+    }
   }
 
   return stats;
