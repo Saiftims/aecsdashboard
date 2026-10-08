@@ -1117,7 +1117,7 @@ export interface RetentionReport {
   cohorts: CohortRow[];
   monthCols: number;
   monthlyCases: MonthCount[];
-  monthlyNewFirms: MonthCount[];
+  monthlyNewFirms: (MonthCount & { firstCase: number; signupOnly: number })[];
   monthlyDemos: MonthCount[];
   monthlyMqls: (MonthCount & { metaForm: number; metaBooking: number; other: number })[];
   /** False when the Meta lead sheet could not be read; the split is then meaningless. */
@@ -1152,7 +1152,9 @@ export interface MonthCount {
 export interface MonthMembers {
   mqls: Record<string, { dealId: string; at: string; source: MqlSource }[]>;
   demos: Record<string, { dealId: string; at: string }[]>;
-  newFirms: Record<string, { companyId: string; at: string }[]>;
+  newFirms: Record<string, {
+    companyId: string; at: string; signedUpAt: string | null; firstCaseAt: string | null;
+  }[]>;
   /** companyId null = an analyst-worked case no firm could be named for. */
   cases: Record<string, { caseId: string | null; companyId: string | null; at: string }[]>;
 }
@@ -1294,7 +1296,7 @@ export async function retentionReport(): Promise<RetentionReport> {
     // skip them because they have no firm to retain.
     sb.from("cases").select("case_id, company_hubspot_id, submitted_date"),
     sb.from("deals").select("hubspot_id, name, is_activation, hs_created_at, primary_contact_id, properties"),
-    sb.from("companies").select("hubspot_id, status:properties->>sw_customer_status"),
+    sb.from("companies").select("hubspot_id, signed_up_at, status:properties->>sw_customer_status"),
     selectAll<{ hubspot_id: string; email: string | null; first_name: string | null; last_name: string | null; extra: string | null }>(
       "contacts", "hubspot_id, email, first_name, last_name, extra:properties->>hs_additional_emails"),
     loadMetaLeadIndex(),
@@ -1339,15 +1341,32 @@ export async function retentionReport(): Promise<RetentionReport> {
   const monthlyCases = countSeries(monthMembers.cases);
 
   // ---- new firms per calendar month ----
-  // A firm is new in the month its FIRST case landed - the owner counts firms
-  // by when they started actually using us, not by signups or deal paperwork
-  // (owner-confirmed 2026-08-28: signup-only and closed-won-only firms are
-  // pipeline, not new firms). Same first-case month the cohort tables use.
-  for (const [companyId, timestamps] of byFirm) {
-    const first = new Date(timestamps[0]);
-    push(monthMembers.newFirms, utcMonthKey(first), { companyId, at: first.toISOString() });
+  // A firm is new in the month of its first app signup OR first case,
+  // whichever came first, and appears once (owner, 2026-10-08 - this replaces
+  // the first-case-only rule of 2026-08-28). The bar is split by whether the
+  // firm has submitted a case yet, so a signup-only firm moves into the case
+  // segment of its own month once it sends one. Closed-won paperwork alone
+  // still does not make a new firm. The cohort tables keep first-case months.
+  const signedUp = new Map<string, number>();
+  for (const r of statusRows ?? []) {
+    const t = r.signed_up_at ? new Date(r.signed_up_at).getTime() : NaN;
+    if (!Number.isNaN(t)) signedUp.set(r.hubspot_id, t);
   }
-  const monthlyNewFirms = countSeries(monthMembers.newFirms);
+  for (const companyId of new Set([...byFirm.keys(), ...signedUp.keys()])) {
+    const firstCase = byFirm.get(companyId)?.[0] ?? null;
+    const signup = signedUp.get(companyId) ?? null;
+    const onset = Math.min(firstCase ?? Infinity, signup ?? Infinity);
+    push(monthMembers.newFirms, utcMonthKey(new Date(onset)), {
+      companyId,
+      at: new Date(onset).toISOString(),
+      signedUpAt: signup === null ? null : new Date(signup).toISOString(),
+      firstCaseAt: firstCase === null ? null : new Date(firstCase).toISOString(),
+    });
+  }
+  const monthlyNewFirms = countSeries(monthMembers.newFirms).map((row) => {
+    const firstCase = monthMembers.newFirms[row.key].filter((f) => f.firstCaseAt).length;
+    return { ...row, firstCase, signupOnly: row.count - firstCase };
+  });
 
   // ---- MQLs per calendar month ----
   // An MQL is a new deal in the sales pipeline, dated by when HubSpot created

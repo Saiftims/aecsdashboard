@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   DailyActivityChart, FunnelChart, LeadSourceChart, MonthlyBarChart, MonthlyMqlChart,
+  MonthlyNewFirmsChart,
   MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
@@ -321,15 +322,16 @@ export default async function ActivityPage() {
             }
           />
           <div className="p-4">
-            <MonthlyBarChart data={retention.monthlyNewFirms} color="hsl(265 60% 55%)"
+            <MonthlyNewFirmsChart data={retention.monthlyNewFirms}
               target={settings.monthlyNewFirmsTarget} drillBase="/drill/month_firms_" />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
-            A firm counts in the month its first case landed {"\u2014"} the
-            moment it started actually using us. Firms that have only signed up
-            or closed a deal but have not submitted a case yet are pipeline, not
-            new firms, and show up here the month their first case arrives. Each
-            firm appears once.
+            A firm counts once, in the month it first signed up for the app or
+            submitted its first case, whichever came first. The dark part has
+            submitted a case; the pale part has signed up but not sent one yet,
+            and moves into the dark part of its own month when it does. A
+            closed-won deal with no signup and no case is still pipeline. The
+            cohort tables below stay on first-case months.
           </p>
         </Card>
       </section>

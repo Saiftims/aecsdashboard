@@ -331,6 +331,36 @@ export function LeadSourceChart({
   );
 }
 
+/** New firms per month, split into firms that have submitted a case and firms
+ * that have only signed up so far. */
+export function MonthlyNewFirmsChart({
+  data,
+  target,
+  drillBase,
+}: {
+  data: { month: string; key?: string; count: number; firstCase: number; signupOnly: number }[];
+  target?: number;
+  drillBase?: string;
+}) {
+  const drillProps = useMonthDrill(data, drillBase);
+  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }} {...drillProps}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+        <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
+        <Tooltip />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="firstCase" stackId="firms" name="Submitted a case" fill="hsl(265 60% 55%)" />
+        <Bar dataKey="signupOnly" stackId="firms" name="Signed up, no case yet" fill="hsl(265 45% 78%)"
+             radius={[4, 4, 0, 0]} />
+        {target ? targetLine(target, `Target ${target}`) : null}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 /** Called as a function, not rendered as a component: recharts only draws
  * a ReferenceLine that is a direct child of the chart. */
 function targetLine(y: number, label: string) {
