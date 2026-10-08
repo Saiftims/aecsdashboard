@@ -6,9 +6,10 @@ import { SALES_STAGES } from "@/lib/hubspot/stages";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
   billingRetentionReport, hasFutureDemo, isOpenSalesDeal, isTaskSuperseded,
+  monthlyRevenueBreakdown, retentionReport,
   type ActivityRow, type CompanyRow, type DealRow, type RetentionMember,
 } from "@/lib/queries";
-import { supabaseService } from "@/lib/supabase/server";
+import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 export interface DrillRow {
   title: string;
@@ -509,8 +510,116 @@ async function revenueDrill(metric: string): Promise<DrillResult | null> {
   };
 }
 
+const MQL_SOURCE_LABEL: Record<string, string> = {
+  metaForm: "Meta form fill", metaBooking: "Meta direct booking", other: "Other",
+};
+
+/** The records behind one bar of a monthly chart, e.g. month_mqls_2026-10.
+ * Read from the same report the chart plots, so the list matches the bar. */
+async function monthDrill(metric: string): Promise<DrillResult | null> {
+  const m = /^month_(mqls|demos|firms|cases|revenue)_(\d{4}-\d{2})$/.exec(metric);
+  if (!m) return null;
+  const [, kind, key] = m;
+  const monthLabel = new Date(`${key}-01T00:00:00Z`)
+    .toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const [companies, deals] = await Promise.all([
+    selectAll<{ hubspot_id: string; name: string | null; domain: string | null; cases_lifetime: number | null }>(
+      "companies", "hubspot_id, name, domain, cases_lifetime"),
+    selectAll<{ hubspot_id: string; name: string | null; stage_label: string | null; company_hubspot_id: string | null }>(
+      "deals", "hubspot_id, name, stage_label, company_hubspot_id"),
+  ]);
+  const company = new Map(companies.map((c) => [c.hubspot_id, c]));
+  const deal = new Map(deals.map((d) => [d.hubspot_id, d]));
+  const firmName = (id: string | null) =>
+    (id && (company.get(id)?.name || company.get(id)?.domain)) || null;
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+
+  if (kind === "revenue") {
+    const { rows, firms } = await monthlyRevenueBreakdown();
+    const bar = rows.find((r) => r.key === key);
+    if (!bar) return null;
+    return {
+      label: `Revenue — ${monthLabel} · ${money(bar.total)}`,
+      rows: (firms.get(key) ?? []).map((f) => ({
+        title: firmName(f.companyId) ?? (f.companyId ? f.companyId : "No firm matched"),
+        subtitle: [
+          f.collected ? `${money(f.collected)} collected (Stripe)` : null,
+          f.modelled ? `${money(f.modelled)} estimated` : null,
+        ].filter(Boolean).join(" · "),
+        companyId: f.companyId,
+        when: `${key}-01T00:00:00Z`,
+      })),
+    };
+  }
+
+  const { monthMembers } = await retentionReport();
+  const dealRowFor = (dealId: string, at: string, detail: string): DrillRow => {
+    const d = deal.get(dealId);
+    return {
+      title: d?.name ?? dealId,
+      subtitle: [detail, d?.stage_label].filter(Boolean).join(" · "),
+      companyId: d?.company_hubspot_id ?? null,
+      dealId,
+      when: at,
+    };
+  };
+  const byDateDesc = <T extends { at: string }>(xs: T[]) =>
+    [...xs].sort((a, b) => b.at.localeCompare(a.at));
+
+  if (kind === "mqls") {
+    const list = byDateDesc(monthMembers.mqls[key] ?? []);
+    const split = Object.entries(MQL_SOURCE_LABEL)
+      .map(([s, l]) => `${list.filter((x) => x.source === s).length} ${l.toLowerCase()}`)
+      .join(", ");
+    return {
+      label: `MQLs — ${monthLabel} · ${list.length} (${split})`,
+      rows: list.map((x) => dealRowFor(x.dealId, x.at, MQL_SOURCE_LABEL[x.source])),
+    };
+  }
+  if (kind === "demos") {
+    const list = byDateDesc(monthMembers.demos[key] ?? []);
+    return {
+      label: `Demos run — ${monthLabel} · ${list.length}`,
+      rows: list.map((x) => dealRowFor(x.dealId, x.at, "demo attended")),
+    };
+  }
+  if (kind === "firms") {
+    const list = byDateDesc(monthMembers.newFirms[key] ?? []);
+    return {
+      label: `New firms — ${monthLabel} · ${list.length} (first case that month)`,
+      rows: list.map((x) => ({
+        title: firmName(x.companyId) ?? x.companyId,
+        subtitle: `first case ${new Date(x.at).toLocaleDateString()} · ` +
+          `${company.get(x.companyId)?.cases_lifetime ?? 0} lifetime case(s)`,
+        companyId: x.companyId,
+        when: x.at,
+      })),
+    };
+  }
+  // cases: one row per firm, so a firm that sent five reads as one line.
+  const list = monthMembers.cases[key] ?? [];
+  const perFirm = new Map<string, { companyId: string | null; n: number; last: string }>();
+  for (const c of list) {
+    const k = c.companyId ?? "";
+    const f = perFirm.get(k) ?? { companyId: c.companyId, n: 0, last: c.at };
+    f.n += 1;
+    if (c.at > f.last) f.last = c.at;
+    perFirm.set(k, f);
+  }
+  return {
+    label: `Cases submitted — ${monthLabel} · ${list.length} from ${perFirm.size} firm(s)`,
+    rows: [...perFirm.values()].sort((a, b) => b.n - a.n).map((f) => ({
+      title: firmName(f.companyId) ?? (f.companyId ?? "No firm (analyst-worked case)"),
+      subtitle: `${f.n} case${f.n === 1 ? "" : "s"} this month`,
+      companyId: f.companyId,
+      when: f.last,
+    })),
+  };
+}
+
 export async function drill(metric: string, ownerId?: string | null): Promise<DrillResult | null> {
   if (/^(rev|use)(cohort|billing)_/.test(metric)) return revenueDrill(metric);
+  if (metric.startsWith("month_")) return monthDrill(metric);
 
   const def = metric.startsWith("activation_")
     ? activationMetric(metric.slice("activation_".length))

@@ -1105,6 +1105,8 @@ export interface CohortRow {
  * separate so a reader can see how much of a bar is measured. */
 export interface MonthlyRevenueRow {
   month: string;
+  /** "YYYY-MM", the drill-down key. */
+  key: string;
   collected: number;
   modelled: number;
   total: number;
@@ -1114,13 +1116,16 @@ export interface RetentionReport {
   funnel: FunnelStep[];
   cohorts: CohortRow[];
   monthCols: number;
-  monthlyCases: { month: string; count: number }[];
-  monthlyNewFirms: { month: string; count: number }[];
-  monthlyDemos: { month: string; count: number }[];
-  monthlyMqls: { month: string; count: number; metaForm: number; metaBooking: number; other: number }[];
+  monthlyCases: MonthCount[];
+  monthlyNewFirms: MonthCount[];
+  monthlyDemos: MonthCount[];
+  monthlyMqls: (MonthCount & { metaForm: number; metaBooking: number; other: number })[];
   /** False when the Meta lead sheet could not be read; the split is then meaningless. */
   mqlSourcesKnown: boolean;
   monthlyRevenue: MonthlyRevenueRow[];
+  /** The records behind each monthly bar, keyed by "YYYY-MM", so a drill-down
+   * lists exactly what the chart counted. */
+  monthMembers: MonthMembers;
   frequency: {
     activatedFirms: number;
     totalCases: number;
@@ -1137,7 +1142,37 @@ export interface RetentionReport {
   };
 }
 
+export interface MonthCount {
+  month: string;
+  /** "YYYY-MM", the drill-down key. */
+  key: string;
+  count: number;
+}
+
+export interface MonthMembers {
+  mqls: Record<string, { dealId: string; at: string; source: MqlSource }[]>;
+  demos: Record<string, { dealId: string; at: string }[]>;
+  newFirms: Record<string, { companyId: string; at: string }[]>;
+  /** companyId null = an analyst-worked case no firm could be named for. */
+  cases: Record<string, { caseId: string | null; companyId: string | null; at: string }[]>;
+}
+
+/** One firm's share of a month's revenue. companyId null = cash from a payer no
+ * company matched, plus modelled cases with no firm. */
+export interface MonthRevenueFirm {
+  companyId: string | null;
+  collected: number;
+  modelled: number;
+}
+
 const DAY_MS = 86400000;
+
+const utcMonthKey = (d: Date) =>
+  `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+const monthKeyOfIndex = (m: number) =>
+  `${Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, "0")}`;
+const shortMonthLabel = (key: string) =>
+  new Date(`${key}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 
 /** Revenue per calendar month, on the same rule as everything else: cash for
  * firms Stripe has billed, modelled pricing for the rest.
@@ -1147,6 +1182,16 @@ const DAY_MS = 86400000;
  * Chudacoff bills $500 in a quiet month too.
  */
 export async function monthlyRevenueSeries(): Promise<MonthlyRevenueRow[]> {
+  return (await monthlyRevenueBreakdown()).rows;
+}
+
+/** The monthly revenue series plus, for each month index, which firms made it
+ * up. Unmatched cash is the month's Stripe total minus what matched a firm, so
+ * the per-firm list always sums to the bar. */
+export async function monthlyRevenueBreakdown(): Promise<{
+  rows: MonthlyRevenueRow[];
+  firms: Map<string, MonthRevenueFirm[]>;
+}> {
   const sb = supabaseService();
   const settings = await loadSettings();
   const [{ data: companies }, { data: caseRows }, facts] = await Promise.all([
@@ -1161,8 +1206,25 @@ export async function monthlyRevenueSeries(): Promise<MonthlyRevenueRow[]> {
 
   const collected = new Map<number, number>(facts.byMonth);
   const modelled = new Map<number, number>();
-  const add = (m: number, v: number) =>
+  const perFirm = new Map<number, Map<string, MonthRevenueFirm>>();
+  const credit = (m: number, id: string | null, part: "collected" | "modelled", v: number) => {
+    const month = perFirm.get(m) ?? new Map<string, MonthRevenueFirm>();
+    perFirm.set(m, month);
+    const f = month.get(id ?? "") ?? { companyId: id, collected: 0, modelled: 0 };
+    f[part] += v;
+    month.set(id ?? "", f);
+  };
+  const add = (m: number, v: number, id: string | null) => {
     modelled.set(m, (modelled.get(m) ?? 0) + v);
+    credit(m, id, "modelled", v);
+  };
+  for (const [id, months] of facts.byCompanyMonth) {
+    for (const [m, v] of months) credit(m, id, "collected", v);
+  }
+  for (const [m, total] of collected) {
+    const matched = [...(perFirm.get(m)?.values() ?? [])].reduce((s, f) => s + f.collected, 0);
+    if (total - matched >= 0.5) credit(m, null, "collected", total - matched);
+  }
 
   const planFirms = new Set<string>();
   const firstCaseMonth = new Map<string, number>();
@@ -1184,7 +1246,7 @@ export async function monthlyRevenueSeries(): Promise<MonthlyRevenueRow[]> {
     const end = firmPlanEnd(co);
     const last = Math.min(
       end ? end.getUTCFullYear() * 12 + end.getUTCMonth() : nowIdx, nowIdx);
-    for (let m = start; m <= last; m += 1) add(m, amount);
+    for (let m = start; m <= last; m += 1) add(m, amount, co.hubspot_id);
   }
 
   for (const c of caseRows ?? []) {
@@ -1194,19 +1256,25 @@ export async function monthlyRevenueSeries(): Promise<MonthlyRevenueRow[]> {
     // A plan firm's cases bill nothing extra, and a Stripe firm's cases are
     // already counted as the cash they produced.
     if (knows(id) || (id && planFirms.has(id))) continue;
-    add(m, caseRevenue(c, settings.defaultCasePrice));
+    add(m, caseRevenue(c, settings.defaultCasePrice), id ?? null);
   }
 
   const months = [...new Set([...collected.keys(), ...modelled.keys()])]
     .filter((m) => m <= nowIdx)
     .sort((a, b) => a - b);
-  return months.map((m) => {
+  const rows = months.map((m) => {
     const c = Math.round(collected.get(m) ?? 0);
     const e = Math.round(modelled.get(m) ?? 0);
-    const label = new Date(Date.UTC(Math.floor(m / 12), m % 12, 1))
-      .toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
-    return { month: label, collected: c, modelled: e, total: c + e };
+    const key = monthKeyOfIndex(m);
+    return { month: shortMonthLabel(key), key, collected: c, modelled: e, total: c + e };
   });
+  const firms = new Map<string, MonthRevenueFirm[]>();
+  for (const [m, month] of perFirm) {
+    firms.set(monthKeyOfIndex(m), [...month.values()]
+      .filter((f) => Math.abs(f.collected) >= 0.5 || Math.abs(f.modelled) >= 0.5)
+      .sort((a, b) => (b.collected + b.modelled) - (a.collected + a.modelled)));
+  }
+  return { rows, firms };
 }
 
 export async function retentionReport(): Promise<RetentionReport> {
@@ -1224,7 +1292,7 @@ export async function retentionReport(): Promise<RetentionReport> {
     // analyst-worked matters the firm cannot be named from telemetry; they
     // still count in monthly volume and revenue. Cohorts / new-firms below
     // skip them because they have no firm to retain.
-    sb.from("cases").select("company_hubspot_id, submitted_date"),
+    sb.from("cases").select("case_id, company_hubspot_id, submitted_date"),
     sb.from("deals").select("hubspot_id, name, is_activation, hs_created_at, primary_contact_id, properties"),
     sb.from("companies").select("hubspot_id, status:properties->>sw_customer_status"),
     selectAll<{ hubspot_id: string; email: string | null; first_name: string | null; last_name: string | null; extra: string | null }>(
@@ -1254,38 +1322,32 @@ export async function retentionReport(): Promise<RetentionReport> {
   // monthly case volume (ALL dated cases, including unattributed analyst-worked
   // rows with no firm). Those still count in the month total; they are excluded
   // from byFirm above so they cannot create a phantom cohort.
-  const monthCount = new Map<string, number>();
+  const monthMembers: MonthMembers = { mqls: {}, demos: {}, newFirms: {}, cases: {} };
+  const push = <T,>(into: Record<string, T[]>, key: string, item: T) => {
+    (into[key] ??= []).push(item);
+  };
+  const countSeries = <T,>(into: Record<string, T[]>): MonthCount[] =>
+    Object.keys(into).sort().map((key) => ({ month: shortMonthLabel(key), key, count: into[key].length }));
+
   for (const c of caseRows ?? []) {
     if (!c.submitted_date) continue;
     const d = new Date(c.submitted_date);
     if (Number.isNaN(d.getTime())) continue;
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    monthCount.set(key, (monthCount.get(key) ?? 0) + 1);
+    push(monthMembers.cases, utcMonthKey(d),
+      { caseId: c.case_id ?? null, companyId: c.company_hubspot_id ?? null, at: c.submitted_date });
   }
-  const monthlyCases = [...monthCount.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, count]) => ({
-      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
-      count,
-    }));
+  const monthlyCases = countSeries(monthMembers.cases);
 
   // ---- new firms per calendar month ----
   // A firm is new in the month its FIRST case landed - the owner counts firms
   // by when they started actually using us, not by signups or deal paperwork
   // (owner-confirmed 2026-08-28: signup-only and closed-won-only firms are
   // pipeline, not new firms). Same first-case month the cohort tables use.
-  const firmMonths = new Map<string, number>();
-  for (const timestamps of firms) {
-    const d = new Date(timestamps[0]);
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    firmMonths.set(key, (firmMonths.get(key) ?? 0) + 1);
+  for (const [companyId, timestamps] of byFirm) {
+    const first = new Date(timestamps[0]);
+    push(monthMembers.newFirms, utcMonthKey(first), { companyId, at: first.toISOString() });
   }
-  const monthlyNewFirms = [...firmMonths.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, count]) => ({
-      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
-      count,
-    }));
+  const monthlyNewFirms = countSeries(monthMembers.newFirms);
 
   // ---- MQLs per calendar month ----
   // An MQL is a new deal in the sales pipeline, dated by when HubSpot created
@@ -1295,13 +1357,11 @@ export async function retentionReport(): Promise<RetentionReport> {
   // Each MQL is split by where it came from, matched on the contact's email(s)
   // or name against the marketing team's Meta lead sheet.
   const contactById = new Map(contactRows.map((c) => [c.hubspot_id, c]));
-  const mqlMonths = new Map<string, Record<MqlSource, number>>();
   for (const d of demoRows ?? []) {
     if (d.is_activation || !d.hs_created_at) continue;
     if (/intake/i.test(d.name ?? "") || /silent\s?witness/i.test(d.name ?? "")) continue;
     const when = new Date(d.hs_created_at);
     if (Number.isNaN(when.getTime())) continue;
-    const key = `${when.getUTCFullYear()}-${String(when.getUTCMonth() + 1).padStart(2, "0")}`;
     let source: MqlSource = "other";
     if (metaIdx) {
       const c = d.primary_contact_id ? contactById.get(d.primary_contact_id) : undefined;
@@ -1310,17 +1370,13 @@ export async function retentionReport(): Promise<RetentionReport> {
       const names = [normName(`${c?.first_name ?? ""}${c?.last_name ?? ""}`), normName(d.name)].filter(Boolean);
       source = classifyMql(metaIdx, emails, names);
     }
-    const bucket = mqlMonths.get(key) ?? { metaForm: 0, metaBooking: 0, other: 0 };
-    bucket[source]++;
-    mqlMonths.set(key, bucket);
+    push(monthMembers.mqls, utcMonthKey(when), { dealId: d.hubspot_id, at: d.hs_created_at, source });
   }
-  const monthlyMqls = [...mqlMonths.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, b]) => ({
-      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
-      count: b.metaForm + b.metaBooking + b.other,
-      ...b,
-    }));
+  const monthlyMqls = countSeries(monthMembers.mqls).map((row) => {
+    const b: Record<MqlSource, number> = { metaForm: 0, metaBooking: 0, other: 0 };
+    for (const m of monthMembers.mqls[row.key]) b[m.source]++;
+    return { ...row, ...b };
+  });
   const mqlSourcesKnown = metaIdx !== null;
 
   // ---- demos run per calendar month ----
@@ -1329,7 +1385,6 @@ export async function retentionReport(): Promise<RetentionReport> {
   // Demo Completed for demos that happened off Calendly (owner-confirmed
   // 2026-08-28). A no-show gets no stamp and never counts here. Future-dated
   // demos are bookings, not demos run, and are dropped.
-  const demoMonths = new Map<string, number>();
   for (const d of demoRows ?? []) {
     const props = (d.properties ?? {}) as Record<string, unknown>;
     if (String(props.sw_demo_completed ?? "").toLowerCase() !== "true") continue;
@@ -1337,15 +1392,9 @@ export async function retentionReport(): Promise<RetentionReport> {
     if (typeof raw !== "string" || !raw) continue;
     const when = new Date(raw);
     if (Number.isNaN(when.getTime()) || when.getTime() > nowMs) continue;
-    const key = `${when.getUTCFullYear()}-${String(when.getUTCMonth() + 1).padStart(2, "0")}`;
-    demoMonths.set(key, (demoMonths.get(key) ?? 0) + 1);
+    push(monthMembers.demos, utcMonthKey(when), { dealId: d.hubspot_id, at: raw });
   }
-  const monthlyDemos = [...demoMonths.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, count]) => ({
-      month: new Date(`${k}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
-      count,
-    }));
+  const monthlyDemos = countSeries(monthMembers.demos);
 
   const monthlyRevenue = await monthlyRevenueSeries();
 
@@ -1408,7 +1457,7 @@ export async function retentionReport(): Promise<RetentionReport> {
 
   return {
     funnel, cohorts, monthCols, monthlyCases, monthlyNewFirms, monthlyDemos,
-    monthlyMqls, mqlSourcesKnown, monthlyRevenue,
+    monthlyMqls, mqlSourcesKnown, monthlyRevenue, monthMembers,
     frequency: {
       activatedFirms: activated,
       totalCases,

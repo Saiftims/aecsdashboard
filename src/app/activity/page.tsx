@@ -225,10 +225,11 @@ export default async function ActivityPage() {
           />
           <div className="p-4">
             {retention.mqlSourcesKnown ? (
-              <MonthlyMqlChart data={retention.monthlyMqls} target={settings.monthlyMqlsTarget} />
+              <MonthlyMqlChart data={retention.monthlyMqls} target={settings.monthlyMqlsTarget}
+                drillBase="/drill/month_mqls_" />
             ) : (
               <MonthlyBarChart data={retention.monthlyMqls} color="hsl(210 70% 50%)"
-                target={settings.monthlyMqlsTarget} />
+                target={settings.monthlyMqlsTarget} drillBase="/drill/month_mqls_" />
             )}
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
@@ -261,7 +262,7 @@ export default async function ActivityPage() {
           />
           <div className="p-4">
             <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42%)"
-              target={settings.monthlyDemosTarget} />
+              target={settings.monthlyDemosTarget} drillBase="/drill/month_demos_" />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             A demo counts only once someone actually attended it. Calendly is the
@@ -288,7 +289,7 @@ export default async function ActivityPage() {
           />
           <div className="p-4">
             <MonthlyBarChart data={retention.monthlyNewFirms} color="hsl(265 60% 55%)"
-              target={settings.monthlyNewFirmsTarget} />
+              target={settings.monthlyNewFirmsTarget} drillBase="/drill/month_firms_" />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             A firm counts in the month its first case landed {"\u2014"} the
@@ -316,7 +317,8 @@ export default async function ActivityPage() {
             }
           />
           <div className="p-4">
-            <MonthlyBarChart data={retention.monthlyCases} target={settings.monthlyCasesTarget} />
+            <MonthlyBarChart data={retention.monthlyCases} target={settings.monthlyCasesTarget}
+              drillBase="/drill/month_cases_" />
           </div>
         </Card>
       </section>
@@ -337,7 +339,8 @@ export default async function ActivityPage() {
             }
           />
           <div className="p-4">
-            <MonthlyRevenueChart data={retention.monthlyRevenue} target={settings.monthlyRevenueTarget} />
+            <MonthlyRevenueChart data={retention.monthlyRevenue} target={settings.monthlyRevenueTarget}
+              drillBase="/drill/month_revenue_" />
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             The solid bar is cash Stripe actually collected that month, net of

@@ -1,9 +1,23 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
+
+/** Click anywhere in a month's column to open `${drillBase}${row.key}`. */
+function useMonthDrill(data: { key?: string }[], drillBase?: string) {
+  const router = useRouter();
+  if (!drillBase) return {};
+  return {
+    style: { cursor: "pointer" },
+    onClick: (state: { activeIndex?: number | string | null } | null) => {
+      const key = data[Number(state?.activeIndex)]?.key;
+      if (state?.activeIndex != null && key) router.push(`${drillBase}${key}`);
+    },
+  };
+}
 
 export function FunnelChart({ data }: { data: { label: string; count: number }[] }) {
   return (
@@ -225,16 +239,19 @@ export function BillingRetentionChart({
 export function MonthlyRevenueChart({
   data,
   target,
+  drillBase,
 }: {
-  data: { month: string; collected: number; modelled: number; total: number }[];
+  data: { month: string; key?: string; collected: number; modelled: number; total: number }[];
   target?: number;
+  drillBase?: string;
 }) {
+  const drillProps = useMonthDrill(data, drillBase);
   const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
   const hasModelled = data.some((d) => d.modelled > 0);
   const maxVal = Math.max(target ?? 0, ...data.map((d) => d.total), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 8, right: target ? 72 : 8 }}>
+      <BarChart data={data} margin={{ top: 8, right: target ? 72 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis width={58} tick={{ fontSize: 11 }} domain={[0, Math.ceil(maxVal * 1.15)]}
@@ -256,14 +273,17 @@ export function MonthlyRevenueChart({
 export function MonthlyMqlChart({
   data,
   target,
+  drillBase,
 }: {
-  data: { month: string; count: number; metaForm: number; metaBooking: number; other: number }[];
+  data: { month: string; key?: string; count: number; metaForm: number; metaBooking: number; other: number }[];
   target?: number;
+  drillBase?: string;
 }) {
+  const drillProps = useMonthDrill(data, drillBase);
   const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }}>
+      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
@@ -297,15 +317,18 @@ export function MonthlyBarChart({
   data,
   color = "hsl(210 70% 50%)",
   target,
+  drillBase,
 }: {
-  data: { month: string; count: number }[];
+  data: { month: string; key?: string; count: number }[];
   color?: string;
   target?: number;
+  drillBase?: string;
 }) {
+  const drillProps = useMonthDrill(data, drillBase);
   const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }}>
+      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
