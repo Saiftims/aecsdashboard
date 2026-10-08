@@ -120,6 +120,52 @@ export function firmMrr(c: PlanFields): number {
   return ended && ended.getTime() <= Date.now() ? 0 : amount;
 }
 
+/** Transactional logo-retention: churned after this many days with no case.
+ * Subscribers are not measured this way - they stay retained until they cancel. */
+export const TX_RETENTION_DAYS = 90;
+
+export type LogoBilling = "subscription" | "transactional";
+
+/** End of a UTC calendar month, or `now` when that month is still running. */
+export function utcMonthAsOf(monthIdx: number, now: Date): Date {
+  const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
+  if (monthIdx >= nowIdx) return now;
+  const y = Math.floor(monthIdx / 12);
+  const m = monthIdx % 12;
+  return new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999));
+}
+
+/** Latest timestamp on or before asOf, or null. */
+export function lastOnOrBefore(timestamps: number[], asOfMs: number): number | null {
+  let last: number | null = null;
+  for (const t of timestamps) {
+    if (t <= asOfMs && (last === null || t > last)) last = t;
+  }
+  return last;
+}
+
+/** Logo retention at one month of a firm's own cohort.
+ *
+ * Month 0 is always retained (they started). After that:
+ * - subscription: still on the plan at `asOf`. A cancellation on or before
+ *   `asOf` is churn. Usage does not matter.
+ * - transactional: last case on or before `asOf` is within 90 days. Skipping a
+ *   calendar month is not churn; 90 quiet days is. */
+export function logoRetainedAt(args: {
+  billing: LogoBilling;
+  monthOffset: number;
+  asOf: Date;
+  planEnd: Date | null;
+  lastCaseAt: Date | null;
+}): boolean {
+  if (args.monthOffset === 0) return true;
+  if (args.billing === "subscription") {
+    return !args.planEnd || args.planEnd.getTime() > args.asOf.getTime();
+  }
+  if (!args.lastCaseAt) return false;
+  return args.asOf.getTime() - args.lastCaseAt.getTime() <= TX_RETENTION_DAYS * 86400000;
+}
+
 /** What a single case billed. A null amount means "never priced", so it falls
  * back to the standard price; an explicit amount is authoritative INCLUDING
  * zero, which is how a non-billable case is recorded (already invoiced outside
@@ -1093,11 +1139,24 @@ const DEMO_CREDIT_START = "2026-08-10";
 // Retention: activation->2nd->3rd->30/60/90-day funnel, first-case cohorts,
 // and usage-frequency metrics. All firm/case-level and team-wide.
 // ---------------------------------------------------------------------------
+export interface CohortMember {
+  id: string;
+  name: string;
+  billing: LogoBilling;
+  /** True for each elapsed month 0..N; unused slots are omitted. */
+  retained: boolean[];
+  planEnd: string | null;
+  lastCaseAt: string | null;
+}
+
 export interface CohortRow {
   key: string;            // "2026-04"
   label: string;          // "April 2026"
   firms: number;
+  subscribers: number;
+  transactional: number;
   retention: (number | null)[]; // Month 0..N (% retained), null if not elapsed
+  members: CohortMember[];
 }
 
 /** One month of revenue, split by how much we actually know. `collected` is cash
@@ -1289,26 +1348,53 @@ export async function retentionReport(): Promise<RetentionReport> {
   };
   const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
 
-  const [{ data: caseRows }, { data: demoRows }, { data: statusRows }, contactRows, metaIdx] = await Promise.all([
+  const [{ data: caseRows }, { data: demoRows }, { data: companyRows }, { data: stripeSubs }, contactRows, metaIdx] = await Promise.all([
     // Include unattributed rows (company_hubspot_id null). Those are
     // analyst-worked matters the firm cannot be named from telemetry; they
     // still count in monthly volume and revenue. Cohorts / new-firms below
     // skip them because they have no firm to retain.
     sb.from("cases").select("case_id, company_hubspot_id, submitted_date"),
     sb.from("deals").select("hubspot_id, name, is_activation, hs_created_at, primary_contact_id, properties"),
-    sb.from("companies").select("hubspot_id, signed_up_at, status:properties->>sw_customer_status"),
+    // select(*) so subscription_ended_at is present after migration 0006.
+    sb.from("companies").select("*"),
+    sb.from("stripe_subscriptions")
+      .select("company_hubspot_id, status, monthly_cents, started_at, cancelled_at, is_internal"),
     selectAll<{ hubspot_id: string; email: string | null; first_name: string | null; last_name: string | null; extra: string | null }>(
       "contacts", "hubspot_id, email, first_name, last_name, extra:properties->>hs_additional_emails"),
     loadMetaLeadIndex(),
   ]);
+  const statusRows = (companyRows ?? []) as (CompanyRow & { signed_up_at?: string | null })[];
   // Trial firms (sw_customer_status='trial' on the HubSpot company, e.g.
   // Wheatley and Amy P. Lee Law, owner-confirmed 2026-08-31) try the product
   // for free. Their cases are real work and stay in case counts, revenue and
   // new-firm numbers - but they never had a paying relationship to retain, so
   // they are left out of the retention cohorts, which they would only drag down.
   const trialFirms = new Set(
-    (statusRows ?? []).filter((r) => r.status === "trial").map((r) => r.hubspot_id),
+    statusRows.filter((r) => (r.properties as Record<string, unknown> | null)?.sw_customer_status === "trial")
+      .map((r) => r.hubspot_id),
   );
+  type StripeWin = { start: number; end: Date | null; live: boolean };
+  const stripeByCompany = new Map<string, StripeWin>();
+  const STRIPE_NOT_A_PLAN = new Set(["incomplete", "incomplete_expired"]);
+  const STRIPE_LIVE = new Set(["active", "past_due", "trialing", "unpaid", "paused"]);
+  for (const s of stripeSubs ?? []) {
+    if (s.is_internal || !s.company_hubspot_id) continue;
+    if (STRIPE_NOT_A_PLAN.has(String(s.status ?? ""))) continue;
+    const startMs = s.started_at ? new Date(s.started_at).getTime() : NaN;
+    const end = s.cancelled_at ? new Date(s.cancelled_at) : null;
+    const live = STRIPE_LIVE.has(String(s.status ?? "")) && (s.monthly_cents ?? 0) > 0;
+    const prev = stripeByCompany.get(s.company_hubspot_id);
+    if (!prev) {
+      stripeByCompany.set(s.company_hubspot_id, {
+        start: Number.isNaN(startMs) ? Infinity : startMs, end: live ? null : end, live,
+      });
+      continue;
+    }
+    if (!Number.isNaN(startMs)) prev.start = Math.min(prev.start, startMs);
+    prev.live = prev.live || live;
+    if (prev.live) prev.end = null;
+    else if (end && (!prev.end || end.getTime() > prev.end.getTime())) prev.end = end;
+  }
 
   // firm -> ascending submitted timestamps
   const byFirm = new Map<string, number[]>();
@@ -1346,7 +1432,8 @@ export async function retentionReport(): Promise<RetentionReport> {
   // the first-case-only rule of 2026-08-28). The bar is split by whether the
   // firm has submitted a case yet, so a signup-only firm moves into the case
   // segment of its own month once it sends one. Closed-won paperwork alone
-  // still does not make a new firm. The cohort tables keep first-case months.
+  // still does not make a new firm. The logo-retention table groups
+  // subscribers by subscribe month and transactional firms by first case.
   const signedUp = new Map<string, number>();
   for (const r of statusRows ?? []) {
     const t = r.signed_up_at ? new Date(r.signed_up_at).getTime() : NaN;
@@ -1438,27 +1525,89 @@ export async function retentionReport(): Promise<RetentionReport> {
     step("Active in 90-day window", ret90, ret60),
   ];
 
-  // ---- first-case cohorts (calendar month), trial firms excluded ----
-  const cohortMap = new Map<string, { first: number; active: Set<number> }[]>();
-  for (const [firmId, raw] of byFirm) {
-    if (trialFirms.has(firmId)) continue;
-    const f = [...raw].sort((x, y) => x - y);
-    const d = new Date(f[0]);
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    const entry = { first: monthIdx(f[0]), active: new Set(f.map(monthIdx)) };
-    cohortMap.set(key, [...(cohortMap.get(key) ?? []), entry]);
-  }
+  // ---- logo cohorts: subscription = still on the plan; transactional = a
+  // case in the last 90 days. Grouped by subscribe month (or first-case month
+  // if they never had a plan). Usage in a given calendar month no longer
+  // decides this chart (owner, 2026-10-08).
+  type LogoFirm = {
+    id: string;
+    name: string;
+    billing: LogoBilling;
+    first: number;
+    planEnd: Date | null;
+    cases: number[];
+  };
+  const logoFirms: LogoFirm[] = [];
+  const companyById = new Map(statusRows.map((c) => [c.hubspot_id, c]));
+  const seen = new Set<string>();
+  const consider = (id: string) => {
+    if (seen.has(id) || trialFirms.has(id)) return;
+    seen.add(id);
+    const co = companyById.get(id);
+    const stripe = stripeByCompany.get(id);
+    const onPlan = firmPlanAmount(co ?? {}) > 0 || !!stripe;
+    const cases = [...(byFirm.get(id) ?? [])].sort((a, b) => a - b);
+    if (onPlan) {
+      const live = (stripe?.live ?? false) || firmMrr(co ?? {}) > 0;
+      const planEnd = live ? null : (firmPlanEnd(co ?? {}) ?? stripe?.end ?? null);
+      const startMs = [
+        co?.subscribed_at ? new Date(co.subscribed_at).getTime() : NaN,
+        stripe && stripe.start !== Infinity ? stripe.start : NaN,
+        cases[0] ?? NaN,
+      ].filter((t) => !Number.isNaN(t));
+      if (!startMs.length) return;
+      logoFirms.push({
+        id, name: co?.name ?? co?.domain ?? id, billing: "subscription",
+        first: monthIdx(Math.min(...startMs)), planEnd, cases,
+      });
+      return;
+    }
+    if (!cases.length) return;
+    logoFirms.push({
+      id, name: co?.name ?? co?.domain ?? id, billing: "transactional",
+      first: monthIdx(cases[0]), planEnd: null, cases,
+    });
+  };
+  for (const id of companyById.keys()) consider(id);
+  for (const id of byFirm.keys()) consider(id);
+
   const monthCols = 4; // Month 0..3
+  const cohortMap = new Map<string, LogoFirm[]>();
+  for (const f of logoFirms) {
+    const key = `${Math.floor(f.first / 12)}-${String((f.first % 12) + 1).padStart(2, "0")}`;
+    cohortMap.set(key, [...(cohortMap.get(key) ?? []), f]);
+  }
   const cohorts: CohortRow[] = [...cohortMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, list]) => {
+    const members: CohortMember[] = list.map((f) => {
+      const retained: boolean[] = [];
+      for (let m = 0; m < monthCols; m++) {
+        if (f.first + m > nowIdx) break;
+        const asOf = utcMonthAsOf(f.first + m, now);
+        const lastMs = lastOnOrBefore(f.cases, asOf.getTime());
+        retained.push(logoRetainedAt({
+          billing: f.billing, monthOffset: m, asOf, planEnd: f.planEnd,
+          lastCaseAt: lastMs === null ? null : new Date(lastMs),
+        }));
+      }
+      return {
+        id: f.id, name: f.name, billing: f.billing, retained,
+        planEnd: f.planEnd ? f.planEnd.toISOString() : null,
+        lastCaseAt: f.cases.length ? new Date(f.cases[f.cases.length - 1]).toISOString() : null,
+      };
+    });
     const retention: (number | null)[] = [];
     for (let m = 0; m < monthCols; m++) {
-      const target = list[0].first + m;
-      if (target > nowIdx) { retention.push(null); continue; } // month not reached yet
-      const cnt = list.filter((x) => x.active.has(x.first + m)).length;
-      retention.push(Math.round((cnt / list.length) * 100));
+      const elapsed = members.filter((x) => x.retained.length > m);
+      if (!elapsed.length) { retention.push(null); continue; }
+      retention.push(Math.round((elapsed.filter((x) => x.retained[m]).length / elapsed.length) * 100));
     }
     const label = new Date(`${key}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-    return { key, label, firms: list.length, retention };
+    return {
+      key, label, firms: list.length,
+      subscribers: list.filter((f) => f.billing === "subscription").length,
+      transactional: list.filter((f) => f.billing === "transactional").length,
+      retention, members: members.sort((a, b) => a.name.localeCompare(b.name)),
+    };
   });
 
   // ---- usage-frequency metrics ----

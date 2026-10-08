@@ -422,11 +422,11 @@ export default async function ActivityPage() {
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Cohort retention — grouped by first-case month
+          Cohort retention — still a customer
         </h2>
         <Card>
           <CardHeader
-            title="Retention curve (% of cohort still submitting)"
+            title="Retention curve (% of cohort still a customer)"
             action={billing.partialMonth ? (
               <span className="text-xs text-amber-600">
                 {billing.partialMonthLabel} is still running — whichever month
@@ -440,26 +440,27 @@ export default async function ActivityPage() {
         </Card>
         <div className="mt-3">
           <Table
-            headers={["First-case cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
+            headers={["Cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
             rows={retention.cohorts.map((c) => [
               <Link key="c" href={`/drill/cohort_${c.key}`} className="font-medium text-blue-600 hover:underline">
                 {c.label}
               </Link>,
-              String(c.firms),
+              `${c.firms} · ${c.subscribers} sub · ${c.transactional} tx`,
               ...c.retention.map((r) => (r === null ? "—" : `${r}%`)),
             ])}
           />
         </div>
         <p className="mt-2 text-xs text-zinc-400">
-          Each cohort = firms whose first case landed that month. Month N = % of the cohort that
-          submitted a case N calendar months later. &ldquo;—&rdquo; = that month hasn&apos;t elapsed yet.
-          {billing.partialMonth ? ` The column landing on ${billing.partialMonthLabel} is measured against an unfinished month, so it can only go up.` : ""}{" "}
-          A steep month-1 drop is expected while most firms arrive with a single
-          case: one case is a trial, not yet a habit, so this reads as &ldquo;came
-          back&rdquo; against &ldquo;tried once&rdquo; rather than as churn of
-          established accounts. Firms marked Trial in HubSpot are excluded here
-          and from the retention charts below {"\u2014"} they never had a paying
-          relationship to retain.
+          A subscriber is retained while the plan is live and churned the month they
+          cancel {"\u2014"} sending cases does not keep them, and skipping a month
+          does not lose them. A transactional firm is retained while it has submitted
+          a case in the last 90 days, and churned after 90 quiet days (not 30). Month
+          0 is always 100%. A subscription cohort starts the month they subscribed; a
+          transactional one the month of their first case. &ldquo;—&rdquo; = that
+          month hasn&apos;t elapsed yet.
+          {billing.partialMonth ? ` The column landing on ${billing.partialMonthLabel} is measured against an unfinished month.` : ""}{" "}
+          Firms marked Trial in HubSpot are excluded here and from the retention
+          charts below {"\u2014"} they never had a paying relationship to retain.
         </p>
       </section>
 

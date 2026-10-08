@@ -105,8 +105,8 @@ export function DailyActivityChart({
   );
 }
 
-/** Cohort retention curves: x = months since first case, y = % retained,
- * one line per first-case cohort. */
+/** Cohort retention curves: x = months since the firm became a customer,
+ * y = % still a customer (plan live, or a case in the last 90 days). */
 export function RetentionChart({
   cohorts,
   monthCols,

@@ -434,24 +434,32 @@ function activationMetric(stage: string) {
   };
 }
 
-/** Firms in a first-case cohort (key = "YYYY-MM"). */
-function cohortMetric(key: string): { label: string; rows: (ctx: Ctx) => DrillRow[] } | null {
+/** Firms in a logo-retention cohort (key = "YYYY-MM"). Membership and
+ * retained/churned status come from the same report the chart plots. */
+async function cohortDrill(key: string): Promise<DrillResult | null> {
   if (!/^\d{4}-\d{2}$/.test(key)) return null;
-  const label = new Date(`${key}-01T00:00:00Z`)
-    .toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const report = await retentionReport();
+  const c = report.cohorts.find((x) => x.key === key);
+  if (!c) return null;
+  const last = (m: typeof c.members[number]) => m.retained[m.retained.length - 1] ?? true;
+  const day = (iso: string | null) => iso ? new Date(iso).toLocaleDateString() : null;
   return {
-    label: `First-case cohort — ${label}`,
-    rows: (ctx) => ctx.companies
-      .filter((c) => {
-        if (!c.first_case_at) return false;
-        // Trial firms are excluded from the cohort table, so keep the
-        // drill-down membership consistent with it.
-        if ((c.properties as Record<string, unknown> | null)?.sw_customer_status === "trial") return false;
-        const d = new Date(c.first_case_at);
-        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}` === key;
-      })
-      .sort((a, b) => (b.cases_lifetime ?? 0) - (a.cases_lifetime ?? 0))
-      .map((c) => companyRow(c, `${c.cases_lifetime ?? 0} lifetime case(s) · first ${c.first_case_at ? new Date(c.first_case_at).toLocaleDateString() : "?"}`)),
+    label: `Retention cohort — ${c.label} · ${c.firms} firm(s) ` +
+      `(${c.subscribers} subscription, ${c.transactional} transactional)`,
+    rows: [...c.members].sort((a, b) => Number(last(b)) - Number(last(a))).map((m) => ({
+      title: m.name,
+      subtitle: [
+        m.billing === "subscription" ? "subscription" : "per case",
+        last(m)
+          ? (m.billing === "subscription" ? "still on plan" : "retained (case in last 90 days)")
+          : (m.billing === "subscription"
+            ? `cancelled${m.planEnd ? ` ${day(m.planEnd)}` : ""}`
+            : `churned (no case in 90 days${m.lastCaseAt ? ` · last ${day(m.lastCaseAt)}` : ""})`),
+        m.lastCaseAt ? `last case ${day(m.lastCaseAt)}` : "no cases",
+      ].join(" · "),
+      companyId: m.id,
+      when: `${c.key}-01T00:00:00Z`,
+    })),
   };
 }
 
@@ -651,11 +659,11 @@ export async function drill(metric: string, ownerId?: string | null): Promise<Dr
   if (metric.startsWith("month_")) return monthDrill(metric);
   if (metric === "leads_7d") return leadsDrill();
 
+  if (metric.startsWith("cohort_")) return cohortDrill(metric.slice("cohort_".length));
+
   const def = metric.startsWith("activation_")
     ? activationMetric(metric.slice("activation_".length))
-    : metric.startsWith("cohort_")
-      ? cohortMetric(metric.slice("cohort_".length))
-      : METRICS[metric];
+    : METRICS[metric];
   if (!def) return null;
 
   const { settings, deals, companies, contacts, activities } = await fetchCore();
