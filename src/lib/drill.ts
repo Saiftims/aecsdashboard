@@ -3,6 +3,8 @@
 import { differenceInDays, subDays } from "date-fns";
 import { bucketOf, isOutreach, isSms } from "@/lib/activity-channels";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
+import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
+import { loadSettings } from "@/lib/settings";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
   billingRetentionReport, hasFutureDemo, isOpenSalesDeal, isTaskSuperseded,
@@ -617,9 +619,30 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
   };
 }
 
+async function leadsDrill(): Promise<DrillResult | null> {
+  const settings = await loadSettings();
+  const report = await leadsReport(settings.dashboardTimezone);
+  if (!report.ok) return null;
+  const label = new Map(LEAD_SOURCES.map((s) => [s.key, s.label]));
+  const split = LEAD_SOURCES
+    .map((s) => [s.label, report.leads.filter((l) => l.source === s.key).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([l, n]) => `${n} ${l.toLowerCase()}`).join(", ");
+  return {
+    label: `New leads — last 7 days · ${report.leads.length} (${split})`,
+    rows: report.leads.map((l) => ({
+      title: l.name,
+      subtitle: `${label.get(l.source)} · ${l.detail}`,
+      dealId: l.dealId,
+      when: l.at,
+    })),
+  };
+}
+
 export async function drill(metric: string, ownerId?: string | null): Promise<DrillResult | null> {
   if (/^(rev|use)(cohort|billing)_/.test(metric)) return revenueDrill(metric);
   if (metric.startsWith("month_")) return monthDrill(metric);
+  if (metric === "leads_7d") return leadsDrill();
 
   const def = metric.startsWith("activation_")
     ? activationMetric(metric.slice("activation_".length))

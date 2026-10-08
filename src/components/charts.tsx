@@ -299,6 +299,38 @@ export function MonthlyMqlChart({
   );
 }
 
+/** New leads per day, stacked by where each came from. A source with no leads
+ * in the window is left out of the legend. Clicking opens the full list. */
+export function LeadSourceChart({
+  data,
+  series,
+  drillHref,
+}: {
+  data: ({ day: string; total: number } & Record<string, number | string>)[];
+  series: { key: string; label: string; color: string }[];
+  drillHref?: string;
+}) {
+  const router = useRouter();
+  const shown = series.filter((s) => data.some((d) => Number(d[s.key] ?? 0) > 0));
+  const maxVal = Math.max(...data.map((d) => d.total), 1);
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <BarChart data={data} margin={{ top: 8, right: 8 }}
+        {...(drillHref ? { style: { cursor: "pointer" }, onClick: () => router.push(drillHref) } : {})}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+        <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
+        <Tooltip />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        {shown.map((s, i) => (
+          <Bar key={s.key} dataKey={s.key} stackId="leads" name={s.label} fill={s.color}
+               radius={i === shown.length - 1 ? [4, 4, 0, 0] : undefined} />
+        ))}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 /** Called as a function, not rendered as a component: recharts only draws
  * a ReferenceLine that is a direct child of the chart. */
 function targetLine(y: number, label: string) {

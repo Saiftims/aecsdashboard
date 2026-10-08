@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
-  DailyActivityChart, FunnelChart, MonthlyBarChart, MonthlyMqlChart,
+  DailyActivityChart, FunnelChart, LeadSourceChart, MonthlyBarChart, MonthlyMqlChart,
   MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
 import { Card, CardHeader, Stat, Table } from "@/components/ui";
@@ -10,6 +10,8 @@ import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
 import {
   activityReport, billingRetentionReport, demoCreditReport, retentionReport,
 } from "@/lib/queries";
+import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
+import { loadSettings } from "@/lib/settings";
 import { currentAppUser } from "@/lib/supabase/server";
 import { unitEconomicsSnapshot } from "@/lib/unit-economics";
 
@@ -30,12 +32,13 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention, billing, demoCredit, unitEcon] = await Promise.all([
+  const [report, retention, billing, demoCredit, unitEcon, leads] = await Promise.all([
     activityReport(user.role === "ae" ? user.hubspot_owner_id : null),
     retentionReport(),
     billingRetentionReport(),
     demoCreditReport(),
     user.role === "executive" ? unitEconomicsSnapshot() : null,
+    loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
   ]);
   const revRetention = billing.revenue;
   const {
@@ -75,7 +78,12 @@ export default async function ActivityPage() {
           Results (7 days)
         </h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Stat label="New leads" value={cohortSize} tone="good" sub="deals created this week" href="/drill/funnel_leads" />
+          {leads.ok ? (
+            <Stat label="New leads" value={leads.leads.length} tone="good"
+              sub="deals, ad forms & bookings" href="/drill/leads_7d" />
+          ) : (
+            <Stat label="New leads" value={cohortSize} tone="good" sub="deals created this week" href="/drill/funnel_leads" />
+          )}
           <Stat label="New customers" value={newCustomers} tone="good" sub="new this week (case/signup/sub)" href="/drill/new_customers_7d" />
           <Stat label="Cases won" value={casesThisWeek} tone="good" sub="cases submitted this week" href="/drill/cases_7d" />
           <Stat
@@ -92,6 +100,31 @@ export default async function ActivityPage() {
           <Stat label="Deals signed" value={dealsWon} sub="closed-won this week" href="/drill/funnel_closed_won" />
         </div>
       </section>
+
+      {leads.ok ? (
+        <Card>
+          <CardHeader
+            title="New leads by source — last 7 days"
+            action={
+              <Link href="/drill/leads_7d" className="text-xs text-blue-600 hover:underline">
+                {leads.leads.length} leads · see the list
+              </Link>
+            }
+          />
+          <div className="p-4">
+            <LeadSourceChart data={leads.daily} series={LEAD_SOURCES} drillHref="/drill/leads_7d" />
+          </div>
+          <p className="px-4 pb-4 text-xs text-zinc-500">
+            Every lead counted once, wherever it landed: new sales-pipeline deals,
+            Meta ad-form submissions HubSpot received (including ones nobody has
+            turned into a deal yet), and rows on the Meta lead sheet that never
+            reached HubSpot. A Meta lead is anyone with a Facebook Lead Ads form
+            in HubSpot or on the sheet, even if a rep or Calendly created the deal.
+            &ldquo;Existing lead came back&rdquo; is someone already in HubSpot filling the
+            form or booking again {"\u2014"} intent, not a new person. Case intakes and activation deals are not leads.
+          </p>
+        </Card>
+      ) : null}
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
@@ -179,7 +212,7 @@ export default async function ActivityPage() {
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Full funnel — {cohortSize} leads created this week
+          Full funnel — {cohortSize} deals created this week
         </h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {funnel.map((f) => (

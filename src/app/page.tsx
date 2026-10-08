@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { FunnelChart } from "@/components/charts";
 import { Card, CardHeader, Stat } from "@/components/ui";
+import { leadsReport } from "@/lib/leads";
 import { execOverview } from "@/lib/queries";
+import { loadSettings } from "@/lib/settings";
 import { currentAppUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +14,10 @@ export default async function ExecutivePage() {
   if (user.role === "ae") redirect("/ae");
   if (user.role === "cs") redirect("/cs");
 
-  const { kpis, funnel, postSaleFunnel } = await execOverview();
+  const [{ kpis, funnel, postSaleFunnel }, leads] = await Promise.all([
+    execOverview(),
+    loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
+  ]);
   const fmtMoney = (n: number | null) =>
     n === null ? "-" : `$${Math.round(n).toLocaleString()}`;
 
@@ -23,7 +28,11 @@ export default async function ExecutivePage() {
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Sales</h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Stat label="New leads (7d)" value={kpis.newLeads7d} tone="good" href="/drill/funnel_leads" />
+          {leads.ok ? (
+            <Stat label="New leads (7d)" value={leads.leads.length} tone="good" href="/drill/leads_7d" />
+          ) : (
+            <Stat label="New leads (7d)" value={kpis.newLeads7d} tone="good" href="/drill/funnel_leads" />
+          )}
           <Stat label="New MQLs (30d)" value={kpis.newMqls30d} />
           <Stat
             label="Median speed-to-lead"
