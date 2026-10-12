@@ -272,8 +272,8 @@ export default async function ActivityPage() {
             for colleagues and email traffic. The split comes from the marketing Meta lead
             sheet: a deal whose contact appears on the form-fill tab is a Meta form fill,
             one on the Calendly tab a Meta direct booking (form first if on both), and
-            everything else {"\u2014"} rep-added and cold leads, website contact forms,
-            conference lists {"\u2014"} is Other.
+            everything else {"\u2014"} rep-added and cold-email leads, website contact forms,
+            conference lists {"\u2014"} is Email.
             {!retention.mqlSourcesKnown && " The Meta lead sheet could not be read, so the split is hidden."}
           </p>
         </Card>

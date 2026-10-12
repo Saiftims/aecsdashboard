@@ -521,7 +521,7 @@ async function revenueDrill(metric: string): Promise<DrillResult | null> {
 }
 
 const MQL_SOURCE_LABEL: Record<string, string> = {
-  metaForm: "Meta form fill", metaBooking: "Meta direct booking", other: "Other",
+  metaForm: "Meta form fill", metaBooking: "Meta direct booking", other: "Email",
 };
 
 /** The records behind one bar of a monthly chart, e.g. month_mqls_2026-10.

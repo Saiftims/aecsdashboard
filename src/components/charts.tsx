@@ -291,7 +291,7 @@ export function MonthlyMqlChart({
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="metaForm" stackId="mql" name="Meta form fill" fill="hsl(210 70% 50%)" />
         <Bar dataKey="metaBooking" stackId="mql" name="Meta direct booking" fill="hsl(265 55% 58%)" />
-        <Bar dataKey="other" stackId="mql" name="Other (rep-added, website, lists)" fill="hsl(220 9% 70%)"
+        <Bar dataKey="other" stackId="mql" name="Email" fill="hsl(220 9% 70%)"
              radius={[4, 4, 0, 0]} />
         {target ? targetLine(target, `Target ${target}`) : null}
       </BarChart>
