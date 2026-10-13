@@ -102,16 +102,18 @@ interface MetaLeadRow {
   full_name: string | null; email: string | null; company: string | null; is_test: boolean;
 }
 
-/** Raw Meta submissions in the window from the `meta_leads` archive. Empty
- * (not null) when the table cannot be read: the HubSpot contacts the FB
- * integration creates still carry every submission, so nothing is lost -
- * only the few Meta test leads HubSpot never received would differ. */
-async function loadMetaApiLeads(sinceIso: string, untilIso: string): Promise<MetaLeadRow[]> {
+/** Every raw Meta submission in the `meta_leads` archive (all of them, not
+ * just the window: the EARLIEST submission is what dates a lead, and it can
+ * be months before the deal). Empty (not null) when the table cannot be read:
+ * the HubSpot contacts the FB integration creates still carry every
+ * submission, so nothing is lost - only the few Meta test leads HubSpot never
+ * received would differ. */
+async function loadMetaApiLeads(untilIso: string): Promise<MetaLeadRow[]> {
   try {
     const { data, error } = await supabaseService().from("meta_leads")
       .select("leadgen_id, created_time, form_name, full_name, email, company, is_test")
-      .gte("created_time", sinceIso).lte("created_time", untilIso)
-      .order("created_time", { ascending: true }).limit(5000);
+      .eq("is_test", false).lte("created_time", untilIso)
+      .order("created_time", { ascending: true }).limit(10000);
     if (error) throw error;
     return (data ?? []) as MetaLeadRow[];
   } catch (e) {
@@ -140,7 +142,7 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
         { filters: [{ propertyName: "first_conversion_date", operator: "GTE", value: sinceIso }] },
       ], CONTACT_PROPS),
       loadMetaSheetRows(),
-      loadMetaApiLeads(sinceIso, now.toISOString()),
+      loadMetaApiLeads(now.toISOString()),
     ]);
     const newDeals = deals.filter((d) =>
       !NOT_A_LEAD.test(d.properties.dealname ?? "") && !d.properties.sw_activation_stage);
@@ -156,12 +158,22 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
         (r.tab === "form" ? sheetForm : sheetBooking).add(k);
       }
     }
-    // Everyone Meta itself says filled a form, qualified or not.
-    const metaKeys = new Set<string>();
+    // Everyone Meta itself says filled a form, qualified or not, with the
+    // moment they FIRST did (rows arrive oldest first).
+    const metaFirst = new Map<string, string>();
     for (const r of metaApi) {
-      if (r.is_test) continue;
-      for (const k of [r.email ?? "", normName(r.full_name)].filter(Boolean)) metaKeys.add(k);
+      for (const k of [r.email ?? "", normName(r.full_name)].filter(Boolean)) {
+        if (!metaFirst.has(k)) metaFirst.set(k, r.created_time);
+      }
     }
+    // When a person actually arrived. A deal is often made long after the
+    // fact - 71 were bulk-created on 2026-10-13 for Meta leads from July to
+    // October (owner: "attribute it to that month, not to the HubSpot entry
+    // date") - so the earliest evidence wins: Meta's submission time, else
+    // HubSpot's first form conversion, else the deal's creation.
+    const arrivedAt = (keys: string[], ...dates: (string | undefined | null)[]) =>
+      [...dates, ...keys.map((k) => metaFirst.get(k))]
+        .filter((d): d is string => !!d).sort()[0];
     // FlyTech's sheet is the qualification record: on it = qualified.
     const qualified = (keys: string[]) => keys.some((k) => sheetForm.has(k));
     const metaFormSource = (keys: string[]): LeadSource => qualified(keys) ? "metaForm" : "metaUnqualified";
@@ -182,13 +194,17 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
       const c = contacts.get((dealContacts.get(d.id) ?? [])[0] ?? "");
       const name = d.properties.dealname ?? "";
       if (TEST_LEAD.test(name) || emailsOf(c).some((e) => INTERNAL_EMAIL.test(e))) continue;
-      const at = d.properties.createdate ?? sinceIso;
+      const created = d.properties.createdate ?? sinceIso;
       const keys = [...emailsOf(c), normName(fullName(c)), normName(name)];
+      const at = arrivedAt(keys, created, c?.properties.first_conversion_date);
+      // Arrived before the window: not a new lead now, whatever the deal says.
+      if (at < sinceIso) continue;
       if (known(at, keys)) continue;
       const src = d.properties.hs_object_source;
       const app = d.properties.hs_object_source_detail_1 ?? "";
+      const late = at.slice(0, 10) !== created.slice(0, 10) ? ` · deal created ${created.slice(0, 10)}` : "";
       let source: LeadSource;
-      if (isMetaContact(c) || keys.some((k) => sheetForm.has(k) || metaKeys.has(k))) source = metaFormSource(keys);
+      if (isMetaContact(c) || keys.some((k) => sheetForm.has(k) || metaFirst.has(k))) source = metaFormSource(keys);
       else if (keys.some((k) => sheetBooking.has(k))) source = "metaBooking";
       else if (/^contact form/i.test(name)) source = "website";
       else if (/^wait list/i.test(name)) source = "waitList";
@@ -198,7 +214,7 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
       remember(at, keys);
       leads.push({
         at, name, source,
-        detail: [fullName(c), c?.properties.email].filter(Boolean).join(" · ") || "no contact",
+        detail: ([fullName(c), c?.properties.email].filter(Boolean).join(" · ") || "no contact") + late,
         dealId: d.id, contactId: c?.id ?? null,
       });
     }
@@ -212,20 +228,27 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
       if (TEST_LEAD.test(name) || emailsOf(c).some((e) => INTERNAL_EMAIL.test(e))) continue;
       const keys = [...emailsOf(c), normName(name)];
       const hasDeal = Number(c.properties.num_associated_deals ?? 0) > 0;
+      // The first conversion is dated by Meta's record when that is earlier
+      // (HubSpot's integration can receive a form fill after the fact).
+      const firstAt = c.properties.first_conversion_date
+        ? arrivedAt(keys, c.properties.first_conversion_date) : c.properties.first_conversion_date;
       const conversions = [
-        [c.properties.first_conversion_date, c.properties.first_conversion_event_name],
+        [firstAt, c.properties.first_conversion_event_name],
         [c.properties.recent_conversion_date, c.properties.recent_conversion_event_name],
       ].filter((x): x is [string, string] => !!x[0] && x[0] >= sinceIso)
         .filter((x, i, all) => i === 0 || scopeOf(x[0]) !== scopeOf(all[0][0]));
-      conversions.forEach(([at, event], i) => {
+      conversions.forEach(([at, event]) => {
         if (known(at, keys)) return;
         remember(at, keys);
         const meta = META_FORM.test(event ?? "");
-        const repeat = hasDeal || i > 0;
+        // Not their first submission (the first may be before the window),
+        // or they already had a deal: an existing lead coming back.
+        const again = !!firstAt && at > firstAt;
+        const repeat = hasDeal || again;
         leads.push({
           at, name: name || c.properties.email || c.id,
           source: meta ? (repeat ? "metaRepeat" : metaFormSource(keys)) : "website",
-          detail: `${(event ?? "").replace(/^Facebook Lead Ads:\s*/i, "")}${hasDeal ? " · already had a deal" : i > 0 ? " · submitted again" : " · no deal yet"}`,
+          detail: `${(event ?? "").replace(/^Facebook Lead Ads:\s*/i, "")}${hasDeal ? " · already had a deal" : again ? ` · submitted again (first ${firstAt!.slice(0, 10)})` : " · no deal yet"}`,
           dealId: null, contactId: c.id,
         });
       });
@@ -244,7 +267,8 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
     // a form fill HubSpot's integration never received at all (it held 235 of
     // the 239 Meta still had on 2026-10-13; the rest were Meta's test leads).
     const metaLeft = metaApi.filter((r) =>
-      !r.is_test && !TEST_LEAD.test(r.full_name ?? "") && !INTERNAL_EMAIL.test(r.email ?? "") &&
+      r.created_time >= sinceIso &&
+      !TEST_LEAD.test(r.full_name ?? "") && !INTERNAL_EMAIL.test(r.email ?? "") &&
       !known(r.created_time, [r.email ?? "", normName(r.full_name)]));
     const emails = [...new Set([
       ...candidates.map((r) => r.email), ...metaLeft.map((r) => r.email ?? ""),
