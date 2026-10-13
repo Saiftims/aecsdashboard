@@ -88,8 +88,15 @@ const isMetaContact = (c: HsObject | undefined) =>
   META_FORM.test(c?.properties.first_conversion_event_name ?? "") ||
   META_FORM.test(c?.properties.recent_conversion_event_name ?? "");
 
-export async function leadsReport(tz: string, days = 7, now = new Date()): Promise<LeadsReport> {
-  const since = new Date(now.getTime() - days * 86400000);
+const utcMonthKey = (iso: string) => iso.slice(0, 7);
+
+/** Every lead between `since` and `now`, each person counted once per `scope`
+ * ("" = once in the whole window; a month key = once per calendar month, so a
+ * lead from July who fills the form again in October is October's "existing
+ * lead came back" rather than vanishing from October). Null when HubSpot
+ * could not be read. This is THE definition of a lead: the 7-day tile and the
+ * monthly MQL chart both call it, so they cannot disagree (owner, 2026-10-13). */
+export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: string) => string = () => ""): Promise<Lead[] | null> {
   const sinceIso = since.toISOString();
   const leads: Lead[] = [];
   try {
@@ -118,16 +125,26 @@ export async function leadsReport(tz: string, days = 7, now = new Date()): Promi
         (r.tab === "form" ? sheetForm : sheetBooking).add(k);
       }
     }
-    // Everyone already represented, so no person is counted twice.
-    const seen = new Set<string>();
-    const remember = (keys: string[]) => keys.filter(Boolean).forEach((k) => seen.add(k));
-    const known = (keys: string[]) => keys.filter(Boolean).some((k) => seen.has(k));
+    // Everyone already represented within a scope, so no person is counted
+    // twice in it.
+    const seen = new Map<string, Set<string>>();
+    const remember = (at: string, keys: string[]) => {
+      const s = seen.get(scopeOf(at)) ?? new Set<string>();
+      keys.filter(Boolean).forEach((k) => s.add(k));
+      seen.set(scopeOf(at), s);
+    };
+    const known = (at: string, keys: string[]) => {
+      const s = seen.get(scopeOf(at));
+      return !!s && keys.filter(Boolean).some((k) => s.has(k));
+    };
 
-    for (const d of newDeals) {
+    for (const d of newDeals.sort((a, b) => (a.properties.createdate ?? "").localeCompare(b.properties.createdate ?? ""))) {
       const c = contacts.get((dealContacts.get(d.id) ?? [])[0] ?? "");
       const name = d.properties.dealname ?? "";
       if (TEST_LEAD.test(name) || emailsOf(c).some((e) => INTERNAL_EMAIL.test(e))) continue;
+      const at = d.properties.createdate ?? sinceIso;
       const keys = [...emailsOf(c), normName(fullName(c)), normName(name)];
+      if (known(at, keys)) continue;
       const src = d.properties.hs_object_source;
       const app = d.properties.hs_object_source_detail_1 ?? "";
       let source: LeadSource;
@@ -138,31 +155,39 @@ export async function leadsReport(tz: string, days = 7, now = new Date()): Promi
       else if (/calendly|groiwth/i.test(app)) source = "calendly";
       else if (src === "CRM_UI" || src === "IMPORT") source = "repAdded";
       else source = "other";
-      remember(keys);
+      remember(at, keys);
       leads.push({
-        at: d.properties.createdate ?? sinceIso, name, source,
+        at, name, source,
         detail: [fullName(c), c?.properties.email].filter(Boolean).join(" · ") || "no contact",
         dealId: d.id, contactId: c?.id ?? null,
       });
     }
 
     // Form submissions that have not become a new deal: a first-time ad lead
-    // nobody has worked yet, or an existing lead submitting again.
+    // nobody has worked yet, or an existing lead submitting again. HubSpot
+    // keeps only the first and the latest conversion per contact, so those
+    // are the submissions that can be dated.
     for (const c of converted) {
-      const event = c.properties.recent_conversion_event_name ?? c.properties.first_conversion_event_name ?? "";
       const name = fullName(c);
-      if (TEST_LEAD.test(name)) continue;
+      if (TEST_LEAD.test(name) || emailsOf(c).some((e) => INTERNAL_EMAIL.test(e))) continue;
       const keys = [...emailsOf(c), normName(name)];
-      if (known(keys)) continue;
-      remember(keys);
-      const meta = META_FORM.test(event);
       const hasDeal = Number(c.properties.num_associated_deals ?? 0) > 0;
-      leads.push({
-        at: c.properties.recent_conversion_date ?? c.properties.first_conversion_date ?? sinceIso,
-        name: name || c.properties.email || c.id,
-        source: meta ? (hasDeal ? "metaRepeat" : "metaForm") : "website",
-        detail: `${event.replace(/^Facebook Lead Ads:\s*/i, "")}${hasDeal ? " · already had a deal" : " · no deal yet"}`,
-        dealId: null, contactId: c.id,
+      const conversions = [
+        [c.properties.first_conversion_date, c.properties.first_conversion_event_name],
+        [c.properties.recent_conversion_date, c.properties.recent_conversion_event_name],
+      ].filter((x): x is [string, string] => !!x[0] && x[0] >= sinceIso)
+        .filter((x, i, all) => i === 0 || scopeOf(x[0]) !== scopeOf(all[0][0]));
+      conversions.forEach(([at, event], i) => {
+        if (known(at, keys)) return;
+        remember(at, keys);
+        const meta = META_FORM.test(event ?? "");
+        const repeat = hasDeal || i > 0;
+        leads.push({
+          at, name: name || c.properties.email || c.id,
+          source: meta ? (repeat ? "metaRepeat" : "metaForm") : "website",
+          detail: `${(event ?? "").replace(/^Facebook Lead Ads:\s*/i, "")}${hasDeal ? " · already had a deal" : i > 0 ? " · submitted again" : " · no deal yet"}`,
+          dealId: null, contactId: c.id,
+        });
       });
     }
 
@@ -171,7 +196,7 @@ export async function leadsReport(tz: string, days = 7, now = new Date()): Promi
     // existing lead coming back, not a new one.
     const candidates = (sheet ?? []).filter((r) =>
       r.at && r.at >= sinceIso && r.at <= now.toISOString() &&
-      !TEST_LEAD.test(r.name) && !known([r.email, normName(r.name)]));
+      !TEST_LEAD.test(r.name) && !known(r.at, [r.email, normName(r.name)]));
     const emails = [...new Set(candidates.map((r) => r.email).filter(Boolean))];
     const existing = new Map<string, HsObject>();
     for (let i = 0; i < emails.length; i += 50) {
@@ -185,8 +210,8 @@ export async function leadsReport(tz: string, days = 7, now = new Date()): Promi
     }
     for (const r of candidates) {
       const keys = [r.email, normName(r.name)];
-      if (known(keys)) continue;
-      remember(keys);
+      if (known(r.at!, keys)) continue;
+      remember(r.at!, keys);
       const c = existing.get(r.email);
       leads.push({
         at: r.at!, name: r.name || r.email,
@@ -198,12 +223,42 @@ export async function leadsReport(tz: string, days = 7, now = new Date()): Promi
       });
     }
   } catch (e) {
-    console.error("leadsReport:", e instanceof Error ? e.message : e);
-    return { ok: false, leads: [], daily: [] };
+    console.error("collectLeads:", e instanceof Error ? e.message : e);
+    return null;
   }
+  return leads.sort((a, b) => b.at.localeCompare(a.at));
+}
 
-  leads.sort((a, b) => b.at.localeCompare(a.at));
-  const empty = () => Object.fromEntries(LEAD_SOURCES.map((s) => [s.key, 0])) as Record<LeadSource, number>;
+const emptyBySource = () => Object.fromEntries(LEAD_SOURCES.map((s) => [s.key, 0])) as Record<LeadSource, number>;
+
+export interface MonthlyLeads {
+  ok: boolean;
+  months: ({ month: string; key: string; count: number } & Record<LeadSource, number>)[];
+  /** The leads behind each month, keyed "YYYY-MM". */
+  members: Record<string, Lead[]>;
+}
+
+/** Leads per calendar month (UTC) since `since`, each person once per month.
+ * This IS the "MQLs per month" series. */
+export async function monthlyLeads(since: Date, now = new Date()): Promise<MonthlyLeads> {
+  const leads = await collectLeads(since, now, utcMonthKey);
+  if (!leads) return { ok: false, months: [], members: {} };
+  const members: Record<string, Lead[]> = {};
+  for (const l of leads) (members[utcMonthKey(l.at)] ??= []).push(l);
+  const label = (key: string) =>
+    new Date(`${key}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  const months = Object.keys(members).sort().map((key) => {
+    const row = { month: label(key), key, count: members[key].length, ...emptyBySource() };
+    for (const l of members[key]) row[l.source] += 1;
+    return row;
+  });
+  return { ok: true, months, members };
+}
+
+export async function leadsReport(tz: string, days = 7, now = new Date()): Promise<LeadsReport> {
+  const leads = await collectLeads(new Date(now.getTime() - days * 86400000), now);
+  if (!leads) return { ok: false, leads: [], daily: [] };
+  const empty = emptyBySource;
   // A rolling window starts part-way through a local day, so it can touch
   // days + 1 calendar days; keep that partial day only if it holds a lead, so
   // the bars always add up to the total.

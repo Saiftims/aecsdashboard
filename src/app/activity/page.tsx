@@ -259,22 +259,23 @@ export default async function ActivityPage() {
           />
           <div className="p-4">
             {retention.mqlSourcesKnown ? (
-              <MonthlyMqlChart data={retention.monthlyMqls} target={settings.monthlyMqlsTarget}
-                drillBase="/drill/month_mqls_" />
+              <MonthlyMqlChart data={retention.monthlyMqls} series={LEAD_SOURCES}
+                target={settings.monthlyMqlsTarget} drillBase="/drill/month_mqls_" />
             ) : (
               <MonthlyBarChart data={retention.monthlyMqls} color="hsl(210 70% 50%)"
                 target={settings.monthlyMqlsTarget} drillBase="/drill/month_mqls_" />
             )}
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
-            An MQL is a new deal in the sales pipeline, counted in the month HubSpot
-            created it. New contacts are not counted, since HubSpot also creates those
-            for colleagues and email traffic. The split comes from the marketing Meta lead
-            sheet: a deal whose contact appears on the form-fill tab is a Meta form fill,
-            one on the Calendly tab a Meta direct booking (form first if on both), and
-            everything else {"\u2014"} rep-added and cold-email leads, website contact forms,
-            conference lists {"\u2014"} is Email.
-            {!retention.mqlSourcesKnown && " The Meta lead sheet could not be read, so the split is hidden."}
+            An MQL is a new lead {"\u2014"} the same definition and the same records as the
+            &ldquo;New leads&rdquo; tile above, so month-to-date here always covers the
+            7-day figure. Every person who arrived is counted once per month, whichever
+            way they came in: a new deal in the sales pipeline, a Meta ad-form submission
+            HubSpot&rsquo;s integration created as a contact (whether or not a rep has made a
+            deal for it yet), a Calendly booking, a website or wait-list form, or a lead a
+            rep added. Someone already in HubSpot who submits again is &ldquo;existing lead
+            came back&rdquo;. Reps&rsquo; test submissions and staff addresses are excluded.
+            {!retention.mqlSourcesKnown && " HubSpot could not be read live, so this shows cached sales deals only."}
           </p>
         </Card>
       </section>

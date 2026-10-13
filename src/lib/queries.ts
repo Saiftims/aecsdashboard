@@ -16,8 +16,7 @@ import {
   loadRevenueFacts, monthIndexOf, stripeRevenueBetween, type RevenueFacts,
 } from "@/lib/revenue";
 import { loadSettings } from "@/lib/settings";
-import { INTERNAL_EMAIL, TEST_LEAD } from "@/lib/leads";
-import { classifyMql, loadMetaLeadIndex, normName, type MqlSource } from "@/lib/meta-leads";
+import { LEAD_SOURCES, TEST_LEAD, monthlyLeads, type Lead, type LeadSource } from "@/lib/leads";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 export interface DealRow {
@@ -1179,8 +1178,11 @@ export interface RetentionReport {
   monthlyCases: MonthCount[];
   monthlyNewFirms: (MonthCount & { firstCase: number; signupOnly: number })[];
   monthlyDemos: MonthCount[];
-  monthlyMqls: (MonthCount & { metaForm: number; metaBooking: number; other: number })[];
-  /** False when the Meta lead sheet could not be read; the split is then meaningless. */
+  /** Leads per month, split by source - the same definition and the same
+   * code path as the 7-day "New leads" tile (`collectLeads`). */
+  monthlyMqls: (MonthCount & Record<LeadSource, number>)[];
+  /** False when HubSpot could not be read live; the series then falls back to
+   * cached deals and the source split is meaningless. */
   mqlSourcesKnown: boolean;
   monthlyRevenue: MonthlyRevenueRow[];
   /** The records behind each monthly bar, keyed by "YYYY-MM", so a drill-down
@@ -1210,7 +1212,7 @@ export interface MonthCount {
 }
 
 export interface MonthMembers {
-  mqls: Record<string, { dealId: string; at: string; source: MqlSource }[]>;
+  mqls: Record<string, Lead[]>;
   demos: Record<string, { dealId: string; at: string }[]>;
   newFirms: Record<string, {
     companyId: string; at: string; signedUpAt: string | null; firstCaseAt: string | null;
@@ -1349,7 +1351,7 @@ export async function retentionReport(): Promise<RetentionReport> {
   };
   const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
 
-  const [{ data: caseRows }, { data: demoRows }, { data: companyRows }, { data: stripeSubs }, contactRows, metaIdx] = await Promise.all([
+  const [{ data: caseRows }, { data: demoRows }, { data: companyRows }, { data: stripeSubs }] = await Promise.all([
     // Include unattributed rows (company_hubspot_id null). Those are
     // analyst-worked matters the firm cannot be named from telemetry; they
     // still count in monthly volume and revenue. Cohorts / new-firms below
@@ -1360,9 +1362,6 @@ export async function retentionReport(): Promise<RetentionReport> {
     sb.from("companies").select("*"),
     sb.from("stripe_subscriptions")
       .select("company_hubspot_id, status, monthly_cents, started_at, cancelled_at, is_internal"),
-    selectAll<{ hubspot_id: string; email: string | null; first_name: string | null; last_name: string | null; extra: string | null }>(
-      "contacts", "hubspot_id, email, first_name, last_name, extra:properties->>hs_additional_emails"),
-    loadMetaLeadIndex(),
   ]);
   const statusRows = (companyRows ?? []) as (CompanyRow & { signed_up_at?: string | null })[];
   // Trial firms (sw_customer_status='trial' on the HubSpot company, e.g.
@@ -1457,38 +1456,39 @@ export async function retentionReport(): Promise<RetentionReport> {
   });
 
   // ---- MQLs per calendar month ----
-  // An MQL is a new deal in the sales pipeline, dated by when HubSpot created
-  // it. Contacts overstate demand (HubSpot auto-creates them for colleagues
-  // and email traffic), activation deals are post-sale, and "intake" deals
-  // are cases, not leads.
-  // Each MQL is split by where it came from, matched on the contact's email(s)
-  // or name against the marketing team's Meta lead sheet.
-  const contactById = new Map(contactRows.map((c) => [c.hubspot_id, c]));
-  for (const d of demoRows ?? []) {
-    if (d.is_activation || !d.hs_created_at) continue;
-    if (/intake/i.test(d.name ?? "") || /silent\s?witness/i.test(d.name ?? "")) continue;
-    // Reps' own test submissions ("Alex test", "Saif Altimimi — test") and
-    // deals whose contact is a staff address are not leads.
-    if (TEST_LEAD.test(d.name ?? "")) continue;
-    const when = new Date(d.hs_created_at);
-    if (Number.isNaN(when.getTime())) continue;
-    const c = d.primary_contact_id ? contactById.get(d.primary_contact_id) : undefined;
-    const emails = [c?.email, ...(c?.extra ?? "").split(";")]
-      .map((e) => (e ?? "").trim().toLowerCase()).filter(Boolean);
-    if (emails.some((e) => INTERNAL_EMAIL.test(e))) continue;
-    let source: MqlSource = "other";
-    if (metaIdx) {
-      const names = [normName(`${c?.first_name ?? ""}${c?.last_name ?? ""}`), normName(d.name)].filter(Boolean);
-      source = classifyMql(metaIdx, emails, names);
+  // An MQL IS a lead (owner, 2026-10-13: "we need them both to match and mean
+  // the same thing"). The series comes from the same `collectLeads` the 7-day
+  // tile uses - every person who arrived, from any source, once per month -
+  // so a Meta form fill HubSpot's integration left as a bare contact counts
+  // the day it lands, not only once a rep gets round to making a deal.
+  // Counting deals alone hid 14 paid-for leads in the week of 2026-10-13.
+  const firstDeal = (demoRows ?? [])
+    .map((d) => d.hs_created_at).filter((t): t is string => !!t).sort()[0];
+  const leadsSince = new Date(firstDeal ? `${firstDeal.slice(0, 7)}-01T00:00:00Z` : "2026-01-01T00:00:00Z");
+  const ml = await monthlyLeads(leadsSince, now);
+  let monthlyMqls: (MonthCount & Record<LeadSource, number>)[] = ml.months;
+  if (ml.ok) {
+    monthMembers.mqls = ml.members;
+  } else {
+    // HubSpot unreachable: fall back to new sales deals from the cache so the
+    // chart is not blank. Everything lands in "other" since the sheet-based
+    // split cannot be trusted on its own.
+    for (const d of demoRows ?? []) {
+      if (d.is_activation || !d.hs_created_at) continue;
+      if (/intake/i.test(d.name ?? "") || /silent\s?witness/i.test(d.name ?? "") || TEST_LEAD.test(d.name ?? "")) continue;
+      const when = new Date(d.hs_created_at);
+      if (Number.isNaN(when.getTime())) continue;
+      push(monthMembers.mqls, utcMonthKey(when), {
+        at: d.hs_created_at, name: d.name ?? d.hubspot_id, source: "other", detail: "from cache", dealId: d.hubspot_id, contactId: null,
+      });
     }
-    push(monthMembers.mqls, utcMonthKey(when), { dealId: d.hubspot_id, at: d.hs_created_at, source });
+    monthlyMqls = countSeries(monthMembers.mqls).map((row) => {
+      const b = Object.fromEntries(LEAD_SOURCES.map((s) => [s.key, 0])) as Record<LeadSource, number>;
+      for (const m of monthMembers.mqls[row.key]) b[m.source]++;
+      return { ...row, ...b };
+    });
   }
-  const monthlyMqls = countSeries(monthMembers.mqls).map((row) => {
-    const b: Record<MqlSource, number> = { metaForm: 0, metaBooking: 0, other: 0 };
-    for (const m of monthMembers.mqls[row.key]) b[m.source]++;
-    return { ...row, ...b };
-  });
-  const mqlSourcesKnown = metaIdx !== null;
+  const mqlSourcesKnown = ml.ok;
 
   // ---- demos run per calendar month ----
   // sw_demo_completed is the single evidence a demo ran: the Calendly sync

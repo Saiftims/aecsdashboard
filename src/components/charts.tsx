@@ -268,18 +268,22 @@ export function MonthlyRevenueChart({
   );
 }
 
-/** MQLs per month, stacked by source so paid-social demand is visible apart
- * from leads the reps added themselves or that arrived some other way. */
-export function MonthlyMqlChart({
+/** MQLs (new leads) per month, stacked by source with the same series and
+ * colours as the 7-day leads chart - they are the same leads. A source with
+ * no leads in the range is left out of the legend. */
+export function MonthlyMqlChart<K extends string>({
   data,
+  series,
   target,
   drillBase,
 }: {
-  data: { month: string; key?: string; count: number; metaForm: number; metaBooking: number; other: number }[];
+  data: ({ month: string; key?: string; count: number } & Record<K, number>)[];
+  series: { key: K; label: string; color: string }[];
   target?: number;
   drillBase?: string;
 }) {
   const drillProps = useMonthDrill(data, drillBase);
+  const shown = series.filter((s) => data.some((d) => Number(d[s.key] ?? 0) > 0));
   const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={240}>
@@ -289,10 +293,10 @@ export function MonthlyMqlChart({
         <YAxis allowDecimals={false} width={36} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="metaForm" stackId="mql" name="Meta form fill" fill="hsl(210 70% 50%)" />
-        <Bar dataKey="metaBooking" stackId="mql" name="Meta direct booking" fill="hsl(265 55% 58%)" />
-        <Bar dataKey="other" stackId="mql" name="Email" fill="hsl(220 9% 70%)"
-             radius={[4, 4, 0, 0]} />
+        {shown.map((s, i) => (
+          <Bar key={s.key} dataKey={s.key} stackId="mql" name={s.label} fill={s.color}
+               radius={i === shown.length - 1 ? [4, 4, 0, 0] : undefined} />
+        ))}
         {target ? targetLine(target, `Target ${target}`) : null}
       </BarChart>
     </ResponsiveContainer>

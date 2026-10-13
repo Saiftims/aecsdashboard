@@ -520,10 +520,6 @@ async function revenueDrill(metric: string): Promise<DrillResult | null> {
   };
 }
 
-const MQL_SOURCE_LABEL: Record<string, string> = {
-  metaForm: "Meta form fill", metaBooking: "Meta direct booking", other: "Email",
-};
-
 /** The records behind one bar of a monthly chart, e.g. month_mqls_2026-10.
  * Read from the same report the chart plots, so the list matches the bar. */
 async function monthDrill(metric: string): Promise<DrillResult | null> {
@@ -577,13 +573,19 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
     [...xs].sort((a, b) => b.at.localeCompare(a.at));
 
   if (kind === "mqls") {
+    // Same rows, same wording as the 7-day "New leads" drill: they are the
+    // same leads.
     const list = byDateDesc(monthMembers.mqls[key] ?? []);
-    const split = Object.entries(MQL_SOURCE_LABEL)
-      .map(([s, l]) => `${list.filter((x) => x.source === s).length} ${l.toLowerCase()}`)
-      .join(", ");
+    const label = new Map(LEAD_SOURCES.map((s) => [s.key, s.label]));
+    const split = LEAD_SOURCES
+      .map((s) => [s.label, list.filter((l) => l.source === s.key).length] as const)
+      .filter(([, n]) => n > 0)
+      .map(([l, n]) => `${n} ${l.toLowerCase()}`).join(", ");
     return {
-      label: `MQLs — ${monthLabel} · ${list.length} (${split})`,
-      rows: list.map((x) => dealRowFor(x.dealId, x.at, MQL_SOURCE_LABEL[x.source])),
+      label: `MQLs (new leads) — ${monthLabel} · ${list.length} (${split})`,
+      rows: list.map((l) => l.dealId
+        ? { ...dealRowFor(l.dealId, l.at, `${label.get(l.source)} · ${l.detail}`), title: deal.get(l.dealId)?.name ?? l.name }
+        : { title: l.name, subtitle: `${label.get(l.source)} · ${l.detail}`, dealId: null, when: l.at }),
     };
   }
   if (kind === "demos") {
