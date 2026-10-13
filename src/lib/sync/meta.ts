@@ -11,11 +11,41 @@ import {
   ASSOC, hsAssociations, hsCreateObject, hsRequest, hsUpdateProperties, type HsObject,
 } from "@/lib/hubspot/client";
 import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
+import { env } from "@/lib/env";
 import { listForms, listLeads, pageAccessToken, type MetaLead } from "@/lib/meta/client";
+import { loadMetaSheetRows, normName } from "@/lib/meta-leads";
 import { supabaseService } from "@/lib/supabase/server";
 
 /** Ahmad "Alex" Qoqazeh - every new Meta lead is his (owner, 2026-10-13). */
 const ALEX_OWNER_ID = "36480771";
+
+/** Same shape as slack_notify.py's MQL alert so #sales reads consistently.
+ * Never throws: a Slack outage must not fail the HubSpot push. */
+async function announceOnSlack(args: {
+  dealId: string; dealName: string; name: string; email: string; phone: string | null;
+  company: string | null; form: string | null; qualified: boolean | null; answers: string;
+}): Promise<boolean> {
+  const url = env.slackWebhookUrl();
+  if (!url) return false;
+  const dealUrl = `https://app-eu1.hubspot.com/contacts/${env.hubspotPortalId()}/record/0-3/${args.dealId}`;
+  const lines = [
+    `*Contact:* ${args.name || "-"}  (${[args.email, args.phone].filter(Boolean).join(" · ")})`,
+    args.company ? `*Company:* ${args.company}` : "",
+    `*Owner:* Alex`,
+    `*Source:* Meta ad form${args.form ? ` · ${args.form}` : ""}`,
+    args.qualified === null ? "" : `*FlyTech sheet:* ${args.qualified ? "on it (qualified)" : "not on it yet (unqualified)"}`,
+    args.answers ? `*Answers:* ${args.answers}` : "",
+  ].filter(Boolean);
+  const text = `:tada: New Meta lead (Unqualified Lead stage): ${args.dealName}`;
+  const blocks = [
+    { type: "section", text: { type: "mrkdwn", text: `:tada: *New Meta lead in HubSpot* (Unqualified Lead stage)\n*<${dealUrl}|${args.dealName}>*` } },
+    { type: "section", text: { type: "mrkdwn", text: lines.join("\n") } },
+  ];
+  try {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, blocks }) });
+    return r.ok;
+  } catch { return false; }
+}
 
 /** Meta's "Test lead" button submits placeholders like
  * "<test lead: dummy data for full_name>". */
@@ -32,7 +62,7 @@ export async function syncMetaLeads(sinceMs?: number) {
   const sb = supabaseService();
   const stats = {
     forms: 0, fetched: 0, upserted: 0, test: 0,
-    pushed: 0, contactsCreated: 0, dealsCreated: 0, repeats: 0, pushErrors: 0,
+    pushed: 0, contactsCreated: 0, dealsCreated: 0, repeats: 0, pushErrors: 0, slacked: 0,
   };
   // Read Meta. A failure here (typically an expired token) must not stop the
   // HubSpot push of anything already fetched; it is re-thrown at the end so
@@ -57,11 +87,29 @@ export async function syncMetaLeads(sinceMs?: number) {
     .select("leadgen_id, created_time, form_name, ad_name, campaign_name, full_name, email, phone, company, answers")
     .is("hubspot_pushed_at", null).eq("is_test", false)
     .order("created_time", { ascending: true }).limit(40);
+  // The FlyTech sheet says whether a lead has been qualified; read once per
+  // run, only if there is something to announce. Null = sheet unreadable.
+  let sheetKeys: Set<string> | null = null;
+  if (pending?.length) {
+    const sheet = await loadMetaSheetRows();
+    sheetKeys = sheet && new Set(sheet.filter((r) => r.tab === "form").flatMap((r) => [r.email, normName(r.name)]).filter(Boolean));
+  }
   for (const lead of (pending ?? []) as PendingLead[]) {
     const r = await pushLeadToHubSpot(lead);
     stats.pushed += 1;
     if (r.contactCreated) stats.contactsCreated += 1;
-    if (r.dealCreated) stats.dealsCreated += 1;
+    if (r.dealCreated && r.dealId) {
+      stats.dealsCreated += 1;
+      const ok = await announceOnSlack({
+        dealId: r.dealId, dealName: r.dealName ?? "", name: lead.full_name ?? "", email: lead.email ?? "",
+        phone: lead.phone, company: lead.company, form: lead.form_name,
+        qualified: sheetKeys ? sheetKeys.has(lead.email ?? "") || sheetKeys.has(normName(lead.full_name)) : null,
+        answers: Object.entries(lead.answers ?? {})
+          .filter(([k]) => !["full_name", "work_email", "email", "phone_number", "company_name"].includes(k))
+          .map(([, v]) => v).join(" · "),
+      });
+      if (ok) { stats.slacked += 1; r.note += " · Slack posted"; } else r.note += " · Slack NOT posted";
+    }
     if (r.repeat) stats.repeats += 1;
     if (r.error) stats.pushErrors += 1;
     await sb.from("meta_leads").update({
@@ -125,7 +173,7 @@ interface PendingLead {
 }
 
 interface PushResult {
-  contactId?: string; dealId?: string;
+  contactId?: string; dealId?: string; dealName?: string;
   contactCreated?: boolean; dealCreated?: boolean; repeat?: boolean;
   error?: boolean; note: string;
 }
@@ -199,7 +247,10 @@ export async function pushLeadToHubSpot(lead: PendingLead): Promise<PushResult> 
         contactCreated = true;
         contact = { id: created.id!, properties: { email } } as HsObject;
       }
-    } else if (!contact.properties.hubspot_owner_id) {
+    } else if (contact.properties.hubspot_owner_id !== ALEX_OWNER_ID) {
+      // HubSpot's FB integration leaves the contact on the default owner
+      // (Chris); the lead is Alex's. The sweep agrees because the stage is in
+      // ALEX_STAGES.
       await hsUpdateProperties("contacts", contact.id, { hubspot_owner_id: ALEX_OWNER_ID });
     }
 
@@ -249,7 +300,7 @@ export async function pushLeadToHubSpot(lead: PendingLead): Promise<PushResult> 
     await hsCreateObject("notes", { hs_timestamp: lead.created_time, hs_note_body: body },
       [{ toId: deal.id!, associationTypeId: ASSOC.noteToDeal }]);
     return {
-      contactId: contact.id, dealId: deal.id, contactCreated, dealCreated: true,
+      contactId: contact.id, dealId: deal.id, dealName, contactCreated, dealCreated: true,
       note: `created deal "${dealName}" in Unqualified Lead for Alex${contactCreated ? " (contact created too)" : ""}`,
     };
   } catch (e) {
