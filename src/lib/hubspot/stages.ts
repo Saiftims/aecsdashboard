@@ -5,6 +5,8 @@
 export const SALES_PIPELINE_ID = "default";
 
 export const SALES_STAGES = {
+  /** Added 2026-10-13: every new Meta form fill lands here under Alex. */
+  unqualified: "6219565278",
   mql: "5242041534",
   attemptingContact: "5242041535",
   connected: "5656197328",
@@ -19,6 +21,7 @@ export const SALES_STAGES = {
 } as const;
 
 export const SALES_STAGE_ORDER: string[] = [
+  SALES_STAGES.unqualified,
   SALES_STAGES.mql,
   SALES_STAGES.attemptingContact,
   SALES_STAGES.connected,
@@ -33,6 +36,7 @@ export const SALES_STAGE_ORDER: string[] = [
 ];
 
 export const SALES_STAGE_LABELS: Record<string, string> = {
+  [SALES_STAGES.unqualified]: "Unqualified Lead",
   [SALES_STAGES.mql]: "New MQL",
   [SALES_STAGES.attemptingContact]: "Attempting Contact",
   [SALES_STAGES.connected]: "Connected",
