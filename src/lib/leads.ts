@@ -44,7 +44,10 @@ export interface LeadsReport {
 }
 
 const NOT_A_LEAD = /intake|silent\s?witness|laura\s*saint\s*clair|nathan\s*nale|chris\s*sanz/i;
-const TEST_LEAD = /test lead|dummy data/i;
+/** Reps test the website contact form and Calendly with names like "Alex test",
+ * "Alex Q — tester", "Saif Altimimi — test"; those deals are not leads. */
+export const TEST_LEAD = /\btest(er|ing)?\b|dummy data/i;
+export const INTERNAL_EMAIL = /@(silentwitness\.ai|das\.es)$/i;
 const META_FORM = /facebook lead ads/i;
 const CONTACT_PROPS = [
   "email", "firstname", "lastname", "hs_additional_emails", "hs_analytics_source",
@@ -123,6 +126,7 @@ export async function leadsReport(tz: string, days = 7, now = new Date()): Promi
     for (const d of newDeals) {
       const c = contacts.get((dealContacts.get(d.id) ?? [])[0] ?? "");
       const name = d.properties.dealname ?? "";
+      if (TEST_LEAD.test(name) || emailsOf(c).some((e) => INTERNAL_EMAIL.test(e))) continue;
       const keys = [...emailsOf(c), normName(fullName(c)), normName(name)];
       const src = d.properties.hs_object_source;
       const app = d.properties.hs_object_source_detail_1 ?? "";

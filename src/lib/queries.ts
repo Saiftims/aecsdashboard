@@ -16,6 +16,7 @@ import {
   loadRevenueFacts, monthIndexOf, stripeRevenueBetween, type RevenueFacts,
 } from "@/lib/revenue";
 import { loadSettings } from "@/lib/settings";
+import { INTERNAL_EMAIL, TEST_LEAD } from "@/lib/leads";
 import { classifyMql, loadMetaLeadIndex, normName, type MqlSource } from "@/lib/meta-leads";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
@@ -1466,13 +1467,17 @@ export async function retentionReport(): Promise<RetentionReport> {
   for (const d of demoRows ?? []) {
     if (d.is_activation || !d.hs_created_at) continue;
     if (/intake/i.test(d.name ?? "") || /silent\s?witness/i.test(d.name ?? "")) continue;
+    // Reps' own test submissions ("Alex test", "Saif Altimimi — test") and
+    // deals whose contact is a staff address are not leads.
+    if (TEST_LEAD.test(d.name ?? "")) continue;
     const when = new Date(d.hs_created_at);
     if (Number.isNaN(when.getTime())) continue;
+    const c = d.primary_contact_id ? contactById.get(d.primary_contact_id) : undefined;
+    const emails = [c?.email, ...(c?.extra ?? "").split(";")]
+      .map((e) => (e ?? "").trim().toLowerCase()).filter(Boolean);
+    if (emails.some((e) => INTERNAL_EMAIL.test(e))) continue;
     let source: MqlSource = "other";
     if (metaIdx) {
-      const c = d.primary_contact_id ? contactById.get(d.primary_contact_id) : undefined;
-      const emails = [c?.email, ...(c?.extra ?? "").split(";")]
-        .map((e) => (e ?? "").trim().toLowerCase()).filter(Boolean);
       const names = [normName(`${c?.first_name ?? ""}${c?.last_name ?? ""}`), normName(d.name)].filter(Boolean);
       source = classifyMql(metaIdx, emails, names);
     }

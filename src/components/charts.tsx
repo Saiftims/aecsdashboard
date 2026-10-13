@@ -286,7 +286,7 @@ export function MonthlyMqlChart({
       <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-        <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
+        <YAxis allowDecimals={false} width={36} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="metaForm" stackId="mql" name="Meta form fill" fill="hsl(210 70% 50%)" />
