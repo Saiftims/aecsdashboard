@@ -5,10 +5,11 @@ import { syncCalendly } from "@/lib/sync/calendly";
 import { computeRollups, syncCases } from "@/lib/sync/cases";
 import { syncQuo } from "@/lib/sync/quo";
 import { syncStripe } from "@/lib/sync/stripe";
+import { syncMetaLeads } from "@/lib/sync/meta";
 
 export type SyncKind =
   | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup"
-  | "quo" | "quo_full" | "quo_messages_full" | "stripe";
+  | "quo" | "quo_full" | "quo_messages_full" | "stripe" | "meta" | "meta_full";
 
 export async function runSync(kinds: SyncKind[]) {
   const sb = supabaseService();
@@ -58,6 +59,18 @@ export async function runSync(kinds: SyncKind[]) {
         // hundred charges, and refunds mutate rows that are already synced, so
         // an incremental window would miss money coming back out.
         stats = await syncStripe();
+      } else if (kind === "meta" || kind === "meta_full") {
+        // Incremental by default: each form is asked only for leads newer than
+        // the last success, less a day of overlap. Full re-reads whatever Meta
+        // still holds (~90 days) - the upsert makes that idempotent.
+        let sinceMs: number | undefined;
+        if (kind === "meta") {
+          const { data: last } = await sb.from("sync_runs")
+            .select("finished_at").in("kind", ["meta", "meta_full"]).eq("status", "ok")
+            .order("finished_at", { ascending: false }).limit(1).maybeSingle();
+          if (last?.finished_at) sinceMs = new Date(last.finished_at).getTime() - 24 * 60 * 60 * 1000;
+        }
+        stats = await syncMetaLeads(sinceMs);
       } else if (kind === "cases") {
         stats = await syncCases();
       } else if (kind === "rollup") {

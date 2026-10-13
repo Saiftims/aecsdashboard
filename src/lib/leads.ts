@@ -11,13 +11,20 @@ import { hsAssociationsBatch, hsRequest, type HsObject } from "@/lib/hubspot/cli
 import { SALES_PIPELINE_ID } from "@/lib/hubspot/stages";
 import { loadMetaSheetRows, normName } from "@/lib/meta-leads";
 import { localDayLabel } from "@/lib/rep-activity";
+import { supabaseService } from "@/lib/supabase/server";
 
 export type LeadSource =
-  | "metaForm" | "metaBooking" | "metaRepeat" | "calendly"
+  | "metaForm" | "metaUnqualified" | "metaBooking" | "metaRepeat" | "calendly"
   | "website" | "waitList" | "repAdded" | "other";
 
+/** Meta form fills are split by whether FlyTech put the person on its sheet
+ * (qualified) or not (unqualified). Both are MQLs (owner, 2026-10-13: "pull
+ * them both in as MQLs and just identify the difference"); the raw feed is
+ * `meta_leads`, read from the Graph API, and HubSpot's Facebook integration
+ * also creates a contact for every one. */
 export const LEAD_SOURCES: { key: LeadSource; label: string; color: string }[] = [
-  { key: "metaForm", label: "Meta form fill", color: "hsl(210 70% 50%)" },
+  { key: "metaForm", label: "Meta form - qualified (on FlyTech sheet)", color: "hsl(210 70% 50%)" },
+  { key: "metaUnqualified", label: "Meta form - unqualified (not on sheet)", color: "hsl(200 45% 68%)" },
   { key: "metaBooking", label: "Meta direct booking", color: "hsl(265 55% 58%)" },
   { key: "metaRepeat", label: "Meta - existing lead came back", color: "hsl(205 60% 75%)" },
   { key: "calendly", label: "Calendly booking", color: "hsl(160 55% 42%)" },
@@ -90,6 +97,29 @@ const isMetaContact = (c: HsObject | undefined) =>
 
 const utcMonthKey = (iso: string) => iso.slice(0, 7);
 
+interface MetaLeadRow {
+  leadgen_id: string; created_time: string; form_name: string | null;
+  full_name: string | null; email: string | null; company: string | null; is_test: boolean;
+}
+
+/** Raw Meta submissions in the window from the `meta_leads` archive. Empty
+ * (not null) when the table cannot be read: the HubSpot contacts the FB
+ * integration creates still carry every submission, so nothing is lost -
+ * only the few Meta test leads HubSpot never received would differ. */
+async function loadMetaApiLeads(sinceIso: string, untilIso: string): Promise<MetaLeadRow[]> {
+  try {
+    const { data, error } = await supabaseService().from("meta_leads")
+      .select("leadgen_id, created_time, form_name, full_name, email, company, is_test")
+      .gte("created_time", sinceIso).lte("created_time", untilIso)
+      .order("created_time", { ascending: true }).limit(5000);
+    if (error) throw error;
+    return (data ?? []) as MetaLeadRow[];
+  } catch (e) {
+    console.error("loadMetaApiLeads:", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 /** Every lead between `since` and `now`, each person counted once per `scope`
  * ("" = once in the whole window; a month key = once per calendar month, so a
  * lead from July who fills the form again in October is October's "existing
@@ -100,7 +130,7 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
   const sinceIso = since.toISOString();
   const leads: Lead[] = [];
   try {
-    const [deals, converted, sheet] = await Promise.all([
+    const [deals, converted, sheet, metaApi] = await Promise.all([
       searchAll("deals", [{ filters: [
         { propertyName: "createdate", operator: "GTE", value: sinceIso },
         { propertyName: "pipeline", operator: "EQ", value: SALES_PIPELINE_ID },
@@ -110,6 +140,7 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
         { filters: [{ propertyName: "first_conversion_date", operator: "GTE", value: sinceIso }] },
       ], CONTACT_PROPS),
       loadMetaSheetRows(),
+      loadMetaApiLeads(sinceIso, now.toISOString()),
     ]);
     const newDeals = deals.filter((d) =>
       !NOT_A_LEAD.test(d.properties.dealname ?? "") && !d.properties.sw_activation_stage);
@@ -125,6 +156,15 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
         (r.tab === "form" ? sheetForm : sheetBooking).add(k);
       }
     }
+    // Everyone Meta itself says filled a form, qualified or not.
+    const metaKeys = new Set<string>();
+    for (const r of metaApi) {
+      if (r.is_test) continue;
+      for (const k of [r.email ?? "", normName(r.full_name)].filter(Boolean)) metaKeys.add(k);
+    }
+    // FlyTech's sheet is the qualification record: on it = qualified.
+    const qualified = (keys: string[]) => keys.some((k) => sheetForm.has(k));
+    const metaFormSource = (keys: string[]): LeadSource => qualified(keys) ? "metaForm" : "metaUnqualified";
     // Everyone already represented within a scope, so no person is counted
     // twice in it.
     const seen = new Map<string, Set<string>>();
@@ -148,7 +188,7 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
       const src = d.properties.hs_object_source;
       const app = d.properties.hs_object_source_detail_1 ?? "";
       let source: LeadSource;
-      if (isMetaContact(c) || keys.some((k) => sheetForm.has(k))) source = "metaForm";
+      if (isMetaContact(c) || keys.some((k) => sheetForm.has(k) || metaKeys.has(k))) source = metaFormSource(keys);
       else if (keys.some((k) => sheetBooking.has(k))) source = "metaBooking";
       else if (/^contact form/i.test(name)) source = "website";
       else if (/^wait list/i.test(name)) source = "waitList";
@@ -184,7 +224,7 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
         const repeat = hasDeal || i > 0;
         leads.push({
           at, name: name || c.properties.email || c.id,
-          source: meta ? (repeat ? "metaRepeat" : "metaForm") : "website",
+          source: meta ? (repeat ? "metaRepeat" : metaFormSource(keys)) : "website",
           detail: `${(event ?? "").replace(/^Facebook Lead Ads:\s*/i, "")}${hasDeal ? " · already had a deal" : i > 0 ? " · submitted again" : " · no deal yet"}`,
           dealId: null, contactId: c.id,
         });
@@ -197,7 +237,18 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
     const candidates = (sheet ?? []).filter((r) =>
       r.at && r.at >= sinceIso && r.at <= now.toISOString() &&
       !TEST_LEAD.test(r.name) && !known(r.at, [r.email, normName(r.name)]));
-    const emails = [...new Set(candidates.map((r) => r.email).filter(Boolean))];
+    // Likewise submissions Meta reports that nothing above produced. Usually a
+    // MIDDLE submission: HubSpot keeps only a contact's first and latest
+    // conversion, so a July lead who filled the form again in August and
+    // again in September has no August date in HubSpot - Meta has it. Rarely
+    // a form fill HubSpot's integration never received at all (it held 235 of
+    // the 239 Meta still had on 2026-10-13; the rest were Meta's test leads).
+    const metaLeft = metaApi.filter((r) =>
+      !r.is_test && !TEST_LEAD.test(r.full_name ?? "") && !INTERNAL_EMAIL.test(r.email ?? "") &&
+      !known(r.created_time, [r.email ?? "", normName(r.full_name)]));
+    const emails = [...new Set([
+      ...candidates.map((r) => r.email), ...metaLeft.map((r) => r.email ?? ""),
+    ].filter(Boolean))];
     const existing = new Map<string, HsObject>();
     for (let i = 0; i < emails.length; i += 50) {
       const chunk = emails.slice(i, i + 50);
@@ -219,6 +270,21 @@ export async function collectLeads(since: Date, now = new Date(), scopeOf: (at: 
         detail: c
           ? `${r.tab === "form" ? "filled the form" : "booked"} again · already in HubSpot`
           : "on the Meta sheet only - not in HubSpot",
+        dealId: null, contactId: c?.id ?? null,
+      });
+    }
+
+    for (const r of metaLeft) {
+      const name = r.full_name ?? "";
+      const keys = [r.email ?? "", normName(name)];
+      if (known(r.created_time, keys)) continue;
+      remember(r.created_time, keys);
+      const c = existing.get(r.email ?? "");
+      leads.push({
+        at: r.created_time, name: name || r.email || r.leadgen_id,
+        source: c ? "metaRepeat" : metaFormSource(keys),
+        detail: `${r.form_name ?? "Meta form"}${r.company ? ` · ${r.company}` : ""}${
+          c ? " · filled the form again · already in HubSpot" : " · from Meta only - not in HubSpot"}`,
         dealId: null, contactId: c?.id ?? null,
       });
     }

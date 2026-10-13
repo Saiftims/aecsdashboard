@@ -6,6 +6,7 @@
     { "path": "/api/cron/cases-probe", "schedule": "* * * * *" },
     { "path": "/api/cron/cases", "schedule": "5 * * * *" },
     { "path": "/api/cron/calendly", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/quo", "schedule": "*/5 * * * *" }
+    { "path": "/api/cron/quo", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/meta", "schedule": "*/10 * * * *" }
   ]
 }

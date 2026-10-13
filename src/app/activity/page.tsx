@@ -117,10 +117,11 @@ export default async function ActivityPage() {
           </div>
           <p className="px-4 pb-4 text-xs text-zinc-500">
             Every lead counted once, wherever it landed: new sales-pipeline deals,
-            Meta ad-form submissions HubSpot received (including ones nobody has
-            turned into a deal yet), and rows on the Meta lead sheet that never
-            reached HubSpot. A Meta lead is anyone with a Facebook Lead Ads form
-            in HubSpot or on the sheet, even if a rep or Calendly created the deal.
+            every Meta ad-form submission read directly from Meta (including ones
+            nobody has turned into a deal yet), and sheet rows that never reached
+            HubSpot. Meta form fills are split by FlyTech&rsquo;s screening:
+            &ldquo;qualified&rdquo; is anyone FlyTech put on its lead sheet, &ldquo;unqualified&rdquo;
+            is a submission Meta has that the sheet does not {"\u2014"} both are MQLs.
             &ldquo;Existing lead came back&rdquo; is someone already in HubSpot filling the
             form or booking again {"\u2014"} intent, not a new person. Case intakes and activation deals are not leads.
           </p>
@@ -271,9 +272,9 @@ export default async function ActivityPage() {
             &ldquo;New leads&rdquo; tile above, so month-to-date here always covers the
             7-day figure. Every person who arrived is counted once per month, whichever
             way they came in: a new deal in the sales pipeline, a Meta ad-form submission
-            HubSpot&rsquo;s integration created as a contact (whether or not a rep has made a
-            deal for it yet), a Calendly booking, a website or wait-list form, or a lead a
-            rep added. Someone already in HubSpot who submits again is &ldquo;existing lead
+            read straight from Meta (qualified if FlyTech put them on its sheet, unqualified
+            if not {"\u2014"} and whether or not a rep has made a deal yet), a Calendly booking,
+            a website or wait-list form, or a lead a rep added. Someone already in HubSpot who submits again is &ldquo;existing lead
             came back&rdquo;. Reps&rsquo; test submissions and staff addresses are excluded.
             {!retention.mqlSourcesKnown && " HubSpot could not be read live, so this shows cached sales deals only."}
           </p>
