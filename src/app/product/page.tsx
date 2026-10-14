@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FunnelChart } from "@/components/charts";
 import { Badge, Card, CardHeader, Stat, Table } from "@/components/ui";
+import { caseUiReport } from "@/lib/case-ui";
 import { productDashboard } from "@/lib/product-analytics";
 import { currentAppUser } from "@/lib/supabase/server";
 
@@ -32,7 +33,7 @@ export default async function ProductPage() {
   if (!user) redirect("/login");
   if (user.role === "ae") redirect("/ae");
 
-  const data = await productDashboard();
+  const [data, ui] = await Promise.all([productDashboard(), caseUiReport()]);
 
   return (
     <div className="space-y-6">
@@ -50,6 +51,21 @@ export default async function ProductPage() {
         flagged “not using product.” PostHog&apos;s <code>case_created</code> event is
         known to under-report, so the tracked funnel remains a telemetry floor.
       </div>
+
+      <Link href="/product/ui" className="block">
+        <Card className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/40">
+          <div>
+            <div className="text-sm font-semibold">Old UI vs new UI</div>
+            <div className="text-xs text-zinc-500">Which firms and cases are still on the old case UI · click for the list by firm</div>
+          </div>
+          <div className="flex items-center gap-6 text-sm">
+            <span><span className="font-semibold text-emerald-600">{ui.firms.filter((f) => f.lastUi === "v2").length}</span> <span className="text-zinc-500">firms on new</span></span>
+            <span><span className={ui.totals.firmsOnOld ? "font-semibold text-red-600" : "font-semibold"}>{ui.totals.firmsOnOld}</span> <span className="text-zinc-500">still on old</span></span>
+            <span><span className="font-semibold">{ui.totals.new}</span><span className="text-zinc-500"> / </span><span className={ui.totals.old ? "font-semibold text-red-600" : "font-semibold"}>{ui.totals.old}</span> <span className="text-zinc-500">cases new / old</span></span>
+            <span className="text-zinc-400">›</span>
+          </div>
+        </Card>
+      </Link>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
