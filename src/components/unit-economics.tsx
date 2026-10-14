@@ -169,8 +169,11 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
     );
   }
 
+  const totalLeads = cohorts.reduce((a, c) => a + (c.adLeads ?? 0), 0);
   const cohortRows = [...cohorts.map((c) => ({ ...c, name: c.label + (c.mature ? "" : " · still converting") })),
-    { name: "All months", spend: totalSpend, teamCost: totalTeam, subs: era, spendFromLedger: true, ...total }];
+    { name: "All months", spend: totalSpend, teamCost: totalTeam, subs: era, spendFromLedger: true,
+      spendSource: "meta" as const, adLeads: cohorts.every((c) => c.adLeads !== null) ? totalLeads : null, ...total }];
+  const fromMeta = cohorts.some((c) => c.spendSource === "meta");
 
   return (
     <div className="space-y-4">
@@ -189,11 +192,13 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
         <CardHeader title="Unit economics by lead month"
           action={<span className="text-xs text-zinc-500">{active.label} churn · {ATTR_LABEL[attr]}</span>} />
         <Grid
-          headers={["Lead month", "Ad spend", "Sales team", "Subscribers", "Paid-sourced", "CAC, fully loaded",
-            "Avg plan", "LTV, fully loaded", "LTV : CAC", "Payback"]}
+          headers={["Lead month", "Ad spend", "Meta leads", "Cost / lead", "Sales team", "Subscribers", "Paid-sourced",
+            "CAC, fully loaded", "Avg plan", "LTV, fully loaded", "LTV : CAC", "Payback"]}
           rows={cohortRows.map((c) => [
             c.name,
-            usd(c.spend) + (c.spendFromLedger ? "" : " planned"),
+            usd(c.spend) + (c.spendSource === "planned" ? " planned" : c.spendSource === "ledger" ? " (typed)" : ""),
+            c.adLeads === null ? "—" : String(c.adLeads),
+            c.adLeads ? usd(c.spend / c.adLeads) : "—",
             usd(c.teamCost), String(c.subs.length), String(c.paid),
             usd(c.cac), c.subs.length ? `${usd(c.plan)}/mo` : "—",
             usd(c.ltv), ratio(c.ltv, c.cac), mo(c.payback),
@@ -205,6 +210,9 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           spend over its paid-sourced subscribers plus the sales team cost over all of them. LTV is lifetime gross
           margin on the cohort&apos;s actual plans under the selected churn, capped at {HORIZON / 12} years. A month
           keeps converting for a few weeks after it ends, so the latest month&apos;s CAC is still falling.
+          {fromMeta
+            ? " Ad spend and Meta leads are actuals from the Meta Ads account (synced every 6 hours); a month marked (typed) is the Settings ledger, used only when Meta has no data for it."
+            : " Ad spend is the Settings ledger; the Meta spend sync has not run yet."}
         </p>
       </Card>
 
@@ -272,8 +280,8 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
 
       <p className="text-xs text-zinc-500">
         Subscriptions only: per-case charges and expert sign-offs on top would shorten payback. The sales team
-        cost is {usd(snap.teamCost)}/mo (customer success is not acquisition). Ad spend by month, sales team
-        cost and margin are set in Settings. Live billed MRR is {usd(snap.liveMrr)} across{" "}
+        cost is {usd(snap.teamCost)}/mo (customer success is not acquisition). Ad spend comes from Meta; sales
+        team cost and margin are set in Settings. Live billed MRR is {usd(snap.liveMrr)} across{" "}
         {snap.activeSubscribers} paying subscribers.
       </p>
     </div>

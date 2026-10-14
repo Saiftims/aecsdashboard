@@ -87,3 +87,37 @@ export async function listLeads(formId: string, pageToken: string, sinceMs?: num
   }
   return allPages<MetaLead>(`${formId}/leads`, pageToken, params);
 }
+
+export interface MetaDailySpend {
+  day: string;
+  spendCents: number;
+  impressions: number;
+  clicks: number;
+  /** Form submissions (`onsite_conversion.lead_grouped`). Not `lead`, which
+   * also counts the pixel's MQL/SQL custom events and runs ~2x. */
+  leads: number;
+}
+
+/** Account-level spend per day between two YYYY-MM-DD dates (inclusive).
+ * Needs only `ads_read`, so it uses `META_ADS_TOKEN` when set. Meta caps a
+ * single insights request at 37 months, far beyond anything asked here. */
+export async function dailyAccountSpend(since: string, until: string): Promise<MetaDailySpend[]> {
+  type Row = {
+    date_start: string; spend?: string; impressions?: string; clicks?: string;
+    actions?: { action_type: string; value: string }[];
+  };
+  const rows = await allPages<Row>(`${env.metaAdAccountId()}/insights`, env.metaAdsToken(), {
+    level: "account",
+    fields: "spend,impressions,clicks,actions",
+    time_increment: "1",
+    time_range: JSON.stringify({ since, until }),
+    limit: "500",
+  });
+  return rows.map((r) => ({
+    day: r.date_start,
+    spendCents: Math.round(Number(r.spend ?? 0) * 100),
+    impressions: Number(r.impressions ?? 0),
+    clicks: Number(r.clicks ?? 0),
+    leads: Number(r.actions?.find((a) => a.action_type === "onsite_conversion.lead_grouped")?.value ?? 0),
+  }));
+}

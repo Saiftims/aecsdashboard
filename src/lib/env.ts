@@ -27,6 +27,11 @@ export const env = {
   /** Meta Graph token with leads_retrieval + pages_show_list + pages_read_engagement. */
   metaAccessToken: () => required("META_ACCESS_TOKEN"),
   metaPageId: () => clean("META_PAGE_ID") || "852956741232072",
+  /** Token for the ad account's Insights (spend). Only needs `ads_read`, so a
+   * never-expiring system-user token can go here even while the leads token
+   * above has to be re-minted. Falls back to META_ACCESS_TOKEN. */
+  metaAdsToken: () => clean("META_ADS_TOKEN") || required("META_ACCESS_TOKEN"),
+  metaAdAccountId: () => clean("META_AD_ACCOUNT_ID") || "act_993053423296349",
   /** HubSpot writes are gated: nothing is written unless explicitly enabled. */
   hubspotWritesEnabled: () => clean("HUBSPOT_APPLY") === "true",
 };

@@ -46,7 +46,14 @@ export interface CohortMonth {
   month: string;
   label: string;
   spend: number;
+  /** `meta`: summed from `meta_ad_spend_daily` (Insights API, actual);
+   * `ledger`: the hand-typed month in Settings; `planned`: the monthly budget
+   * prorated. */
+  spendSource: "meta" | "ledger" | "planned";
+  /** True unless the figure is a prorated plan. */
   spendFromLedger: boolean;
+  /** Form submissions Meta reports for the month (null when no Meta row). */
+  adLeads: number | null;
   mqls: number;
   /** Share of the month elapsed, for prorating monthly costs. */
   fraction: number;
@@ -89,14 +96,27 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     company_hubspot_id: string | null; properties: Record<string, string> | null;
   };
   type ContactRow = { company_hubspot_id: string | null; properties: Record<string, string> | null };
-  const [deals, { data: subs }, contacts, companies] = await Promise.all([
+  type SpendRow = { day: string; spend_cents: number; leads: number };
+  const [deals, { data: subs }, contacts, companies, { data: spendDays }] = await Promise.all([
     selectAll<DealRow>("deals", "name, is_activation, hs_created_at, company_hubspot_id, properties"),
     sb.from("stripe_subscriptions")
       .select("company_hubspot_id, billed_cents, monthly_cents, status, is_internal, started_at"),
     selectAll<ContactRow>("contacts", "company_hubspot_id, properties"),
     selectAll<{ hubspot_id: string; name: string }>("companies", "hubspot_id, name"),
+    sb.from("meta_ad_spend_daily").select("day, spend_cents, leads"),
   ]);
   const name = new Map(companies.map((c) => [c.hubspot_id, c.name]));
+  // Actual Meta spend by month. A month is only "known" once a day of it has
+  // synced; zero-spend days still come back as rows, so a paused month reads
+  // $0 rather than falling through to the plan.
+  const metaByMonth = new Map<string, { spend: number; leads: number }>();
+  for (const r of (spendDays ?? []) as SpendRow[]) {
+    const k = monthKey(r.day);
+    const cur = metaByMonth.get(k) ?? { spend: 0, leads: 0 };
+    cur.spend += r.spend_cents / 100;
+    cur.leads += r.leads;
+    metaByMonth.set(k, cur);
+  }
 
   const sales = deals.filter((d) =>
     d.hs_created_at && !d.is_activation
@@ -187,12 +207,16 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     const elapsed = Math.min(daysIn, Math.max(1, Math.ceil((now.getTime() - m.getTime()) / DAY)));
     const fraction = elapsed / daysIn;
     const ledger = settings.adSpendByMonth[key];
+    const meta = metaByMonth.get(key);
+    const spendSource = meta ? "meta" : Number.isFinite(Number(ledger)) ? "ledger" : "planned";
     months.push({
       month: key,
       label: m.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
         + (elapsed < daysIn ? ` (1–${now.getUTCDate()})` : ""),
-      spend: Number.isFinite(Number(ledger)) ? Number(ledger) : settings.monthlyAdSpend * fraction,
-      spendFromLedger: ledger !== undefined,
+      spend: meta ? meta.spend : spendSource === "ledger" ? Number(ledger) : settings.monthlyAdSpend * fraction,
+      spendSource,
+      spendFromLedger: spendSource !== "planned",
+      adLeads: meta ? meta.leads : null,
       mqls: mqlsByMonth.get(key) ?? 0,
       fraction,
       teamCost: settings.monthlyTeamCost * fraction,

@@ -5,11 +5,12 @@ import { syncCalendly } from "@/lib/sync/calendly";
 import { computeRollups, syncCases } from "@/lib/sync/cases";
 import { syncQuo } from "@/lib/sync/quo";
 import { syncStripe } from "@/lib/sync/stripe";
-import { syncMetaLeads } from "@/lib/sync/meta";
+import { syncMetaLeads, syncMetaSpend } from "@/lib/sync/meta";
 
 export type SyncKind =
   | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup"
-  | "quo" | "quo_full" | "quo_messages_full" | "stripe" | "meta" | "meta_full";
+  | "quo" | "quo_full" | "quo_messages_full" | "stripe" | "meta" | "meta_full"
+  | "meta_spend" | "meta_spend_full";
 
 export async function runSync(kinds: SyncKind[]) {
   const sb = supabaseService();
@@ -71,6 +72,8 @@ export async function runSync(kinds: SyncKind[]) {
           if (last?.finished_at) sinceMs = new Date(last.finished_at).getTime() - 24 * 60 * 60 * 1000;
         }
         stats = await syncMetaLeads(sinceMs);
+      } else if (kind === "meta_spend" || kind === "meta_spend_full") {
+        stats = await syncMetaSpend(kind === "meta_spend_full");
       } else if (kind === "cases") {
         stats = await syncCases();
       } else if (kind === "rollup") {

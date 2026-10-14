@@ -12,7 +12,7 @@ import {
 } from "@/lib/hubspot/client";
 import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
 import { env } from "@/lib/env";
-import { listForms, listLeads, pageAccessToken, type MetaLead } from "@/lib/meta/client";
+import { dailyAccountSpend, listForms, listLeads, pageAccessToken, type MetaLead } from "@/lib/meta/client";
 import { loadMetaSheetRows, normName } from "@/lib/meta-leads";
 import { supabaseService } from "@/lib/supabase/server";
 
@@ -45,6 +45,30 @@ async function announceOnSlack(args: {
     const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, blocks }) });
     return r.ok;
   } catch { return false; }
+}
+
+/** First day the ad account spent anything (Insights `maximum` range). */
+const SPEND_SINCE = "2026-05-01";
+
+/** Actual ad spend per day into `meta_ad_spend_daily`. Routine runs re-read
+ * the last 45 days - Meta restates recent days as late conversions and
+ * invalid-click credits land - and `full` re-reads from the account's first
+ * spend. One request either way. */
+export async function syncMetaSpend(full = false) {
+  const sb = supabaseService();
+  const until = new Date().toISOString().slice(0, 10);
+  const since = full ? SPEND_SINCE : new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
+  const days = await dailyAccountSpend(since, until);
+  const rows = days.map((d) => ({
+    day: d.day, spend_cents: d.spendCents, impressions: d.impressions, clicks: d.clicks,
+    leads: d.leads, synced_at: new Date().toISOString(),
+  }));
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb.from("meta_ad_spend_daily").upsert(rows.slice(i, i + 200), { onConflict: "day" });
+    if (error) throw new Error(`meta_ad_spend_daily upsert: ${error.message}`);
+  }
+  const spend = rows.reduce((a, r) => a + r.spend_cents, 0) / 100;
+  return { since, until, days: rows.length, spend, leads: rows.reduce((a, r) => a + r.leads, 0) };
 }
 
 /** Meta's "Test lead" button submits placeholders like
