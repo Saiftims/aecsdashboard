@@ -12,7 +12,10 @@ import {
 } from "@/lib/hubspot/client";
 import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
 import { env } from "@/lib/env";
-import { dailyAccountSpend, listForms, listLeads, pageAccessToken, type MetaLead } from "@/lib/meta/client";
+import {
+  dailyAccountSpend, dailyAdInsights, imageUrlsByHash, listAds, listForms, listLeads, pageAccessToken,
+  readCreatives, type MetaCreative, type MetaLead,
+} from "@/lib/meta/client";
 import { loadMetaSheetRows, normName } from "@/lib/meta-leads";
 import { supabaseService } from "@/lib/supabase/server";
 
@@ -71,7 +74,66 @@ export async function syncMetaSpend(full = false) {
     if (error) throw new Error(`meta_ad_spend_daily upsert: ${error.message}`);
   }
   const spend = rows.reduce((a, r) => a + r.spend_cents, 0) / 100;
-  return { since, until, days: rows.length, spend, leads: rows.reduce((a, r) => a + r.leads, 0) };
+  const ads = await syncMetaAds(since, until);
+  return { since, until, days: rows.length, spend, leads: rows.reduce((a, r) => a + r.leads, 0), ads };
+}
+
+/** What a creative shows and says. Dynamic-creative ads carry several titles
+ * and bodies; the first is what Meta reports as the primary. */
+export function creativeFields(c: MetaCreative | undefined) {
+  const ld = c?.object_story_spec?.link_data;
+  const vd = c?.object_story_spec?.video_data;
+  const afs = c?.asset_feed_spec;
+  return {
+    title: c?.title ?? afs?.titles?.[0]?.text ?? vd?.title ?? null,
+    body: c?.body ?? afs?.bodies?.[0]?.text ?? vd?.message ?? null,
+    cta: c?.call_to_action_type ?? ld?.call_to_action?.type ?? vd?.call_to_action?.type ?? null,
+    link: ld?.link ?? ld?.call_to_action?.value?.link ?? null,
+    form_id: ld?.call_to_action?.value?.lead_gen_form_id ?? vd?.call_to_action?.value?.lead_gen_form_id ?? null,
+    image_url: c?.image_url ?? vd?.image_url ?? null,
+    thumbnail_url: c?.thumbnail_url ?? null,
+    image_hash: c?.image_hash ?? ld?.image_hash ?? vd?.image_hash ?? afs?.images?.[0]?.hash ?? null,
+    video_id: vd?.video_id ?? afs?.videos?.[0]?.video_id ?? null,
+    post_id: c?.effective_object_story_id ?? null,
+  };
+}
+
+/** Every ad with its creative, plus per-ad daily insights for the window. */
+export async function syncMetaAds(since: string, until: string) {
+  const sb = supabaseService();
+  const ads = await listAds();
+  const creativeIds = [...new Set(ads.map((a) => a.creative?.id).filter((x): x is string => !!x))];
+  const creatives = await readCreatives(creativeIds);
+  // An image-library URL by hash outlives the creative's signed CDN link, so
+  // prefer it where the hash is known.
+  const hashes = [...new Set([...creatives.values()].map((c) => creativeFields(c).image_hash).filter((x): x is string => !!x))];
+  const byHash = await imageUrlsByHash(hashes);
+  const now = new Date().toISOString();
+  const adRows = ads.map((a) => {
+    const f = creativeFields(a.creative?.id ? creatives.get(a.creative.id) : undefined);
+    return {
+      ad_id: a.id, name: a.name, status: a.status, effective_status: a.effective_status,
+      adset_id: a.adset?.id ?? null, adset_name: a.adset?.name ?? null,
+      campaign_id: a.campaign?.id ?? null, campaign_name: a.campaign?.name ?? null, objective: a.campaign?.objective ?? null,
+      creative_id: a.creative?.id ?? null, ...f,
+      image_url: (f.image_hash && byHash.get(f.image_hash)) || f.image_url,
+      issues: a.issues_info ?? null, created_time: a.created_time, updated_time: a.updated_time, synced_at: now,
+    };
+  });
+  for (let i = 0; i < adRows.length; i += 200) {
+    const { error } = await sb.from("meta_ads").upsert(adRows.slice(i, i + 200), { onConflict: "ad_id" });
+    if (error) throw new Error(`meta_ads upsert: ${error.message}`);
+  }
+  const daily = await dailyAdInsights(since, until);
+  const insRows = daily.map((d) => ({
+    ad_id: d.adId, day: d.day, spend_cents: d.spendCents, impressions: d.impressions, reach: d.reach,
+    clicks: d.clicks, link_clicks: d.linkClicks, leads: d.leads, synced_at: now,
+  }));
+  for (let i = 0; i < insRows.length; i += 500) {
+    const { error } = await sb.from("meta_ad_insights_daily").upsert(insRows.slice(i, i + 500), { onConflict: "ad_id,day" });
+    if (error) throw new Error(`meta_ad_insights_daily upsert: ${error.message}`);
+  }
+  return { ads: adRows.length, creatives: creatives.size, withImage: adRows.filter((r) => r.image_url).length, insightRows: insRows.length };
 }
 
 /** Meta's "Test lead" button submits placeholders like

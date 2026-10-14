@@ -88,6 +88,121 @@ export async function listLeads(formId: string, pageToken: string, sinceMs?: num
   return allPages<MetaLead>(`${formId}/leads`, pageToken, params);
 }
 
+export interface MetaAd {
+  id: string;
+  name: string;
+  status: string;
+  effective_status: string;
+  adset?: { id: string; name: string };
+  campaign?: { id: string; name: string; objective?: string };
+  creative?: { id: string };
+  created_time: string;
+  updated_time: string;
+  issues_info?: unknown[];
+}
+
+/** Every ad in the account, any status. */
+export async function listAds(): Promise<MetaAd[]> {
+  return allPages<MetaAd>(`${env.metaAdAccountId()}/ads`, env.metaAdsToken(), {
+    fields: "id,name,status,effective_status,adset{id,name},campaign{id,name,objective},creative{id},created_time,updated_time,issues_info",
+    limit: "200",
+  });
+}
+
+export interface MetaCreative {
+  id: string;
+  title?: string;
+  body?: string;
+  image_url?: string;
+  thumbnail_url?: string;
+  image_hash?: string;
+  effective_object_story_id?: string;
+  call_to_action_type?: string;
+  object_story_spec?: {
+    link_data?: { link?: string; image_hash?: string; call_to_action?: { type?: string; value?: { lead_gen_form_id?: string; link?: string } } };
+    video_data?: { video_id?: string; image_url?: string; image_hash?: string; title?: string; message?: string; call_to_action?: { type?: string; value?: { lead_gen_form_id?: string } } };
+  };
+  asset_feed_spec?: {
+    titles?: { text: string }[]; bodies?: { text: string }[]; images?: { hash: string }[]; videos?: { video_id: string }[];
+  };
+}
+
+/** Creatives by id, 50 per request. */
+export async function readCreatives(ids: string[]): Promise<Map<string, MetaCreative>> {
+  const out = new Map<string, MetaCreative>();
+  for (let i = 0; i < ids.length; i += 50) {
+    const batch = ids.slice(i, i + 50);
+    const r = await graph<Record<string, MetaCreative>>("", env.metaAdsToken(), {
+      ids: batch.join(","),
+      fields: "id,title,body,image_url,thumbnail_url,image_hash,effective_object_story_id,call_to_action_type,object_story_spec,asset_feed_spec",
+      // Page-post creatives (and videos) expose no image_url; their thumbnail
+      // is 64px unless a size is asked for, so ask for a full-size render.
+      thumbnail_width: "1080",
+      thumbnail_height: "1080",
+    });
+    for (const [id, c] of Object.entries(r)) if (id !== "error") out.set(id, c);
+  }
+  return out;
+}
+
+/** Permanent-ish URLs for ad images by hash (the account's image library). */
+export async function imageUrlsByHash(hashes: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < hashes.length; i += 50) {
+    const r = await graph<{ data: { hash: string; url?: string; permalink_url?: string }[] }>(
+      `${env.metaAdAccountId()}/adimages`, env.metaAdsToken(),
+      { hashes: JSON.stringify(hashes.slice(i, i + 50)), fields: "hash,url,permalink_url" },
+    ).catch(() => ({ data: [] }));
+    for (const im of r.data ?? []) if (im.url) out.set(im.hash, im.url);
+  }
+  return out;
+}
+
+export interface MetaAdDaily {
+  adId: string;
+  day: string;
+  spendCents: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  linkClicks: number;
+  leads: number;
+}
+
+/** Per-ad, per-day insights. Asked a month at a time so no single response
+ * trips Meta's "reduce the amount of data" limit. */
+export async function dailyAdInsights(since: string, until: string): Promise<MetaAdDaily[]> {
+  type Row = {
+    ad_id: string; date_start: string; spend?: string; impressions?: string; reach?: string; clicks?: string;
+    inline_link_clicks?: string; actions?: { action_type: string; value: string }[];
+  };
+  const out: MetaAdDaily[] = [];
+  let cursor = new Date(since + "T00:00:00Z");
+  const end = new Date(until + "T00:00:00Z");
+  while (cursor <= end) {
+    const monthEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+    const chunkEnd = monthEnd < end ? monthEnd : end;
+    const rows = await allPages<Row>(`${env.metaAdAccountId()}/insights`, env.metaAdsToken(), {
+      level: "ad",
+      fields: "ad_id,spend,impressions,reach,clicks,inline_link_clicks,actions",
+      time_increment: "1",
+      time_range: JSON.stringify({ since: cursor.toISOString().slice(0, 10), until: chunkEnd.toISOString().slice(0, 10) }),
+      limit: "500",
+    });
+    for (const r of rows) {
+      out.push({
+        adId: r.ad_id, day: r.date_start,
+        spendCents: Math.round(Number(r.spend ?? 0) * 100),
+        impressions: Number(r.impressions ?? 0), reach: Number(r.reach ?? 0),
+        clicks: Number(r.clicks ?? 0), linkClicks: Number(r.inline_link_clicks ?? 0),
+        leads: Number(r.actions?.find((a) => a.action_type === "onsite_conversion.lead_grouped")?.value ?? 0),
+      });
+    }
+    cursor = new Date(Date.UTC(chunkEnd.getUTCFullYear(), chunkEnd.getUTCMonth(), chunkEnd.getUTCDate() + 1));
+  }
+  return out;
+}
+
 export interface MetaDailySpend {
   day: string;
   spendCents: number;

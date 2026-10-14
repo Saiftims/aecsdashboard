@@ -16,6 +16,7 @@ const NAV = [
   { href: "/", label: "Executive", roles: ["executive"] },
   { href: "/ae", label: "AE", roles: ["executive", "ae"] },
   { href: "/activity", label: "Activity & Funnel", roles: ["executive", "ae", "cs"] },
+  { href: "/marketing", label: "Marketing", roles: ["executive"] },
   { href: "/product", label: "Product", roles: ["executive", "cs"] },
   { href: "/cs", label: "Customer Success", roles: ["executive", "cs"] },
   { href: "/firms", label: "Firms", roles: ["executive", "ae", "cs"] },
