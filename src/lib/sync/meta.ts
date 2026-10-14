@@ -47,6 +47,9 @@ async function announceOnSlack(args: {
   } catch { return false; }
 }
 
+/** When the HubSpot push went live; submissions before it are never pushed. */
+const PUSH_SINCE = "2026-10-13T15:00:00Z";
+
 /** First day the ad account spent anything (Insights `maximum` range). */
 const SPEND_SINCE = "2026-05-01";
 
@@ -107,6 +110,14 @@ export async function syncMetaLeads(sinceMs?: number) {
   }
 
   // ---- push new submissions into HubSpot ----
+  // Only leads that arrived after the push went live. A full re-read can
+  // surface an older submission the archive had missed; HubSpot already has
+  // that person from its own Facebook integration, and announcing a July
+  // lead as new would mislead the team. Mark those handled instead.
+  await sb.from("meta_leads").update({
+    hubspot_pushed_at: new Date().toISOString(),
+    hubspot_push_note: `pre-existing; not pushed (went live ${PUSH_SINCE.slice(0, 10)})`,
+  }).is("hubspot_pushed_at", null).lt("created_time", PUSH_SINCE);
   const { data: pending } = await sb.from("meta_leads")
     .select("leadgen_id, created_time, form_name, ad_name, campaign_name, full_name, email, phone, company, answers")
     .is("hubspot_pushed_at", null).eq("is_test", false)
