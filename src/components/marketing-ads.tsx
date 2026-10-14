@@ -1,7 +1,6 @@
 "use client";
 
 import { clsx } from "clsx";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Badge, Card, Stat, inputCls } from "@/components/ui";
 import type { AdPerf, MarketingRange, MarketingReport } from "@/lib/marketing";
@@ -64,7 +63,6 @@ function AdImage({ ad, className, thumb }: { ad: AdPerf; className?: string; thu
 }
 
 export function MarketingAds({ report, ranges }: { report: MarketingReport; ranges: { key: MarketingRange; label: string }[] }) {
-  const router = useRouter();
   const [status, setStatus] = useState<StatusFilter>("spent");
   const [campaign, setCampaign] = useState("");
   const [adset, setAdset] = useState("");
@@ -124,7 +122,7 @@ export function MarketingAds({ report, ranges }: { report: MarketingReport; rang
         <div className="grid gap-2 md:grid-cols-7">
           <label className="text-xs">
             <span className="mb-1 block font-medium text-zinc-500">Time</span>
-            <select className={inputCls} value={report.range} onChange={(e) => router.push(`/marketing?range=${e.target.value}`)}>
+            <select className={inputCls} value={report.range} onChange={(e) => { window.location.href = `/marketing?range=${e.target.value}`; }}>
               {ranges.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
             </select>
           </label>
