@@ -83,6 +83,7 @@ export function SubscribersTable({ rows }: { rows: SubscriberRow[] }) {
                   <td className="px-3 py-2">
                     {r.plan}
                     {r.cancelAtPeriodEnd ? <Badge tone="red">cancels at renewal</Badge> : r.status === "past_due" ? <Badge tone="yellow">past due</Badge> : null}
+                    {r.note ? <div className="text-xs text-zinc-400">{r.note}</div> : null}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">${r.monthly.toLocaleString("en-US")}{r.interval === "year" ? <span className="text-xs text-zinc-400"> (annual)</span> : ""}</td>
                   <td className="px-3 py-2 tabular-nums">{day(r.periodStart)}</td>

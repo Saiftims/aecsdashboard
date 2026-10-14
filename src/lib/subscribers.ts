@@ -18,6 +18,21 @@ export function includedCases(planName: string | null | undefined): number | nul
   return null;
 }
 
+/** Stripe customers the sync flags internal (staff email on the account) that
+ * the owner says are real paying firms. CF Injury bills from
+ * diego+10@silentwitness.ai (owner, 2026-10-14). Listed by Stripe customer id
+ * so the page shows them while the revenue code keeps its own view. */
+const REAL_DESPITE_STAFF_EMAIL = new Set(["cus_USJrd91b84An63"]);
+
+/** Billing arrangements Stripe's subscription object cannot express, shown
+ * under the plan so the CSM is not misled by the list price. */
+const PLAN_NOTES: Record<string, { monthly: number; note: string }> = {
+  // Powerhouse $24,000/yr carries a 100% Stripe discount (invoice of 4 May 2026
+  // paid $0); the firm is billed per case at $83.33 instead. Owner states a
+  // $500/mo arrangement (2026-10-14) that Stripe does not show.
+  cus_USJrd91b84An63: { monthly: 0, note: "Plan 100% discounted in Stripe; billed $83.33 per case" },
+};
+
 export interface SubscriberRow {
   companyId: string | null;
   firm: string;
@@ -38,6 +53,7 @@ export interface SubscriberRow {
   lastCase: string | null;
   cancelAtPeriodEnd: boolean;
   startedAt: string | null;
+  note: string | null;
 }
 
 export async function subscribersReport(now = new Date()): Promise<{ rows: SubscriberRow[]; syncedAt: string | null }> {
@@ -98,7 +114,7 @@ export async function subscribersReport(now = new Date()): Promise<{ rows: Subsc
   const rows: SubscriberRow[] = [];
   const seen = new Set<string>();
   for (const s of subs
-    .filter((s) => !s.is_internal && LIVE.has(s.status ?? ""))
+    .filter((s) => (!s.is_internal || REAL_DESPITE_STAFF_EMAIL.has(s.customer_id ?? "")) && LIVE.has(s.status ?? ""))
     .sort((a, b) => (a.current_period_end ?? "").localeCompare(b.current_period_end ?? ""))) {
     const key = s.company_hubspot_id ?? `stripe:${s.customer_id}`;
     if (seen.has(key)) continue;
@@ -109,11 +125,13 @@ export async function subscribersReport(now = new Date()): Promise<{ rows: Subsc
     const included = includedCases(s.plan_name);
     const used = countBetween(s.company_hubspot_id, s.current_period_start, s.current_period_end);
     const end = s.current_period_end ? new Date(s.current_period_end).getTime() : null;
+    const special = PLAN_NOTES[s.customer_id ?? ""];
     rows.push({
       companyId: s.company_hubspot_id,
       firm: co?.name ?? s.customer_name ?? s.customer_id ?? s.subscription_id,
       plan: s.plan_name ?? "Plan",
-      monthly: monthlyPrice(s),
+      monthly: special?.monthly ?? monthlyPrice(s),
+      note: special?.note ?? null,
       interval: s.interval,
       status: s.status ?? "",
       source: "stripe",
@@ -150,7 +168,7 @@ export async function subscribersReport(now = new Date()): Promise<{ rows: Subsc
       casesThisPeriod: countBetween(co.hubspot_id, monthStart, monthEnd),
       included: null, left: null,
       casesLast30: last30(co.hubspot_id), lastCase: lastCase(co.hubspot_id),
-      cancelAtPeriodEnd: false, startedAt: null,
+      cancelAtPeriodEnd: false, startedAt: null, note: null,
     });
   }
 
