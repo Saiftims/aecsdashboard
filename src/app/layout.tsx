@@ -19,6 +19,7 @@ const NAV = [
   { href: "/marketing", label: "Marketing", roles: ["executive"] },
   { href: "/product", label: "Product", roles: ["executive", "cs"] },
   { href: "/cs", label: "Customer Success", roles: ["executive", "cs"] },
+  { href: "/subscribers", label: "Subscribers", roles: ["executive", "cs"] },
   { href: "/firms", label: "Firms", roles: ["executive", "ae", "cs"] },
   { href: "/data-quality", label: "Data Quality", roles: ["executive", "ae", "cs"] },
   { href: "/settings", label: "Settings", roles: ["executive"] },

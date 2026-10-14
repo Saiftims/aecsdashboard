@@ -55,15 +55,28 @@ export interface StripeSubscription {
   status?: string | null;
   created?: number | null;
   canceled_at?: number | null;
+  cancel_at_period_end?: boolean | null;
+  /** Absent on newer API versions, where the period lives on each item. */
+  current_period_start?: number | null;
   current_period_end?: number | null;
   items?: {
     data?: {
+      current_period_start?: number | null;
+      current_period_end?: number | null;
       price?: {
+        id?: string | null;
         unit_amount?: number | null;
         recurring?: { interval?: string | null } | null;
       } | null;
     }[];
   } | null;
+}
+
+export interface StripePrice {
+  id: string;
+  unit_amount?: number | null;
+  recurring?: { interval?: string | null } | null;
+  product?: { id: string; name?: string | null; metadata?: Record<string, string> | null } | string | null;
 }
 
 function key(): string {
@@ -105,3 +118,7 @@ export const listInvoices = () => page<StripeInvoice>("invoices");
  * billed a flat fee while it ran, and their history depends on knowing that. */
 export const listSubscriptions = () =>
   page<StripeSubscription>("subscriptions", { status: "all" });
+/** Prices with their product, which is where the plan NAME lives ("Solo",
+ * "Boutique"). A subscription item only carries the price id. */
+export const listPrices = () =>
+  page<StripePrice>("prices", { "expand[]": "data.product" });

@@ -21,7 +21,7 @@
  */
 import { isTestCaseActor } from "@/lib/cases/provider";
 import {
-  listCharges, listCustomers, listInvoices, listSubscriptions,
+  listCharges, listCustomers, listInvoices, listPrices, listSubscriptions,
   StripeCharge, StripeInvoice,
 } from "@/lib/stripe/client";
 import { supabaseService } from "@/lib/supabase/server";
@@ -98,9 +98,10 @@ function dayKey(sec: number | null | undefined): string {
 export async function syncStripe() {
   const sb = supabaseService();
 
-  const [customers, charges, invoices, subscriptions] = await Promise.all([
-    listCustomers(), listCharges(), listInvoices(), listSubscriptions(),
+  const [customers, charges, invoices, subscriptions, prices] = await Promise.all([
+    listCustomers(), listCharges(), listInvoices(), listSubscriptions(), listPrices(),
   ]);
+  const priceById = new Map(prices.map((p) => [p.id, p]));
 
   // ---- company lookup ------------------------------------------------------
   const { data: companyRows } = await sb.from("companies")
@@ -216,10 +217,19 @@ export async function syncStripe() {
     const amount = items.reduce((t, i) => t + (i.price?.unit_amount ?? 0), 0);
     const interval = items[0]?.price?.recurring?.interval ?? null;
     const billed = lastSubCharge.get(s.customer ?? "") ?? amount;
+    // The plan name lives on the product behind the item's price. Newer API
+    // versions also move the billing period from the subscription to its items.
+    const price = priceById.get(items[0]?.price?.id ?? "");
+    const product = price && typeof price.product === "object" ? price.product : null;
     return {
       subscription_id: s.id,
       customer_id: s.customer ?? null,
       company_hubspot_id: cust?.company_hubspot_id ?? null,
+      customer_name: cust?.name ?? null,
+      plan_name: product?.name ?? null,
+      plan_type: product?.metadata?.plan_type ?? null,
+      current_period_start: iso(s.current_period_start ?? items[0]?.current_period_start),
+      cancel_at_period_end: s.cancel_at_period_end ?? false,
       amount_cents: amount,
       billed_cents: billed,
       // Normalised so an annual plan can be compared with a monthly one.
@@ -229,7 +239,7 @@ export async function syncStripe() {
       is_internal: cust?.is_internal ?? false,
       started_at: iso(s.created),
       cancelled_at: iso(s.canceled_at),
-      current_period_end: iso(s.current_period_end),
+      current_period_end: iso(s.current_period_end ?? items[0]?.current_period_end),
       synced_at: now,
     };
   });
