@@ -2,7 +2,7 @@
 
 import { clsx } from "clsx";
 import { useState, type ReactNode } from "react";
-import { Card, CardHeader, Stat } from "@/components/ui";
+import { Card, CardHeader, Stat, inputCls } from "@/components/ui";
 import type { LeadSource, UnitEconomicsSnapshot } from "@/lib/unit-economics";
 
 type Bands = [number, number, number, number];
@@ -78,6 +78,7 @@ const mo = (n: number) => (Number.isFinite(n) ? `${n.toFixed(1)} mo` : "never");
 const ratio = (a: number, b: number) => (Number.isFinite(a / b) && b > 0 ? `${(a / b).toFixed(1)}x` : "—");
 const num = (v: string, d: number) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
 const day = (iso: string) => iso.slice(0, 10);
+type SubSort = "renews" | "left" | "lead" | "subscribed" | "firm";
 
 const selectCls = "mt-1 w-full rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900";
 
@@ -128,6 +129,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
   const [focus, setFocus] = useState("base");
   const [attr, setAttr] = useState<Attribution>("likely");
   const [custom, setCustom] = useState<string[]>(["10", "5", "3", "2"]);
+  const [subSort, setSubSort] = useState<SubSort>("renews");
 
   const margin = num(marginS, snap.grossMargin * 100) / 100;
   const paidSet = PAID[attr];
@@ -153,6 +155,21 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
   };
 
   const era = snap.subscribers.filter((x) => !x.preSwitch);
+  const liveSubs = snap.subscribers.filter((x) => x.live);
+  const liveCount = liveSubs.length;
+  const unusedCount = liveSubs.filter((x) => (x.left ?? 0) > 0).length;
+  const dueSoon = liveSubs.filter((x) => (x.left ?? 0) > 0 && (x.daysToRenewal ?? 99) <= 7).length;
+  const sortedSubs = [...snap.subscribers].sort((a, b) => {
+    // Cancelled plans always sink to the bottom.
+    if (a.live !== b.live) return a.live ? -1 : 1;
+    switch (subSort) {
+      case "renews": return (a.daysToRenewal ?? 9e9) - (b.daysToRenewal ?? 9e9);
+      case "left": return (b.left ?? -1) - (a.left ?? -1) || (a.daysToRenewal ?? 9e9) - (b.daysToRenewal ?? 9e9);
+      case "subscribed": return b.subscribedAt.localeCompare(a.subscribedAt);
+      case "firm": return a.firm.localeCompare(b.firm);
+      default: return a.leadAt.localeCompare(b.leadAt);
+    }
+  });
   const cohorts = snap.months.map((m) => {
     const subs = era.filter((x) => x.leadAt.startsWith(m.month));
     return { ...m, subs, ...economics(m.spend, m.teamCost, subs, active.s) };
@@ -233,23 +250,56 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       </Card>
 
       <Card>
-        <CardHeader title="Every subscriber" />
-        <Grid left={5}
-          headers={["Firm", "Lead in", "Subscribed", "Plan", "Source"]}
-          rows={snap.subscribers.map((x) => [
-            x.firm, day(x.leadAt), day(x.subscribedAt), `${usd(x.plan)}/mo`,
-            <span key="s" className={clsx("rounded-full px-2 py-0.5 text-xs",
-              !x.preSwitch && paidSet.includes(x.source)
-                ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
-                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300")}>
-              {x.preSwitch ? "Lead from before July" : SOURCE_LABEL[x.source]}
-            </span>,
-          ])}
+        <CardHeader title="Every subscriber"
+          action={
+            <label className="flex items-center gap-2 text-xs text-zinc-500">
+              <span>{liveCount} live · {unusedCount} with cases left{dueSoon ? ` · ${dueSoon} renewing within 7 days` : ""}</span>
+              <select className={inputCls} value={subSort} onChange={(e) => setSubSort(e.target.value as SubSort)}>
+                <option value="renews">Renews soonest</option>
+                <option value="left">Most cases left</option>
+                <option value="lead">Lead date</option>
+                <option value="subscribed">Subscribed date</option>
+                <option value="firm">Firm A–Z</option>
+              </select>
+            </label>
+          } />
+        <Grid left={2}
+          headers={["Firm", "Plan", "$/mo", "Subscribed", "Renews", "Cases this period", "Cases left", "Lead in", "Source"]}
+          rows={sortedSubs.map((x) => {
+            const soon = x.live && (x.left ?? 0) > 0 && (x.daysToRenewal ?? 99) <= 7;
+            return [
+              x.firm,
+              <span key="p">
+                {x.live ? x.planName : <span className="text-zinc-400">Cancelled</span>}
+                {x.note ? <span className="block text-xs text-zinc-400">{x.note}</span> : null}
+              </span>,
+              `${usd(x.plan)}`,
+              day(x.subscribedAt),
+              x.periodEnd
+                ? <span key="r" className={clsx(soon && "font-semibold text-amber-600")}>
+                    {day(x.periodEnd)}{x.daysToRenewal !== null ? <span className="ml-1 text-xs opacity-70">{x.daysToRenewal <= 0 ? "today" : `${x.daysToRenewal}d`}</span> : null}
+                  </span>
+                : "—",
+              x.casesThisPeriod === null ? "—" : `${x.casesThisPeriod}${x.included !== null ? ` / ${x.included}` : ""}`,
+              x.left === null ? "—"
+                : <span key="l" className={clsx((x.left ?? 0) > 0 ? "font-semibold text-amber-600" : "text-zinc-400")}>{x.left}</span>,
+              day(x.leadAt),
+              <span key="s" className={clsx("rounded-full px-2 py-0.5 text-xs",
+                !x.preSwitch && paidSet.includes(x.source)
+                  ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
+                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300")}>
+                {x.preEra ? "Before plans launched" : x.preSwitch ? "Lead from before July" : SOURCE_LABEL[x.source]}
+              </span>,
+            ];
+          })}
           highlight={-1}
         />
         <p className="px-4 pb-3 pt-1 text-xs text-zinc-400">
-          Blue sources count as paid under the selected attribution. Sources come from Lead Source on the
-          firm&apos;s converting deal or contacts in HubSpot; correct a firm there.
+          Plan and renewal date from Stripe (synced every 3 hours); cases this period are the firm&apos;s submitted
+          cases dated inside the current billing period, against the plan&apos;s allowance (Solo 2, Boutique 5,
+          Growth 10). Firms renewing within 7 days with cases left are amber. Blue sources count as paid under the
+          selected attribution; a plan from before August is listed but belongs to no cohort. Sources come from
+          Lead Source on the firm&apos;s converting deal or contacts in HubSpot; correct a firm there.
         </p>
       </Card>
 

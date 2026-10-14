@@ -63,12 +63,55 @@ function derivedStatus(c: { submitted_date: string | null; completed_date: strin
 
 // ---------------------------------------------------------------------------
 // Ingestion
+/** One `case_ui_usage` row per case, customer and staff activity apart.
+ * Returns the number of cases written. */
+async function syncCaseUiUsage(provider: PostHogProvider): Promise<number> {
+  const rows = await provider.listCaseUiUsage();
+  type Agg = {
+    v1: number; v2: number; v1First: string | null; v1Last: string | null; v2First: string | null; v2Last: string | null;
+    staffV1: number; staffV2: number; staffLastUi: string | null; staffLastAt: string | null;
+    accounts: Set<string>; emails: Set<string>;
+  };
+  const byCase = new Map<string, Agg>();
+  const minIso = (a: string | null, b: string | null) => (!a ? b : !b ? a : a < b ? a : b);
+  const maxIso = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b);
+  for (const r of rows) {
+    const a = byCase.get(r.caseId) ?? {
+      v1: 0, v2: 0, v1First: null, v1Last: null, v2First: null, v2Last: null,
+      staffV1: 0, staffV2: 0, staffLastUi: null, staffLastAt: null, accounts: new Set(), emails: new Set(),
+    };
+    if (r.account) a.accounts.add(r.account);
+    const staff = isTestCaseActor(r.email, r.account);
+    if (staff) {
+      if (r.ui === "v1") a.staffV1 += r.events; else a.staffV2 += r.events;
+      if (!a.staffLastAt || (r.last ?? "") > a.staffLastAt) { a.staffLastAt = r.last; a.staffLastUi = r.ui; }
+    } else {
+      if (r.email) a.emails.add(r.email);
+      if (r.ui === "v1") { a.v1 += r.events; a.v1First = minIso(a.v1First, r.first); a.v1Last = maxIso(a.v1Last, r.last); }
+      else { a.v2 += r.events; a.v2First = minIso(a.v2First, r.first); a.v2Last = maxIso(a.v2Last, r.last); }
+    }
+    byCase.set(r.caseId, a);
+  }
+  const now = new Date().toISOString();
+  const out = [...byCase.entries()].map(([case_id, a]) => ({
+    case_id, v1_events: a.v1, v2_events: a.v2, v1_first: a.v1First, v1_last: a.v1Last, v2_first: a.v2First, v2_last: a.v2Last,
+    staff_v1_events: a.staffV1, staff_v2_events: a.staffV2, staff_last_ui: a.staffLastUi,
+    accounts: [...a.accounts], customer_emails: [...a.emails], synced_at: now,
+  }));
+  const sb = supabaseService();
+  for (let i = 0; i < out.length; i += 500) {
+    const { error } = await sb.from("case_ui_usage").upsert(out.slice(i, i + 500), { onConflict: "case_id" });
+    if (error) throw new Error(`case_ui_usage upsert: ${error.message}`);
+  }
+  return out.length;
+}
+
 // ---------------------------------------------------------------------------
 export async function syncCases() {
   const sb = supabaseService();
   const stats = {
     posthog: 0, fromUrls: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, dedupedStandIn: 0,
-    bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0,
+    bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0, uiCases: 0,
   };
 
   // Purge any previously-ingested test/internal cases (idempotent cleanup).
@@ -204,6 +247,13 @@ export async function syncCases() {
           phCases.push(uc);
           stats.fromUrls += 1;
         }
+      }
+      // Old UI vs new UI per case (case_ui property, since 2026-10-13). Its
+      // own try: a failure here must not cost the case ingest below.
+      try {
+        stats.uiCases = await syncCaseUiUsage(provider);
+      } catch (e) {
+        console.error("case_ui sync failed:", e instanceof Error ? e.message : e);
       }
     } catch (e) {
       console.error("PostHog fetch failed:", e instanceof Error ? e.message : e);

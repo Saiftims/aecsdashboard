@@ -1,4 +1,5 @@
 import { loadSettings } from "@/lib/settings";
+import { subscribersReport, type SubscriberRow } from "@/lib/subscribers";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 /** Subscription plans replaced per-case pricing in August 2026; only
@@ -38,8 +39,20 @@ export interface Subscriber {
   source: LeadSource;
   sourceDetail: string | null;
   plan: number;
-  /** Lead predates the first cohort; shown but never in a cohort. */
+  /** Lead predates the first cohort, or the plan predates the subscription
+   * era; shown but never in a cohort. */
   preSwitch: boolean;
+  /** Plan started before plans launched in August 2026. */
+  preEra: boolean;
+  live: boolean;
+  /** Current-period usage, for the CS view; null when no live plan. */
+  planName: string | null;
+  periodEnd: string | null;
+  daysToRenewal: number | null;
+  casesThisPeriod: number | null;
+  included: number | null;
+  left: number | null;
+  note: string | null;
 }
 
 export interface CohortMonth {
@@ -97,14 +110,20 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
   };
   type ContactRow = { company_hubspot_id: string | null; properties: Record<string, string> | null };
   type SpendRow = { day: string; spend_cents: number; leads: number };
-  const [deals, { data: subs }, contacts, companies, { data: spendDays }] = await Promise.all([
+  const [deals, { data: subs }, contacts, companies, { data: spendDays }, current] = await Promise.all([
     selectAll<DealRow>("deals", "name, is_activation, hs_created_at, company_hubspot_id, properties"),
     sb.from("stripe_subscriptions")
       .select("company_hubspot_id, billed_cents, monthly_cents, status, is_internal, started_at"),
     selectAll<ContactRow>("contacts", "company_hubspot_id, properties"),
     selectAll<{ hubspot_id: string; name: string }>("companies", "hubspot_id, name"),
     sb.from("meta_ad_spend_daily").select("day, spend_cents, leads"),
+    subscribersReport(now),
   ]);
+  // Live plans with their billing period and case usage, by firm. This is the
+  // COMPLETE subscriber list (it includes pre-era plans and the firms billed
+  // outside Stripe); the Stripe rows below only add cancelled plans for CAC.
+  const liveByCompany = new Map<string, SubscriberRow>();
+  for (const r of current.rows) liveByCompany.set(r.companyId ?? `name:${r.firm}`, r);
   const name = new Map(companies.map((c) => [c.hubspot_id, c.name]));
   // Actual Meta spend by month. A month is only "known" once a day of it has
   // synced; zero-spend days still come back as rows, so a paused month reads
@@ -163,9 +182,17 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     if (!prev || s.started_at < prev.started) acquired.set(key, { started: s.started_at, plan: billed });
   }
 
+  // Every firm with a live plan, plus any plan acquired since August that has
+  // since been cancelled (it still cost acquisition spend).
+  for (const [key, r] of liveByCompany) {
+    if (!acquired.has(key)) acquired.set(key, { started: r.startedAt ?? r.periodStart ?? now.toISOString(), plan: r.monthly });
+  }
+
   const subscribers: Subscriber[] = [];
   for (const [company, { started, plan }] of acquired) {
-    if (started < SUBSCRIPTION_ERA_START) continue;
+    const live = liveByCompany.get(company);
+    const preEra = started < SUBSCRIPTION_ERA_START;
+    if (preEra && !live) continue;
     const cutoff = new Date(Date.parse(started) + DAY).toISOString();
     const priorDeals = (dealsByCompany.get(company) ?? [])
       .filter((d) => d.hs_created_at <= cutoff)
@@ -185,13 +212,23 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     const pick = candidates.find((c) => SOURCE_OF[c.src!] && SOURCE_OF[c.src!] !== "other") ?? candidates[0];
     subscribers.push({
       company,
-      firm: name.get(company) ?? "Unmatched Stripe customer",
+      firm: name.get(company) ?? live?.firm ?? "Unmatched Stripe customer",
       leadAt: lead,
       subscribedAt: started,
       source: pick ? SOURCE_OF[pick.src!] ?? "other" : "unknown",
       sourceDetail: pick?.detail ?? null,
-      plan,
-      preSwitch: lead < FIRST_COHORT,
+      plan: live?.monthly ?? plan,
+      // Pre-era plans are listed but stay out of every cohort, as before.
+      preSwitch: lead < FIRST_COHORT || preEra,
+      preEra,
+      live: !!live,
+      planName: live?.plan ?? null,
+      periodEnd: live?.periodEnd ?? null,
+      daysToRenewal: live?.daysToRenewal ?? null,
+      casesThisPeriod: live ? live.casesThisPeriod : null,
+      included: live?.included ?? null,
+      left: live?.left ?? null,
+      note: live?.note ?? null,
     });
   }
   subscribers.sort((a, b) => a.leadAt.localeCompare(b.leadAt));

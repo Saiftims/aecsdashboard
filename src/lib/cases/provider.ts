@@ -420,6 +420,43 @@ export class PostHogProvider {
     return rows.map(([caseId, actors]) => ({ caseId, actors: actors ?? [] }));
   }
 
+  /** Which UI each case is worked in. `case_ui` is an event PROPERTY (v1 =
+   * old UI, v2 = new UI) stamped on every app event since 2026-10-13; the
+   * case comes from `caseId` when present, else the /cases/<id> URL. One row
+   * per (case, ui, account, person) so the caller can split customer from
+   * staff activity with `isTestCaseActor` - the question is which CUSTOMERS
+   * are still on the old UI, and Silent Witness staff open every case. */
+  async listCaseUiUsage(sinceDays = 90): Promise<{
+    caseId: string; ui: string; account: string | null; email: string | null;
+    first: string | null; last: string | null; events: number;
+  }[]> {
+    const hogql = `
+      select
+        if(properties.caseId is not null and properties.caseId != '', toString(properties.caseId),
+           extract(toString(properties.$current_url), 'cases/(case_[0-9a-fA-F]{8,})')) as case_id,
+        toString(properties.case_ui) as ui,
+        properties.$group_0 as account_id,
+        person.properties.email as email,
+        min(timestamp) as first_seen,
+        max(timestamp) as last_seen,
+        count() as events
+      from events
+      where properties.case_ui in ('v1', 'v2')
+        and properties.$current_url not like '%staging%'
+        and timestamp > now() - interval ${sinceDays} day
+      group by case_id, ui, account_id, email
+      having case_id != ''
+      limit 50000`;
+    const rows = await this.query(hogql);
+    return rows.map((r) => ({
+      caseId: String(r[0]), ui: String(r[1]),
+      account: r[2] ? String(r[2]) : null,
+      email: r[3] ? String(r[3]).toLowerCase() : null,
+      first: safeIso(r[4] as string | null), last: safeIso(r[5] as string | null),
+      events: Number(r[6] ?? 0),
+    }));
+  }
+
   async listCasesFromUrls(sinceDays = 400): Promise<PostHogCase[]> {
     // Staging is excluded: dev/QA work lives on app.staging.silentwitness.ai.
     //
