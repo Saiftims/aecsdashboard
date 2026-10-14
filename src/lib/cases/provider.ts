@@ -420,13 +420,16 @@ export class PostHogProvider {
     return rows.map(([caseId, actors]) => ({ caseId, actors: actors ?? [] }));
   }
 
-  /** Which UI each case is worked in. `case_ui` is an event PROPERTY (v1 =
-   * old UI, v2 = new UI) stamped on every app event since 2026-10-13; the
-   * case comes from `caseId` when present, else the /cases/<id> URL. One row
-   * per (case, ui, account, person) so the caller can split customer from
-   * staff activity with `isTestCaseActor` - the question is which CUSTOMERS
-   * are still on the old UI, and Silent Witness staff open every case. */
-  async listCaseUiUsage(sinceDays = 90): Promise<{
+  /** Activity on each case, and which UI it was worked in. `case_ui` is an
+   * event PROPERTY (v1 = old UI, v2 = new UI) stamped on every app event since
+   * 2026-10-13 - events from before that (or without it) come back with
+   * `ui = ''`, so the caller still sees WHEN a case was last touched even when
+   * it cannot say in which UI. The case comes from `caseId` when present, else
+   * the /cases/<id> URL. One row per (case, ui, account, person) so the caller
+   * can split customer from staff activity with `isTestCaseActor` - the
+   * question is which CUSTOMERS are still on the old UI, and Silent Witness
+   * staff open every case. */
+  async listCaseUiUsage(sinceDays = 400): Promise<{
     caseId: string; ui: string; account: string | null; email: string | null;
     first: string | null; last: string | null; events: number;
   }[]> {
@@ -434,15 +437,14 @@ export class PostHogProvider {
       select
         if(properties.caseId is not null and properties.caseId != '', toString(properties.caseId),
            extract(toString(properties.$current_url), 'cases/(case_[0-9a-fA-F]{8,})')) as case_id,
-        toString(properties.case_ui) as ui,
+        if(properties.case_ui in ('v1', 'v2'), toString(properties.case_ui), '') as ui,
         properties.$group_0 as account_id,
         person.properties.email as email,
         min(timestamp) as first_seen,
         max(timestamp) as last_seen,
         count() as events
       from events
-      where properties.case_ui in ('v1', 'v2')
-        and properties.$current_url not like '%staging%'
+      where properties.$current_url not like '%staging%'
         and timestamp > now() - interval ${sinceDays} day
       group by case_id, ui, account_id, email
       having case_id != ''

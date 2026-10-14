@@ -59,8 +59,9 @@ export default async function ProductPage() {
             <div className="text-xs text-zinc-500">Which firms and cases are still on the old case UI · click for the list by firm</div>
           </div>
           <div className="flex items-center gap-6 text-sm">
-            <span><span className="font-semibold text-emerald-600">{ui.firms.filter((f) => f.lastUi === "v2").length}</span> <span className="text-zinc-500">firms on new</span></span>
+            <span><span className="font-semibold text-emerald-600">{ui.totals.firmsOnNew}</span> <span className="text-zinc-500">firms on new</span></span>
             <span><span className={ui.totals.firmsOnOld ? "font-semibold text-red-600" : "font-semibold"}>{ui.totals.firmsOnOld}</span> <span className="text-zinc-500">still on old</span></span>
+            <span><span className="font-semibold">{ui.totals.firmsUnseen}</span> <span className="text-zinc-500">not seen yet</span></span>
             <span><span className="font-semibold">{ui.totals.new}</span><span className="text-zinc-500"> / </span><span className={ui.totals.old ? "font-semibold text-red-600" : "font-semibold"}>{ui.totals.old}</span> <span className="text-zinc-500">cases new / old</span></span>
             <span className="text-zinc-400">›</span>
           </div>

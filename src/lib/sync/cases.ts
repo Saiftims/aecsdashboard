@@ -69,6 +69,7 @@ async function syncCaseUiUsage(provider: PostHogProvider): Promise<number> {
   const rows = await provider.listCaseUiUsage();
   type Agg = {
     v1: number; v2: number; v1First: string | null; v1Last: string | null; v2First: string | null; v2Last: string | null;
+    custEvents: number; custFirst: string | null; custLast: string | null;
     staffV1: number; staffV2: number; staffLastUi: string | null; staffLastAt: string | null;
     accounts: Set<string>; emails: Set<string>;
   };
@@ -78,24 +79,30 @@ async function syncCaseUiUsage(provider: PostHogProvider): Promise<number> {
   for (const r of rows) {
     const a = byCase.get(r.caseId) ?? {
       v1: 0, v2: 0, v1First: null, v1Last: null, v2First: null, v2Last: null,
+      custEvents: 0, custFirst: null, custLast: null,
       staffV1: 0, staffV2: 0, staffLastUi: null, staffLastAt: null, accounts: new Set(), emails: new Set(),
     };
     if (r.account) a.accounts.add(r.account);
     const staff = isTestCaseActor(r.email, r.account);
+    // ui === "" is activity from before the case_ui flag existed (or an event
+    // without it): it dates the case but says nothing about which UI.
     if (staff) {
-      if (r.ui === "v1") a.staffV1 += r.events; else a.staffV2 += r.events;
-      if (!a.staffLastAt || (r.last ?? "") > a.staffLastAt) { a.staffLastAt = r.last; a.staffLastUi = r.ui; }
+      a.staffLastAt = maxIso(a.staffLastAt, r.last);
+      if (r.ui === "v1") a.staffV1 += r.events; else if (r.ui === "v2") a.staffV2 += r.events;
+      if (r.ui && (!a.staffLastUi || (r.last ?? "") >= (a.staffLastAt ?? ""))) a.staffLastUi = r.ui;
     } else {
       if (r.email) a.emails.add(r.email);
+      a.custEvents += r.events; a.custFirst = minIso(a.custFirst, r.first); a.custLast = maxIso(a.custLast, r.last);
       if (r.ui === "v1") { a.v1 += r.events; a.v1First = minIso(a.v1First, r.first); a.v1Last = maxIso(a.v1Last, r.last); }
-      else { a.v2 += r.events; a.v2First = minIso(a.v2First, r.first); a.v2Last = maxIso(a.v2Last, r.last); }
+      else if (r.ui === "v2") { a.v2 += r.events; a.v2First = minIso(a.v2First, r.first); a.v2Last = maxIso(a.v2Last, r.last); }
     }
     byCase.set(r.caseId, a);
   }
   const now = new Date().toISOString();
   const out = [...byCase.entries()].map(([case_id, a]) => ({
     case_id, v1_events: a.v1, v2_events: a.v2, v1_first: a.v1First, v1_last: a.v1Last, v2_first: a.v2First, v2_last: a.v2Last,
-    staff_v1_events: a.staffV1, staff_v2_events: a.staffV2, staff_last_ui: a.staffLastUi,
+    customer_events: a.custEvents, customer_first: a.custFirst, customer_last: a.custLast,
+    staff_v1_events: a.staffV1, staff_v2_events: a.staffV2, staff_last_ui: a.staffLastUi, staff_last: a.staffLastAt,
     accounts: [...a.accounts], customer_emails: [...a.emails], synced_at: now,
   }));
   const sb = supabaseService();
