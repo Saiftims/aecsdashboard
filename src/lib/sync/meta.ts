@@ -10,7 +10,7 @@
 import {
   ASSOC, hsAssociations, hsCreateObject, hsRequest, hsUpdateProperties, type HsObject,
 } from "@/lib/hubspot/client";
-import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
+import { SALES_PIPELINE_ID, SALES_STAGES, SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
 import { env } from "@/lib/env";
 import {
   dailyAccountSpend, dailyAdInsights, imageUrlsByHash, listAds, listForms, listLeads, pageAccessToken,
@@ -21,27 +21,40 @@ import { supabaseService } from "@/lib/supabase/server";
 
 /** Ahmad "Alex" Qoqazeh - every new Meta lead is his (owner, 2026-10-13). */
 const ALEX_OWNER_ID = "36480771";
+const CHRIS_OWNER_ID = "36148171";
+/** Stages whose deals belong to Alex (mirror of ALEX_STAGES in config.py);
+ * from Demo Scheduled onward the deal is Chris's and is never reassigned. */
+const ALEX_STAGES = new Set<string>([SALES_STAGES.unqualified, SALES_STAGES.mql, SALES_STAGES.attemptingContact, SALES_STAGES.connected]);
 
 /** Same shape as slack_notify.py's MQL alert so #sales reads consistently.
- * Never throws: a Slack outage must not fail the HubSpot push. */
-async function announceOnSlack(args: {
+ * A repeat (someone already in the pipeline submitting the form again) is
+ * announced too - the owner wants every submission pinged (2026-10-15) - but
+ * worded as a come-back with the deal's current stage, so nobody treats it as
+ * a fresh lead. Never throws: a Slack outage must not fail the HubSpot push. */
+export async function announceOnSlack(args: {
   dealId: string; dealName: string; name: string; email: string; phone: string | null;
   company: string | null; form: string | null; qualified: boolean | null; answers: string;
+  repeat?: { stage: string; ownerId: string | null; submittedAt: string };
 }): Promise<boolean> {
   const url = env.slackWebhookUrl();
   if (!url) return false;
   const dealUrl = `https://app-eu1.hubspot.com/contacts/${env.hubspotPortalId()}/record/0-3/${args.dealId}`;
+  const owner = args.repeat ? (args.repeat.ownerId === CHRIS_OWNER_ID ? "Chris" : args.repeat.ownerId === ALEX_OWNER_ID ? "Alex" : "unassigned") : "Alex";
+  const stageLabel = args.repeat ? SALES_STAGE_LABELS[args.repeat.stage] ?? args.repeat.stage : "Unqualified Lead";
   const lines = [
     `*Contact:* ${args.name || "-"}  (${[args.email, args.phone].filter(Boolean).join(" · ")})`,
     args.company ? `*Company:* ${args.company}` : "",
-    `*Owner:* Alex`,
+    `*Owner:* ${owner}`,
     `*Source:* Meta ad form${args.form ? ` · ${args.form}` : ""}`,
     args.qualified === null ? "" : `*FlyTech sheet:* ${args.qualified ? "on it (qualified)" : "not on it yet (unqualified)"}`,
     args.answers ? `*Answers:* ${args.answers}` : "",
   ].filter(Boolean);
-  const text = `:tada: New Meta lead (Unqualified Lead stage): ${args.dealName}`;
+  const headline = args.repeat
+    ? `:repeat: *Existing lead came back* - submitted the Meta form again ${args.repeat.submittedAt.slice(0, 16).replace("T", " ")} UTC (deal already in *${stageLabel}*, stage not changed)`
+    : `:tada: *New Meta lead in HubSpot* (Unqualified Lead stage)`;
+  const text = args.repeat ? `:repeat: Existing lead came back (${stageLabel}): ${args.dealName}` : `:tada: New Meta lead (Unqualified Lead stage): ${args.dealName}`;
   const blocks = [
-    { type: "section", text: { type: "mrkdwn", text: `:tada: *New Meta lead in HubSpot* (Unqualified Lead stage)\n*<${dealUrl}|${args.dealName}>*` } },
+    { type: "section", text: { type: "mrkdwn", text: `${headline}\n*<${dealUrl}|${args.dealName}>*` } },
     { type: "section", text: { type: "mrkdwn", text: lines.join("\n") } },
   ];
   try {
@@ -195,8 +208,8 @@ export async function syncMetaLeads(sinceMs?: number) {
     const r = await pushLeadToHubSpot(lead);
     stats.pushed += 1;
     if (r.contactCreated) stats.contactsCreated += 1;
-    if (r.dealCreated && r.dealId) {
-      stats.dealsCreated += 1;
+    if (r.dealCreated) stats.dealsCreated += 1;
+    if ((r.dealCreated || r.repeat) && r.dealId) {
       const ok = await announceOnSlack({
         dealId: r.dealId, dealName: r.dealName ?? "", name: lead.full_name ?? "", email: lead.email ?? "",
         phone: lead.phone, company: lead.company, form: lead.form_name,
@@ -204,6 +217,7 @@ export async function syncMetaLeads(sinceMs?: number) {
         answers: Object.entries(lead.answers ?? {})
           .filter(([k]) => !["full_name", "work_email", "email", "phone_number", "company_name"].includes(k))
           .map(([, v]) => v).join(" · "),
+        repeat: r.repeat ? { stage: r.stage ?? "", ownerId: r.ownerId ?? null, submittedAt: lead.created_time } : undefined,
       });
       if (ok) { stats.slacked += 1; r.note += " · Slack posted"; } else r.note += " · Slack NOT posted";
     }
@@ -272,6 +286,8 @@ interface PendingLead {
 interface PushResult {
   contactId?: string; dealId?: string; dealName?: string;
   contactCreated?: boolean; dealCreated?: boolean; repeat?: boolean;
+  /** Current stage / owner of the deal (set on repeats). */
+  stage?: string; ownerId?: string | null;
   error?: boolean; note: string;
 }
 
@@ -356,7 +372,7 @@ export async function pushLeadToHubSpot(lead: PendingLead): Promise<PushResult> 
     let existingDeal: HsObject | undefined;
     if (dealIds.length) {
       const read = await hsRequest<{ results: HsObject[] }>("POST", "/crm/v3/objects/deals/batch/read", {
-        inputs: dealIds.map((id) => ({ id })), properties: ["dealname", "dealstage", "pipeline", "createdate"],
+        inputs: dealIds.map((id) => ({ id })), properties: ["dealname", "dealstage", "pipeline", "createdate", "hubspot_owner_id"],
       });
       existingDeal = read.results
         .filter((d) => (d.properties.pipeline ?? SALES_PIPELINE_ID) === SALES_PIPELINE_ID)
@@ -379,9 +395,21 @@ export async function pushLeadToHubSpot(lead: PendingLead): Promise<PushResult> 
         hs_timestamp: lead.created_time,
         hs_note_body: `Meta form submitted AGAIN (existing lead came back)\n${body}`,
       }, [{ toId: existingDeal.id, associationTypeId: ASSOC.noteToDeal }]);
+      // A come-back still in a pre-demo stage is Alex's to work (owner,
+      // 2026-10-15). From Demo Scheduled onward the deal is Chris's - the
+      // owner sweep would hand it back within hours anyway. Stage never moves.
+      const stage = existingDeal.properties.dealstage ?? "";
+      let ownerId = existingDeal.properties.hubspot_owner_id ?? null;
+      let reassigned = "";
+      if (ALEX_STAGES.has(stage) && ownerId !== ALEX_OWNER_ID) {
+        await hsUpdateProperties("deals", existingDeal.id, { hubspot_owner_id: ALEX_OWNER_ID });
+        ownerId = ALEX_OWNER_ID;
+        reassigned = ", deal reassigned to Alex";
+      }
       return {
-        contactId: contact.id, dealId: existingDeal.id, contactCreated, repeat: true,
-        note: `repeat: already had deal "${existingDeal.properties.dealname}" - note added, no new deal`,
+        contactId: contact.id, dealId: existingDeal.id, dealName: existingDeal.properties.dealname ?? "", contactCreated, repeat: true,
+        stage, ownerId,
+        note: `repeat: already had deal "${existingDeal.properties.dealname}" (${SALES_STAGE_LABELS[stage] ?? stage}) - note added${reassigned}, no new deal`,
       };
     }
 
