@@ -433,25 +433,42 @@ export class PostHogProvider {
     caseId: string; ui: string; account: string | null; email: string | null;
     first: string | null; last: string | null; events: number;
   }[]> {
-    const hogql = `
-      select
-        if(properties.caseId is not null and properties.caseId != '', toString(properties.caseId),
-           extract(toString(properties.$current_url), 'cases/(case_[0-9a-fA-F]{8,})')) as case_id,
-        if(properties.case_ui in ('v1', 'v2'), toString(properties.case_ui), '') as ui,
-        properties.$group_0 as account_id,
-        person.properties.email as email,
-        min(timestamp) as first_seen,
-        max(timestamp) as last_seen,
-        count() as events
+    // Two queries, each ~10s. One query over every event (to date the case
+    // AND read its UI) hit PostHog's execution-time limit on 2026-10-16 and
+    // its circuit breaker then took the unrelated listCasesFromUrls down too.
+    //  1. flagged: events carrying case_ui (selective, exists since 13 Oct) -
+    //     decides v1/v2.
+    //  2. activity: $pageview on a /cases/<id> URL over the whole window -
+    //     only dates the case (ui = ''); one event per page load keeps it
+    //     cheap where $autocapture would not.
+    const caseId = `if(coalesce(toString(properties.caseId), '') != '', toString(properties.caseId),
+           extract(toString(properties.$current_url), 'cases/(case_[0-9a-fA-F]{8,})'))`;
+    const flagged = `
+      select ${caseId} as case_id, toString(properties.case_ui) as ui,
+        properties.$group_0 as account_id, person.properties.email as email,
+        min(timestamp), max(timestamp), count()
       from events
-      where properties.$current_url not like '%staging%'
+      where properties.case_ui in ('v1', 'v2')
+        and properties.$current_url not like '%staging%'
         and timestamp > now() - interval ${sinceDays} day
       group by case_id, ui, account_id, email
       having case_id != ''
       limit 50000`;
-    const rows = await this.query(hogql);
-    return rows.map((r) => ({
-      caseId: String(r[0]), ui: String(r[1]),
+    const activity = `
+      select ${caseId} as case_id, '' as ui,
+        properties.$group_0 as account_id, person.properties.email as email,
+        min(timestamp), max(timestamp), count()
+      from events
+      where event = '$pageview'
+        and timestamp > now() - interval ${sinceDays} day
+        and toString(properties.$current_url) like '%/cases/case_%'
+        and properties.$current_url not like '%staging%'
+      group by case_id, account_id, email
+      having case_id != ''
+      limit 50000`;
+    const [a, b] = await Promise.all([this.query(flagged), this.query(activity)]);
+    return [...a, ...b].map((r) => ({
+      caseId: String(r[0]), ui: String(r[1] ?? ""),
       account: r[2] ? String(r[2]) : null,
       email: r[3] ? String(r[3]).toLowerCase() : null,
       first: safeIso(r[4] as string | null), last: safeIso(r[5] as string | null),
