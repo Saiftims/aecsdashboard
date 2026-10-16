@@ -26,6 +26,15 @@ const CHRIS_OWNER_ID = "36148171";
  * from Demo Scheduled onward the deal is Chris's and is never reassigned. */
 const ALEX_STAGES = new Set<string>([SALES_STAGES.unqualified, SALES_STAGES.mql, SALES_STAGES.attemptingContact, SALES_STAGES.connected]);
 
+/** Where a NEW Meta deal lands (owner, 2026-10-16): MQL when FlyTech has the
+ * person on its sheet - form tab (qualified) or booking tab (booked a demo) -
+ * else Unqualified Lead. The sheet's form tab fills within seconds of the
+ * submission, so this is usually decidable at push time; a lead qualified
+ * later is promoted by `promoteQualified`. */
+function stageFor(qualified: boolean | null): string {
+  return qualified ? SALES_STAGES.mql : SALES_STAGES.unqualified;
+}
+
 /** Same shape as slack_notify.py's MQL alert so #sales reads consistently.
  * A repeat (someone already in the pipeline submitting the form again) is
  * announced too - the owner wants every submission pinged (2026-10-15) - but
@@ -34,13 +43,18 @@ const ALEX_STAGES = new Set<string>([SALES_STAGES.unqualified, SALES_STAGES.mql,
 export async function announceOnSlack(args: {
   dealId: string; dealName: string; name: string; email: string; phone: string | null;
   company: string | null; form: string | null; qualified: boolean | null; answers: string;
+  /** Stage the new deal was created in (defaults to Unqualified Lead). */
+  stage?: string;
   repeat?: { stage: string; ownerId: string | null; submittedAt: string };
+  /** An existing Unqualified deal just moved to MQL because FlyTech qualified it. */
+  promoted?: { via: string };
 }): Promise<boolean> {
   const url = env.slackWebhookUrl();
   if (!url) return false;
   const dealUrl = `https://app-eu1.hubspot.com/contacts/${env.hubspotPortalId()}/record/0-3/${args.dealId}`;
   const owner = args.repeat ? (args.repeat.ownerId === CHRIS_OWNER_ID ? "Chris" : args.repeat.ownerId === ALEX_OWNER_ID ? "Alex" : "unassigned") : "Alex";
-  const stageLabel = args.repeat ? SALES_STAGE_LABELS[args.repeat.stage] ?? args.repeat.stage : "Unqualified Lead";
+  const newStage = SALES_STAGE_LABELS[args.stage ?? SALES_STAGES.unqualified] ?? "Unqualified Lead";
+  const stageLabel = args.repeat ? SALES_STAGE_LABELS[args.repeat.stage] ?? args.repeat.stage : newStage;
   const lines = [
     `*Contact:* ${args.name || "-"}  (${[args.email, args.phone].filter(Boolean).join(" · ")})`,
     args.company ? `*Company:* ${args.company}` : "",
@@ -49,10 +63,14 @@ export async function announceOnSlack(args: {
     args.qualified === null ? "" : `*FlyTech sheet:* ${args.qualified ? "on it (qualified)" : "not on it yet (unqualified)"}`,
     args.answers ? `*Answers:* ${args.answers}` : "",
   ].filter(Boolean);
-  const headline = args.repeat
-    ? `:repeat: *Existing lead came back* - submitted the Meta form again ${args.repeat.submittedAt.slice(0, 16).replace("T", " ")} UTC (deal already in *${stageLabel}*, stage not changed)`
-    : `:tada: *New Meta lead in HubSpot* (Unqualified Lead stage)`;
-  const text = args.repeat ? `:repeat: Existing lead came back (${stageLabel}): ${args.dealName}` : `:tada: New Meta lead (Unqualified Lead stage): ${args.dealName}`;
+  const headline = args.promoted
+    ? `:white_check_mark: *Meta lead qualified by FlyTech* (${args.promoted.via}) - moved from Unqualified Lead to *New MQL*`
+    : args.repeat
+      ? `:repeat: *Existing lead came back* - submitted the Meta form again ${args.repeat.submittedAt.slice(0, 16).replace("T", " ")} UTC (deal already in *${stageLabel}*, stage not changed)`
+      : `:tada: *New Meta lead in HubSpot* (${newStage} stage)`;
+  const text = args.promoted
+    ? `:white_check_mark: Meta lead qualified -> New MQL: ${args.dealName}`
+    : args.repeat ? `:repeat: Existing lead came back (${stageLabel}): ${args.dealName}` : `:tada: New Meta lead (${newStage} stage): ${args.dealName}`;
   const blocks = [
     { type: "section", text: { type: "mrkdwn", text: `${headline}\n*<${dealUrl}|${args.dealName}>*` } },
     { type: "section", text: { type: "mrkdwn", text: lines.join("\n") } },
@@ -164,7 +182,7 @@ export async function syncMetaLeads(sinceMs?: number) {
   const sb = supabaseService();
   const stats = {
     forms: 0, fetched: 0, upserted: 0, test: 0,
-    pushed: 0, contactsCreated: 0, dealsCreated: 0, repeats: 0, pushErrors: 0, slacked: 0,
+    pushed: 0, contactsCreated: 0, dealsCreated: 0, repeats: 0, pushErrors: 0, slacked: 0, promoted: 0,
   };
   // Read Meta. A failure here (typically an expired token) must not stop the
   // HubSpot push of anything already fetched; it is re-thrown at the end so
@@ -197,26 +215,31 @@ export async function syncMetaLeads(sinceMs?: number) {
     .select("leadgen_id, created_time, form_name, ad_name, campaign_name, full_name, email, phone, company, answers")
     .is("hubspot_pushed_at", null).eq("is_test", false)
     .order("created_time", { ascending: true }).limit(40);
-  // The FlyTech sheet says whether a lead has been qualified; read once per
-  // run, only if there is something to announce. Null = sheet unreadable.
-  let sheetKeys: Set<string> | null = null;
-  if (pending?.length) {
-    const sheet = await loadMetaSheetRows();
-    sheetKeys = sheet && new Set(sheet.filter((r) => r.tab === "form").flatMap((r) => [r.email, normName(r.name)]).filter(Boolean));
-  }
+  // The FlyTech sheet says whether a lead has been qualified (form tab) or
+  // booked a demo (booking tab); either puts a new deal in MQL. Read once per
+  // run. Null = sheet unreadable, in which case nobody is promoted this run.
+  const sheet = await loadMetaSheetRows();
+  const qualifiedVia = (lead: { email: string | null; full_name: string | null }): string | null => {
+    if (!sheet) return null;
+    const keys = [(lead.email ?? "").toLowerCase(), normName(lead.full_name)].filter(Boolean);
+    const hit = (tab: "form" | "booking") => sheet.some((r) => r.tab === tab && (keys.includes(r.email) || keys.includes(normName(r.name))));
+    return hit("booking") ? "booked a demo" : hit("form") ? "on the FlyTech sheet" : null;
+  };
   for (const lead of (pending ?? []) as PendingLead[]) {
-    const r = await pushLeadToHubSpot(lead);
+    const via = qualifiedVia(lead);
+    const qualified = sheet ? via !== null : null;
+    const r = await pushLeadToHubSpot(lead, stageFor(qualified));
     stats.pushed += 1;
     if (r.contactCreated) stats.contactsCreated += 1;
     if (r.dealCreated) stats.dealsCreated += 1;
     if ((r.dealCreated || r.repeat) && r.dealId) {
       const ok = await announceOnSlack({
         dealId: r.dealId, dealName: r.dealName ?? "", name: lead.full_name ?? "", email: lead.email ?? "",
-        phone: lead.phone, company: lead.company, form: lead.form_name,
-        qualified: sheetKeys ? sheetKeys.has(lead.email ?? "") || sheetKeys.has(normName(lead.full_name)) : null,
+        phone: lead.phone, company: lead.company, form: lead.form_name, qualified,
         answers: Object.entries(lead.answers ?? {})
           .filter(([k]) => !["full_name", "work_email", "email", "phone_number", "company_name"].includes(k))
           .map(([, v]) => v).join(" · "),
+        stage: r.stage,
         repeat: r.repeat ? { stage: r.stage ?? "", ownerId: r.ownerId ?? null, submittedAt: lead.created_time } : undefined,
       });
       if (ok) { stats.slacked += 1; r.note += " · Slack posted"; } else r.note += " · Slack NOT posted";
@@ -230,12 +253,61 @@ export async function syncMetaLeads(sinceMs?: number) {
       // the note says why. Everything else is final.
       hubspot_pushed_at: r.error ? null : new Date().toISOString(),
       hubspot_push_note: r.note,
+      ...(r.dealCreated && qualified ? { qualified_at: new Date().toISOString(), qualified_via: via } : {}),
     }).eq("leadgen_id", lead.leadgen_id);
+  }
+  if (sheet) {
+    try { stats.promoted = await promoteQualified(sheet, qualifiedVia); } catch (e) { console.error("promoteQualified", e); }
   }
   if (metaError) {
     throw new Error(`${metaError instanceof Error ? metaError.message : String(metaError)} (push stage ran: ${JSON.stringify(stats)})`);
   }
   return stats;
+}
+
+/** FlyTech qualifies some leads AFTER we pushed them (the booking tab fills
+ * when the person books, the form tab when FlyTech screens). A deal we
+ * created that still sits in Unqualified Lead is moved to MQL the run the
+ * person appears on the sheet, and #sales is told. A deal Alex has already
+ * moved on is left alone and just marked qualified. Looks back 14 days. */
+async function promoteQualified(
+  sheet: NonNullable<Awaited<ReturnType<typeof loadMetaSheetRows>>>,
+  qualifiedVia: (lead: { email: string | null; full_name: string | null }) => string | null,
+): Promise<number> {
+  const sb = supabaseService();
+  const { data } = await sb.from("meta_leads")
+    .select("leadgen_id, full_name, email, phone, company, form_name, hubspot_deal_id, hubspot_push_note")
+    .is("qualified_at", null).eq("is_test", false).not("hubspot_deal_id", "is", null)
+    .gt("created_time", new Date(Date.now() - 14 * 86400000).toISOString());
+  const candidates = (data ?? []).map((l) => ({ ...l, via: qualifiedVia(l) })).filter((l) => l.via);
+  if (!candidates.length) return 0;
+  const read = await hsRequest<{ results: HsObject[] }>("POST", "/crm/v3/objects/deals/batch/read", {
+    inputs: [...new Set(candidates.map((c) => c.hubspot_deal_id as string))].map((id) => ({ id })),
+    properties: ["dealname", "dealstage", "hubspot_owner_id"],
+  });
+  const deals = new Map(read.results.map((d) => [d.id, d]));
+  let promoted = 0;
+  const now = new Date().toISOString();
+  for (const c of candidates) {
+    const deal = deals.get(c.hubspot_deal_id as string);
+    let note = `qualified (${c.via}) ${now.slice(0, 16)}`;
+    if (deal && deal.properties.dealstage === SALES_STAGES.unqualified) {
+      await hsUpdateProperties("deals", deal.id, { dealstage: SALES_STAGES.mql });
+      const ok = await announceOnSlack({
+        dealId: deal.id, dealName: deal.properties.dealname ?? "", name: c.full_name ?? "", email: c.email ?? "",
+        phone: c.phone, company: c.company, form: c.form_name, qualified: true, answers: "",
+        stage: SALES_STAGES.mql, promoted: { via: c.via! },
+      });
+      note += ` - moved to MQL${ok ? ", Slack posted" : ", Slack NOT posted"}`;
+      promoted += 1;
+    } else if (deal) {
+      note += ` - deal already in ${SALES_STAGE_LABELS[deal.properties.dealstage ?? ""] ?? deal.properties.dealstage}, left`;
+    }
+    await sb.from("meta_leads").update({
+      qualified_at: now, qualified_via: c.via, hubspot_push_note: `${c.hubspot_push_note ?? ""} · ${note}`,
+    }).eq("leadgen_id", c.leadgen_id);
+  }
+  return promoted;
 }
 
 async function readMeta(sinceMs: number | undefined, rows: Record<string, unknown>[], stats: { forms: number; fetched: number; test: number }) {
@@ -328,7 +400,7 @@ async function findContactByEmail(email: string): Promise<HsObject | null> {
  *    Someone who already has one is an existing lead submitting again - an
  *    intent signal logged as a note, never a second deal and never a stage
  *    move backwards (standing rule). */
-export async function pushLeadToHubSpot(lead: PendingLead): Promise<PushResult> {
+export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES_STAGES.unqualified): Promise<PushResult> {
   const email = (lead.email ?? "").trim().toLowerCase();
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return { note: `skipped: no usable email (${lead.email ?? "blank"})` };
@@ -417,7 +489,7 @@ export async function pushLeadToHubSpot(lead: PendingLead): Promise<PushResult> 
     const deal = await hsCreateObject("deals", {
       dealname: dealName,
       pipeline: SALES_PIPELINE_ID,
-      dealstage: SALES_STAGES.unqualified,
+      dealstage: stage,
       hubspot_owner_id: ALEX_OWNER_ID,
       sw_lead_source: "meta_ads",
     }, [{ toId: contact.id, associationTypeId: ASSOC.dealToContact }]);
@@ -425,8 +497,8 @@ export async function pushLeadToHubSpot(lead: PendingLead): Promise<PushResult> 
     await hsCreateObject("notes", { hs_timestamp: lead.created_time, hs_note_body: body },
       [{ toId: deal.id!, associationTypeId: ASSOC.noteToDeal }]);
     return {
-      contactId: contact.id, dealId: deal.id, dealName, contactCreated, dealCreated: true,
-      note: `created deal "${dealName}" in Unqualified Lead for Alex${contactCreated ? " (contact created too)" : ""}`,
+      contactId: contact.id, dealId: deal.id, dealName, contactCreated, dealCreated: true, stage, ownerId: ALEX_OWNER_ID,
+      note: `created deal "${dealName}" in ${SALES_STAGE_LABELS[stage] ?? stage} for Alex${contactCreated ? " (contact created too)" : ""}`,
     };
   } catch (e) {
     return { error: true, note: `error: ${e instanceof Error ? e.message : String(e)}` };
