@@ -429,18 +429,20 @@ export class PostHogProvider {
    * can split customer from staff activity with `isTestCaseActor` - the
    * question is which CUSTOMERS are still on the old UI, and Silent Witness
    * staff open every case. */
-  async listCaseUiUsage(sinceDays = 400): Promise<{
+  async listCaseUiUsage(sinceDays = 180): Promise<{
     caseId: string; ui: string; account: string | null; email: string | null;
     first: string | null; last: string | null; events: number;
   }[]> {
-    // Two queries, each ~10s. One query over every event (to date the case
-    // AND read its UI) hit PostHog's execution-time limit on 2026-10-16 and
-    // its circuit breaker then took the unrelated listCasesFromUrls down too.
-    //  1. flagged: events carrying case_ui (selective, exists since 13 Oct) -
-    //     decides v1/v2.
-    //  2. activity: $pageview on a /cases/<id> URL over the whole window -
-    //     only dates the case (ui = ''); one event per page load keeps it
-    //     cheap where $autocapture would not.
+    // PostHog's per-query execution limit is ~10s on this project and one
+    // query over every event (to date the case AND read its UI) blew it on
+    // 2026-10-16; its circuit breaker then took listCasesFromUrls down too.
+    //  1. flagged: events carrying case_ui (selective; the flag exists since
+    //     2026-10-13) - decides v1/v2. Required.
+    //  2. activity: $pageview on a /cases/<id> URL - only dates the case
+    //     (ui = ''). Even that times out over 180 days with the person join,
+    //     so it is read in 30-day chunks, sequentially (parallel chunks share
+    //     the budget), newest first. A chunk that still fails is skipped: it
+    //     can only make a quiet case look quieter, never change its UI.
     const caseId = `if(coalesce(toString(properties.caseId), '') != '', toString(properties.caseId),
            extract(toString(properties.$current_url), 'cases/(case_[0-9a-fA-F]{8,})'))`;
     const flagged = `
@@ -448,25 +450,31 @@ export class PostHogProvider {
         properties.$group_0 as account_id, person.properties.email as email,
         min(timestamp), max(timestamp), count()
       from events
-      where properties.case_ui in ('v1', 'v2')
+      where timestamp > toDateTime('2026-10-13 00:00:00')
+        and properties.case_ui in ('v1', 'v2')
         and properties.$current_url not like '%staging%'
-        and timestamp > now() - interval ${sinceDays} day
       group by case_id, ui, account_id, email
       having case_id != ''
       limit 50000`;
-    const activity = `
+    const activity = (fromDays: number, toDays: number) => `
       select ${caseId} as case_id, '' as ui,
         properties.$group_0 as account_id, person.properties.email as email,
         min(timestamp), max(timestamp), count()
       from events
       where event = '$pageview'
-        and timestamp > now() - interval ${sinceDays} day
-        and toString(properties.$current_url) like '%/cases/case_%'
+        and timestamp > now() - interval ${toDays} day
+        and timestamp <= now() - interval ${fromDays} day
+        and properties.$current_url like '%/cases/case_%'
         and properties.$current_url not like '%staging%'
       group by case_id, account_id, email
       having case_id != ''
       limit 50000`;
-    const [a, b] = await Promise.all([this.query(flagged), this.query(activity)]);
+    const a = await this.query(flagged);
+    const b: (string | null)[][] = [];
+    for (let from = 0; from < sinceDays; from += 30) {
+      try { b.push(...await this.query(activity(from, Math.min(from + 30, sinceDays)))); }
+      catch (e) { console.error(`listCaseUiUsage: activity chunk ${from}-${from + 30}d skipped: ${e instanceof Error ? e.message.slice(0, 120) : e}`); }
+    }
     return [...a, ...b].map((r) => ({
       caseId: String(r[0]), ui: String(r[1] ?? ""),
       account: r[2] ? String(r[2]) : null,
