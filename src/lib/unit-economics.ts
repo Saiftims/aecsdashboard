@@ -1,3 +1,5 @@
+import { caseRevenue } from "@/lib/queries";
+import { loadRevenueFacts } from "@/lib/revenue";
 import { loadSettings } from "@/lib/settings";
 import { subscribersReport, type SubscriberRow } from "@/lib/subscribers";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
@@ -55,6 +57,31 @@ export interface Subscriber {
   note: string | null;
 }
 
+/** Every firm that has used the product, whatever it pays (owner, 2026-10-20:
+ * "we want to reflect all signups as well not just subs ... and the
+ * transactional cohort, so we see the full picture"). Dated by when the firm
+ * ARRIVED - first app signup, first case or first subscription, whichever is
+ * earliest - and charged to the lead month that produced it, like a
+ * subscriber. */
+export type CustomerKind = "subscription" | "transactional" | "signup";
+
+export interface Customer {
+  company: string;
+  firm: string;
+  kind: CustomerKind;
+  leadAt: string;
+  arrivedAt: string;
+  source: LeadSource;
+  /** What the firm is worth per month: the billed plan for a subscriber; for a
+   * transactional firm its cash to date (Stripe, else modelled per case)
+   * spread over the months since its first case; 0 for a signup. */
+  monthly: number;
+  revenueToDate: number;
+  cases: number;
+  /** Lead predates the first cohort (or a pre-era plan): listed, no cohort. */
+  preSwitch: boolean;
+}
+
 export interface CohortMonth {
   month: string;
   label: string;
@@ -88,6 +115,8 @@ export interface UnitEconomicsSnapshot {
   grossMargin: number;
   months: CohortMonth[];
   subscribers: Subscriber[];
+  /** Every firm that used the product - the cohort table runs on this. */
+  customers: Customer[];
   newSubscriberMrr: number;
   newSubscribers: number;
   activeSubscribers: number;
@@ -110,14 +139,18 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
   };
   type ContactRow = { company_hubspot_id: string | null; properties: Record<string, string> | null };
   type SpendRow = { day: string; spend_cents: number; leads: number };
-  const [deals, { data: subs }, contacts, companies, { data: spendDays }, current] = await Promise.all([
+  type CompanyRow = { hubspot_id: string; name: string; signed_up_at: string | null };
+  type CaseRow = { company_hubspot_id: string | null; submitted_date: string | null; revenue_amount: number | null };
+  const [deals, { data: subs }, contacts, companies, { data: spendDays }, current, { data: caseRows }, facts] = await Promise.all([
     selectAll<DealRow>("deals", "name, is_activation, hs_created_at, company_hubspot_id, properties"),
     sb.from("stripe_subscriptions")
       .select("company_hubspot_id, billed_cents, monthly_cents, status, is_internal, started_at"),
     selectAll<ContactRow>("contacts", "company_hubspot_id, properties"),
-    selectAll<{ hubspot_id: string; name: string }>("companies", "hubspot_id, name"),
+    selectAll<CompanyRow>("companies", "hubspot_id, name, signed_up_at"),
     sb.from("meta_ad_spend_daily").select("day, spend_cents, leads"),
     subscribersReport(now),
+    sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount"),
+    loadRevenueFacts(),
   ]);
   // Live plans with their billing period and case usage, by firm. This is the
   // COMPLETE subscriber list (it includes pre-era plans and the firms billed
@@ -188,12 +221,13 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     if (!acquired.has(key)) acquired.set(key, { started: r.startedAt ?? r.periodStart ?? now.toISOString(), plan: r.monthly });
   }
 
-  const subscribers: Subscriber[] = [];
-  for (const [company, { started, plan }] of acquired) {
-    const live = liveByCompany.get(company);
-    const preEra = started < SUBSCRIPTION_ERA_START;
-    if (preEra && !live) continue;
-    const cutoff = new Date(Date.parse(started) + DAY).toISOString();
+  /** The lead that produced a firm's conversion at `at`: the latest sales deal
+   * created before it, else the firm's first contact, else the event itself;
+   * and the firm's source, where a specific source beats "other" (the CAALA
+   * import stamps every contact "other", including firms that came in
+   * through an ad). */
+  const attribute = (company: string, at: string) => {
+    const cutoff = new Date(Date.parse(at) + DAY).toISOString();
     const priorDeals = (dealsByCompany.get(company) ?? [])
       .filter((d) => d.hs_created_at <= cutoff)
       .sort((a, b) => a.hs_created_at.localeCompare(b.hs_created_at));
@@ -201,22 +235,32 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
       .sort((a, b) => a.properties!.createdate.localeCompare(b.properties!.createdate));
     const contact = firmContacts[0]?.properties?.createdate;
     const converting = priorDeals.at(-1);
-    const lead = converting?.hs_created_at ?? (contact && contact <= cutoff ? contact : started);
-
-    // A specific source beats "other" (the CAALA import stamps every contact
-    // "other", including firms that actually came in through an ad).
+    const lead = converting?.hs_created_at ?? (contact && contact <= cutoff ? contact : at);
     const candidates = [
       { src: converting?.properties?.sw_lead_source, detail: null as string | null },
       ...firmContacts.map((c) => ({ src: c.properties?.sw_lead_source, detail: c.properties?.sw_lead_source_detail ?? null })),
     ].filter((c) => c.src);
     const pick = candidates.find((c) => SOURCE_OF[c.src!] && SOURCE_OF[c.src!] !== "other") ?? candidates[0];
+    return {
+      lead,
+      source: (pick ? SOURCE_OF[pick.src!] ?? "other" : "unknown") as LeadSource,
+      sourceDetail: pick?.detail ?? null,
+    };
+  };
+
+  const subscribers: Subscriber[] = [];
+  for (const [company, { started, plan }] of acquired) {
+    const live = liveByCompany.get(company);
+    const preEra = started < SUBSCRIPTION_ERA_START;
+    if (preEra && !live) continue;
+    const { lead, source, sourceDetail } = attribute(company, started);
     subscribers.push({
       company,
       firm: name.get(company) ?? live?.firm ?? "Unmatched Stripe customer",
       leadAt: lead,
       subscribedAt: started,
-      source: pick ? SOURCE_OF[pick.src!] ?? "other" : "unknown",
-      sourceDetail: pick?.detail ?? null,
+      source,
+      sourceDetail,
       plan: live?.monthly ?? plan,
       // Pre-era plans are listed but stay out of every cohort, as before.
       preSwitch: lead < FIRST_COHORT || preEra,
@@ -232,6 +276,53 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     });
   }
   subscribers.sort((a, b) => a.leadAt.localeCompare(b.leadAt));
+
+  // ---- every firm that used the product ----
+  // First case, case count and modelled case revenue per firm. The cases table
+  // is already purged of internal/test actors.
+  const firstCase = new Map<string, string>();
+  const caseCount = new Map<string, number>();
+  const modelled = new Map<string, number>();
+  for (const c of (caseRows ?? []) as CaseRow[]) {
+    if (!c.company_hubspot_id || !c.submitted_date) continue;
+    const id = c.company_hubspot_id;
+    if (!firstCase.has(id) || c.submitted_date < firstCase.get(id)!) firstCase.set(id, c.submitted_date);
+    caseCount.set(id, (caseCount.get(id) ?? 0) + 1);
+    modelled.set(id, (modelled.get(id) ?? 0) + caseRevenue(c, settings.defaultCasePrice));
+  }
+  const subByCompany = new Map(subscribers.map((s) => [s.company, s]));
+  const customers: Customer[] = [];
+  for (const co of companies) {
+    const id = co.hubspot_id;
+    const sub = subByCompany.get(id);
+    const first = firstCase.get(id) ?? null;
+    const arrivedAt = [co.signed_up_at, first, sub?.subscribedAt].filter((x): x is string => !!x).sort()[0];
+    if (!arrivedAt) continue;
+    const kind: CustomerKind = sub ? "subscription" : first ? "transactional" : "signup";
+    // Stripe states a transactional firm's cash, including $0 for a refunded
+    // one; only a firm Stripe has never billed is priced per case.
+    const cash = facts.ready && facts.inStripe.has(id)
+      ? [...(facts.byCompanyMonth.get(id)?.values() ?? [])].reduce((a, b) => a + b, 0)
+      : modelled.get(id) ?? 0;
+    const monthsActive = Math.max(1, (now.getTime() - Date.parse(first ?? arrivedAt)) / (30 * DAY));
+    const { lead, source } = sub ? { lead: sub.leadAt, source: sub.source } : attribute(id, arrivedAt);
+    customers.push({
+      company: id, firm: co.name ?? sub?.firm ?? id, kind, leadAt: lead, arrivedAt, source,
+      monthly: kind === "subscription" ? sub!.plan : kind === "transactional" ? cash / monthsActive : 0,
+      revenueToDate: kind === "subscription" ? cash : kind === "transactional" ? cash : 0,
+      cases: caseCount.get(id) ?? 0,
+      preSwitch: sub ? sub.preSwitch : lead < FIRST_COHORT,
+    });
+  }
+  // Subscribers Stripe knows but HubSpot does not (no company row).
+  for (const s of subscribers) {
+    if (customers.some((c) => c.company === s.company)) continue;
+    customers.push({
+      company: s.company, firm: s.firm, kind: "subscription", leadAt: s.leadAt, arrivedAt: s.subscribedAt, source: s.source,
+      monthly: s.plan, revenueToDate: 0, cases: 0, preSwitch: s.preSwitch,
+    });
+  }
+  customers.sort((a, b) => a.leadAt.localeCompare(b.leadAt));
 
   const mqlsByMonth = new Map<string, number>();
   for (const d of sales) mqlsByMonth.set(monthKey(d.hs_created_at), (mqlsByMonth.get(monthKey(d.hs_created_at)) ?? 0) + 1);
@@ -267,6 +358,7 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     grossMargin: settings.grossMarginPct / 100,
     months,
     subscribers,
+    customers,
     newSubscriberMrr,
     newSubscribers,
     activeSubscribers,
