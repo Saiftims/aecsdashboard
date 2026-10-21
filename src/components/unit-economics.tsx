@@ -7,6 +7,7 @@ import {
   type Column,
 } from "@/components/ui";
 import type { LeadSource, UnitEconomicsSnapshot } from "@/lib/unit-economics";
+import type { ObservedChurn } from "@/lib/observed-churn";
 
 type Bands = [number, number, number, number];
 
@@ -113,10 +114,11 @@ function NumberInput({ label, value: v, onChange, hint }: {
   );
 }
 
-export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
+export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot; observed: ObservedChurn | null }) {
   const defaultMargin = String(Math.round(snap.grossMargin * 100));
   const [marginS, setMargin] = useState(defaultMargin);
-  const [focus, setFocus] = useState("base");
+  const hasObserved = !!observed && observed.exposure[3] > 0;
+  const [focus, setFocus] = useState(hasObserved ? "observed" : "base");
   const [attr, setAttr] = useState<Attribution>("likely");
   const [custom, setCustom] = useState<string[]>(["10", "5", "3", "2"]);
   const [subSort, setSubSort] = useState<SubSort>("renews");
@@ -129,8 +131,11 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
   const paidSet = PAID[attr];
 
   const customBands = custom.map((c, i) => num(c, [10, 5, 3, 2][i])) as Bands;
-  const scenarios = [...PRESETS, { key: "custom", label: "Custom", bands: customBands }]
-    .map((sc) => ({ ...sc, s: survival(sc.bands) }));
+  const scenarios = [
+    ...(hasObserved && observed ? [{ key: "observed", label: "Observed", bands: observed.bands }] : []),
+    ...PRESETS,
+    { key: "custom", label: "Custom", bands: customBands },
+  ].map((sc) => ({ ...sc, s: survival(sc.bands) }));
   const focusIdx = Math.max(0, scenarios.findIndex((s) => s.key === focus));
   const active = scenarios[focusIdx];
 
@@ -277,20 +282,41 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       </Card>
 
       <Card>
-        <CardHeader title="All months under each churn assumption" />
+        <CardHeader title="All months under each churn assumption"
+          action={hasObserved && observed ? (
+            <span>Observed = {observed.firms} subscribers on the retention chart above</span>
+          ) : null} />
         <Table
           headers={SCENARIO_HEADERS}
           rowClassName={(i) => (i === focusIdx ? "bg-blue-50 dark:bg-blue-950/30" : undefined)}
           rows={scenarios.map((sc) => {
             const ltv = value(total.contribution, sc.s, HORIZON);
+            const isObs = sc.key === "observed" && observed;
             return [
-              <span key="l" className="font-medium">{sc.label}</span>,
-              sc.bands.map((b) => `${b}%`).join(" / "), `${Math.round(sc.s[12] * 100)}%`,
+              <Cell key="l" sub={isObs ? "measured from subscription cohorts" : undefined}>
+                <span className="font-medium">{sc.label}</span>
+              </Cell>,
+              <Cell key="b" sub={isObs
+                ? `${observed.churned.slice(0, 3).map((n, i) => `${n}/${observed.exposure[i]}`).join(" · ")} · tail ${observed.churned[3]}/${observed.exposure[3]} firm-months`
+                : undefined}>
+                {sc.bands.map((b) => `${b}%`).join(" / ")}
+              </Cell>,
+              `${Math.round(sc.s[12] * 100)}%`,
               usd(value(total.contribution, sc.s, 12)), usd(ltv), ratio(ltv, total.cac),
               mo(payback(total.cac, total.contribution, sc.s)),
             ];
           })}
         />
+        {hasObserved && observed ? (
+          <Note>
+            Observed churn is the subscription cohorts above, pooled: of every subscriber still on a plan at the
+            previous month, the share gone the next ({observed.churned[0]} of {observed.exposure[0]} by month 1,{" "}
+            {observed.churned[1]} of {observed.exposure[1]} by month 2, {observed.churned[2]} of {observed.exposure[2]} by
+            month 3). No cohort is older than three months, so the M4+ tail is the pooled rate over all{" "}
+            {observed.exposure[3]} observed firm-months ({observed.bands[3]}%/mo) - a small sample that will move as
+            cohorts age. The presets stay as sensitivity checks.
+          </Note>
+        ) : null}
       </Card>
 
       <Card>
