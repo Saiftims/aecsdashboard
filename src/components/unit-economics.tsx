@@ -225,7 +225,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="CAC, fully loaded" value={usd(total.cac)} tone="warn"
-          sub={`${usd(total.adCac)} ads + ${usd(total.teamCac)} sales team`} />
+          sub={`${usd(total.adCac)} ads + ${usd(total.teamCac)} people (AE ${usd(snap.aeCost)}/mo + CS ${usd(snap.csCost)}/mo)`} />
         <Stat label={`LTV, fully loaded · ${active.label}`} value={usd(total.ltv)}
           sub={`${usd(total.plan)}/mo average per paying firm · ${Math.round(margin * 100)}% margin`} />
         <Stat label="LTV : CAC" value={ratio(total.ltv, total.cac)}
@@ -247,7 +247,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
             </label>
           } />
         <Grid
-          headers={["Month", "Firms signed up", "Ad spend", "Meta leads", "Cost / lead", "Sales team",
+          headers={["Month", "Firms signed up", "Ad spend", "Meta leads", "Cost / lead", "AE + CS cost",
             basis === "started" ? "Of which from earlier months' leads" : "Won from this month's leads",
             "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "LTV, fully loaded", "LTV : CAC", "Payback"]}
           left={2}
@@ -280,7 +280,8 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           counts here too.
           {basis === "started"
             ? " Paying, CAC and LTV run on those same firms, so a month's ad spend is set against firms that started that month even when their lead came in earlier - most take weeks to convert, so the latest month flatters itself and the previous one is undersold. Switch the basis to charge each firm to the month its lead came in."
-            : " Paying, CAC and LTV run on \u201cwon from this month\u2019s leads\u201d, which dates each firm back to the month its lead came in: that month\u2019s ad spend over its paid-sourced paying firms plus the sales team cost over all of its paying firms. The two counts differ because most firms take weeks to convert."}
+            : " Paying, CAC and LTV run on \u201cwon from this month\u2019s leads\u201d, which dates each firm back to the month its lead came in: that month\u2019s ad spend over its paid-sourced paying firms plus the people cost over all of its paying firms. The two counts differ because most firms take weeks to convert."}
+          {` CAC, fully loaded = ad spend ÷ paid-sourced paying firms + (AE ${usd(snap.aeCost)}/mo + CS ${usd(snap.csCost)}/mo, prorated) ÷ all paying firms.`}
           {" "}Avg $/mo is the billed plan for subscribers and the per-case cash run rate for transactional firms
           (Stripe cash where Stripe knows the firm, else $250 a case).
           LTV is lifetime gross margin on that under the selected churn, capped at {HORIZON / 12} years. A month keeps
@@ -387,9 +388,10 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       </Card>
 
       <p className="text-xs text-zinc-500">
-        Subscriptions only: per-case charges and expert sign-offs on top would shorten payback. The sales team
-        cost is {usd(snap.teamCost)}/mo (customer success is not acquisition). Ad spend comes from Meta; sales
-        team cost and margin are set in Settings. Live billed MRR is {usd(snap.liveMrr)} across{" "}
+        Per-case charges and expert sign-offs on top of plans would shorten payback. The people cost in CAC is{" "}
+        {usd(snap.teamCost)}/mo - the account executive at {usd(snap.aeCost)}/mo plus customer success at{" "}
+        {usd(snap.csCost)}/mo, counted because the CSM runs demos and owns the book. Ad spend comes from Meta; both
+        salaries and the margin are set in Settings. Live billed MRR is {usd(snap.liveMrr)} across{" "}
         {snap.activeSubscribers} paying subscribers.
       </p>
     </div>

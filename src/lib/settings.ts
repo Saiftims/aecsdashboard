@@ -28,10 +28,14 @@ export interface GtmSettings {
    * account. A month missing here falls back to monthlyAdSpend, prorated. */
   adSpendByMonth: Record<string, number>;
   adLeadSharePct: number;
-  /** Monthly SALES team cost (AEs only; customer success is not acquisition),
-   * spread over every new subscriber for the fully loaded CAC. Executive-only:
-   * never render it to a rep. */
+  /** Monthly account-executive cost ($3,500/mo on 2026-10-21), spread over
+   * every new paying customer for the fully loaded CAC. Executive-only: never
+   * render it to a rep. */
   monthlyTeamCost: number;
+  /** Monthly customer-success cost. Owner (2026-10-21) counts it in CAC: the
+   * CSM runs the demos and owns the whole book, so it is acquisition here.
+   * $60k/yr = $5,000/mo. */
+  monthlyCsCost: number;
   grossMarginPct: number;
   /** Per-channel daily targets. Reference only since the activity target above
    * replaced them - nothing is measured against these. */
@@ -74,6 +78,7 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4810 },
   adLeadSharePct: 95,
   monthlyTeamCost: 3500,
+  monthlyCsCost: 5000,
   grossMarginPct: 93,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
@@ -122,6 +127,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   ad_spend_by_month: "adSpendByMonth",
   ad_lead_share_pct: "adLeadSharePct",
   monthly_team_cost: "monthlyTeamCost",
+  monthly_cs_cost: "monthlyCsCost",
   gross_margin_pct: "grossMarginPct",
   daily_calls_target: "dailyCallsTarget",
   daily_emails_target: "dailyEmailsTarget",
@@ -166,6 +172,7 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.monthlyAdSpend = Number.isFinite(Number(out.monthlyAdSpend)) ? Number(out.monthlyAdSpend) : 7500;
   out.adLeadSharePct = Number.isFinite(Number(out.adLeadSharePct)) ? Number(out.adLeadSharePct) : 95;
   out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 3500;
+  out.monthlyCsCost = Number.isFinite(Number(out.monthlyCsCost)) ? Number(out.monthlyCsCost) : 5000;
   out.grossMarginPct = Number(out.grossMarginPct) > 0 ? Number(out.grossMarginPct) : 93;
   if (typeof out.adSpendByMonth === "string") {
     try { out.adSpendByMonth = JSON.parse(out.adSpendByMonth); } catch { out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth; }
