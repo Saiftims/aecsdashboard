@@ -246,49 +246,71 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
               </select>
             </label>
           } />
-        <Grid
-          headers={["Month", "Firms signed up", "Ad spend", "Meta leads", "Cost / lead", "Sales & CS salaries",
-            basis === "started" ? "Of which from earlier months' leads" : "Won from this month's leads",
-            "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "LTV, fully loaded", "LTV : CAC", "Payback"]}
-          left={2}
-          rows={cohortRows.map((c) => [
-            c.name,
-            <span key="arrived">
-              <span className="text-base font-semibold">{c.arrived.length}</span>
-              <span className="block text-[11px] font-normal text-zinc-400">{kindsText(kindCount(c.arrived))}</span>
-            </span>,
-            usd(c.spend) + (c.spendSource === "planned" ? " planned" : c.spendSource === "ledger" ? " (typed)" : ""),
-            c.adLeads === null ? "—" : String(c.adLeads),
-            c.adLeads ? usd(c.spend / c.adLeads) : "—",
-            <span key="team" title={"peopleAnnual" in c ? `${usd(c.peopleAnnual)}/yr in force` : undefined}>{usd(c.teamCost)}</span>,
-            basis === "started"
-              ? String(c.arrived.filter((x) => x.leadAt.slice(0, 7) < (c.name === "All months" ? "2026-07" : x.arrivedAt.slice(0, 7))).length)
-              : <span key="custs">
-                {c.fromLeads.length}
-                <span className="block text-[11px] font-normal text-zinc-400">{kindsText(kindCount(c.fromLeads))}</span>
-              </span>,
-            String(c.paying), String(c.paid),
-            usd(c.cac), c.paying ? `${usd(c.plan)}/mo` : "—",
-            usd(c.ltv), ratio(c.ltv, c.cac), mo(c.payback),
-          ])}
-          highlight={-1} strong={cohortRows.length - 1}
-        />
-        <p className="px-4 pb-3 pt-1 text-xs text-zinc-400">
-          Every firm that has used the product is here - on a plan, paying per case, or signed up and yet to send a
-          case. &ldquo;Firms signed up&rdquo; is how many started in that calendar month (first app signup, first case
-          or plan, whichever came first) - a firm that bought a plan through Stripe without ever signing into the app
-          counts here too.
+        <table className="w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-[14%]" /><col className="w-[15%]" /><col className="w-[10%]" /><col className="w-[9%]" />
+            <col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[8%]" /><col className="w-[9%]" />
+            <col className="w-[7%]" /><col className="w-[7%]" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-zinc-200 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+              {[["Month", true], ["Firms signed up", true], ["Ad spend", false], ["Cost / lead", false], ["Paying", false],
+                ["CAC", false], ["Avg $/mo", false], ["LTV", false], ["LTV : CAC", false], ["Payback", false]]
+                .map(([h, l]) => (
+                  <th key={String(h)} className={clsx("px-3 py-2 font-medium", l ? "text-left" : "text-right")}>{String(h)}</th>
+                ))}
+            </tr>
+          </thead>
+          <tbody>
+            {cohortRows.map((c, i) => {
+              const last = i === cohortRows.length - 1;
+              const sub = "block text-[11px] font-normal leading-tight text-zinc-400";
+              return (
+                <tr key={c.name} className={clsx("border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800/60",
+                  last && "bg-zinc-50 font-semibold dark:bg-zinc-900/40")}>
+                  <td className="px-3 py-2.5">
+                    {"label" in c ? c.label : c.name}
+                    {"mature" in c && !c.mature ? <span className={sub}>still converting</span> : null}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className="text-base font-semibold">{c.arrived.length}</span>
+                    <span className={sub}>{kindsText(kindCount(c.arrived))}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    {usd(c.spend)}
+                    {c.spendSource !== "meta" ? <span className={sub}>{c.spendSource === "planned" ? "planned" : "typed"}</span> : null}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    {c.adLeads ? usd(c.spend / c.adLeads) : "—"}
+                    {c.adLeads ? <span className={sub}>{c.adLeads} leads</span> : null}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    {c.paying}
+                    <span className={sub}>{c.paid} from ads</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{usd(c.cac)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{c.paying ? usd(c.plan) : "—"}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{usd(c.ltv)}</td>
+                  <td className={clsx("px-3 py-2.5 text-right tabular-nums",
+                    Number.isFinite(c.ltv / c.cac) && (c.ltv / c.cac >= 3 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"))}>
+                    {ratio(c.ltv, c.cac)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{mo(c.payback)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p className="px-4 pb-3 pt-2 text-xs text-zinc-400">
+          Firms signed up = every firm that started using the product that month (first app signup, first case or
+          plan), whether on a plan, paying per case, or signed up with no case yet.
           {basis === "started"
-            ? " Paying, CAC and LTV run on those same firms, so a month's ad spend is set against firms that started that month even when their lead came in earlier - most take weeks to convert, so the latest month flatters itself and the previous one is undersold. Switch the basis to charge each firm to the month its lead came in."
-            : " Paying, CAC and LTV run on \u201cwon from this month\u2019s leads\u201d, which dates each firm back to the month its lead came in: that month\u2019s ad spend over its paid-sourced paying firms plus the people cost over all of its paying firms. The two counts differ because most firms take weeks to convert."}
-          {" CAC, fully loaded = ad spend ÷ paid-sourced paying firms + that month's sales & CS salaries (the annual figure in force ÷ 12, prorated) ÷ all paying firms."}
-          {" "}Avg $/mo is the billed plan for subscribers and the per-case cash run rate for transactional firms
-          (Stripe cash where Stripe knows the firm, else $250 a case).
-          LTV is lifetime gross margin on that under the selected churn, capped at {HORIZON / 12} years. A month keeps
-          converting for weeks after it ends, so the latest month&apos;s CAC is still falling.
-          {fromMeta
-            ? " Ad spend and Meta leads are actuals from the Meta Ads account (synced every 6 hours); a month marked (typed) is the Settings ledger, used only when Meta has no data for it."
-            : " Ad spend is the Settings ledger; the Meta spend sync has not run yet."}
+            ? " CAC and LTV run on those firms; a month's ad spend is set against firms that started that month even when their lead came in earlier, so the latest month reads high until its leads convert."
+            : " CAC and LTV charge each firm to the month its lead came in, so a month's ad spend is set against the firms it actually produced."}
+          {" "}CAC, fully loaded = ad spend ÷ paying firms from ads + sales &amp; CS salaries ÷ all paying firms.
+          Avg $/mo is what a paying firm bills (plan, or per-case cash run rate); LTV is gross margin on that under
+          the selected churn.
+          {fromMeta ? " Ad spend is actual from the Meta Ads account." : " Ad spend is the Settings ledger; the Meta spend sync has not run yet."}
         </p>
       </Card>
 
