@@ -1,6 +1,6 @@
 import { caseRevenue } from "@/lib/queries";
 import { loadRevenueFacts } from "@/lib/revenue";
-import { loadSettings } from "@/lib/settings";
+import { loadSettings, peopleCostForMonth } from "@/lib/settings";
 import { subscribersReport, type SubscriberRow } from "@/lib/subscribers";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
@@ -97,10 +97,10 @@ export interface CohortMonth {
   mqls: number;
   /** Share of the month elapsed, for prorating monthly costs. */
   fraction: number;
-  /** AE + CS cost for the month, prorated; the two parts for display. */
+  /** Sales + CS salaries for the month (annual ledger / 12), prorated. */
   teamCost: number;
-  aeCost: number;
-  csCost: number;
+  /** The annual figure in force that month, for display. */
+  peopleAnnual: number;
   mature: boolean;
 }
 
@@ -114,10 +114,8 @@ export interface CohortMonth {
  * conference, outbound and pre-switch firms and reads CAC far too low. */
 export interface UnitEconomicsSnapshot {
   monthLabel: string;
-  /** Monthly people cost counted in CAC: AE + CS. */
+  /** Monthly people cost counted in CAC this month (sales + CS). */
   teamCost: number;
-  aeCost: number;
-  csCost: number;
   grossMargin: number;
   months: CohortMonth[];
   subscribers: Subscriber[];
@@ -381,18 +379,15 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
       adLeads: meta ? meta.leads : null,
       mqls: mqlsByMonth.get(key) ?? 0,
       fraction,
-      teamCost: (settings.monthlyTeamCost + settings.monthlyCsCost) * fraction,
-      aeCost: settings.monthlyTeamCost * fraction,
-      csCost: settings.monthlyCsCost * fraction,
+      teamCost: peopleCostForMonth(settings, key) * fraction,
+      peopleAnnual: peopleCostForMonth(settings, key) * 12,
       mature: now.getTime() - end.getTime() >= MATURE_AFTER_DAYS * DAY,
     });
   }
 
   return {
     monthLabel: now.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
-    teamCost: settings.monthlyTeamCost + settings.monthlyCsCost,
-    aeCost: settings.monthlyTeamCost,
-    csCost: settings.monthlyCsCost,
+    teamCost: peopleCostForMonth(settings, now.toISOString().slice(0, 7)),
     grossMargin: settings.grossMarginPct / 100,
     months,
     subscribers,

@@ -28,14 +28,14 @@ export interface GtmSettings {
    * account. A month missing here falls back to monthlyAdSpend, prorated. */
   adSpendByMonth: Record<string, number>;
   adLeadSharePct: number;
-  /** Monthly account-executive cost ($3,500/mo on 2026-10-21), spread over
-   * every new paying customer for the fully loaded CAC. Executive-only: never
-   * render it to a rep. */
+  /** Fallback monthly people cost for a month before the ledger below starts.
+   * Executive-only: never render it to a rep. */
   monthlyTeamCost: number;
-  /** Monthly customer-success cost. Owner (2026-10-21) counts it in CAC: the
-   * CSM runs the demos and owns the whole book, so it is acquisition here.
-   * $60k/yr = $5,000/mo. */
-  monthlyCsCost: number;
+  /** ANNUAL salary bill of the people counted in CAC (AE + CS - the CSM runs
+   * the demos and owns the book), keyed by the first month each figure
+   * applies and carried forward until the next entry. Owner, 2026-10-21:
+   * "in july it was only 60k/year, in aug until today it was 85k/year". */
+  peopleCostByMonth: Record<string, number>;
   grossMarginPct: number;
   /** Per-channel daily targets. Reference only since the activity target above
    * replaced them - nothing is measured against these. */
@@ -77,8 +77,8 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   monthlyAdSpend: 7500,
   adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4810 },
   adLeadSharePct: 95,
-  monthlyTeamCost: 3500,
-  monthlyCsCost: 5000,
+  monthlyTeamCost: 5000,
+  peopleCostByMonth: { "2026-07": 60000, "2026-08": 85000 },
   grossMarginPct: 93,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
@@ -127,7 +127,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   ad_spend_by_month: "adSpendByMonth",
   ad_lead_share_pct: "adLeadSharePct",
   monthly_team_cost: "monthlyTeamCost",
-  monthly_cs_cost: "monthlyCsCost",
+  people_cost_by_month: "peopleCostByMonth",
   gross_margin_pct: "grossMarginPct",
   daily_calls_target: "dailyCallsTarget",
   daily_emails_target: "dailyEmailsTarget",
@@ -171,13 +171,17 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.monthlyRevenueTarget = Number(out.monthlyRevenueTarget) || 18000;
   out.monthlyAdSpend = Number.isFinite(Number(out.monthlyAdSpend)) ? Number(out.monthlyAdSpend) : 7500;
   out.adLeadSharePct = Number.isFinite(Number(out.adLeadSharePct)) ? Number(out.adLeadSharePct) : 95;
-  out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 3500;
-  out.monthlyCsCost = Number.isFinite(Number(out.monthlyCsCost)) ? Number(out.monthlyCsCost) : 5000;
+  out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 5000;
   out.grossMarginPct = Number(out.grossMarginPct) > 0 ? Number(out.grossMarginPct) : 93;
   if (typeof out.adSpendByMonth === "string") {
     try { out.adSpendByMonth = JSON.parse(out.adSpendByMonth); } catch { out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth; }
   }
   if (!out.adSpendByMonth || typeof out.adSpendByMonth !== "object") out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth;
+  if (typeof out.peopleCostByMonth === "string") {
+    try { out.peopleCostByMonth = JSON.parse(out.peopleCostByMonth); } catch { out.peopleCostByMonth = DEFAULT_SETTINGS.peopleCostByMonth; }
+  }
+  if (!out.peopleCostByMonth || typeof out.peopleCostByMonth !== "object") out.peopleCostByMonth = DEFAULT_SETTINGS.peopleCostByMonth;
+
   out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
   out.aeDailyCallsTarget = Number(out.aeDailyCallsTarget) || 50;
@@ -188,6 +192,16 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.dailyTasksTarget = Number(out.dailyTasksTarget) || 30;
   out.dashboardTimezone = String(out.dashboardTimezone || "America/Los_Angeles");
   return out;
+}
+
+/** Monthly people cost for a YYYY-MM month: the ledger entry in force (latest
+ * key at or before the month) divided by 12, else the flat fallback. */
+export function peopleCostForMonth(settings: GtmSettings, month: string): number {
+  const keys = Object.keys(settings.peopleCostByMonth).filter((k) => k <= month).sort();
+  const key = keys.at(-1);
+  if (!key) return settings.monthlyTeamCost;
+  const annual = Number(settings.peopleCostByMonth[key]);
+  return Number.isFinite(annual) ? annual / 12 : settings.monthlyTeamCost;
 }
 
 export async function saveSetting(key: string, value: unknown, updatedBy?: string) {
