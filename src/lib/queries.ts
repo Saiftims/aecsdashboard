@@ -1156,6 +1156,10 @@ export interface CohortRow {
   subscribers: number;
   transactional: number;
   retention: (number | null)[]; // Month 0..N (% retained), null if not elapsed
+  /** The same curve over only the cohort's subscribers / only its transactional
+   * firms, so the chart can show one billing model at a time (owner,
+   * 2026-10-21: subscriptions by default, transactional behind a toggle). */
+  retentionBy: Record<LogoBilling, (number | null)[]>;
   members: CohortMember[];
 }
 
@@ -1600,18 +1604,26 @@ export async function retentionReport(): Promise<RetentionReport> {
         lastCaseAt: f.cases.length ? new Date(f.cases[f.cases.length - 1]).toISOString() : null,
       };
     });
-    const retention: (number | null)[] = [];
-    for (let m = 0; m < monthCols; m++) {
-      const elapsed = members.filter((x) => x.retained.length > m);
-      if (!elapsed.length) { retention.push(null); continue; }
-      retention.push(Math.round((elapsed.filter((x) => x.retained[m]).length / elapsed.length) * 100));
-    }
+    const curve = (subset: CohortMember[]): (number | null)[] => {
+      const out: (number | null)[] = [];
+      for (let m = 0; m < monthCols; m++) {
+        const elapsed = subset.filter((x) => x.retained.length > m);
+        if (!elapsed.length) { out.push(null); continue; }
+        out.push(Math.round((elapsed.filter((x) => x.retained[m]).length / elapsed.length) * 100));
+      }
+      return out;
+    };
     const label = new Date(`${key}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
     return {
       key, label, firms: list.length,
       subscribers: list.filter((f) => f.billing === "subscription").length,
       transactional: list.filter((f) => f.billing === "transactional").length,
-      retention, members: members.sort((a, b) => a.name.localeCompare(b.name)),
+      retention: curve(members),
+      retentionBy: {
+        subscription: curve(members.filter((x) => x.billing === "subscription")),
+        transactional: curve(members.filter((x) => x.billing === "transactional")),
+      },
+      members: members.sort((a, b) => a.name.localeCompare(b.name)),
     };
   });
 

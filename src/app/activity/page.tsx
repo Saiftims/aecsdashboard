@@ -2,11 +2,12 @@ import { redirect } from "next/navigation";
 import {
   DailyActivityChart, FunnelChart, LeadSourceChart, MonthlyBarChart, MonthlyMqlChart,
   MonthlyNewFirmsChart,
-  MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
+  MonthlyRevenueChart, RevenueRetentionChart,
 } from "@/components/charts";
 import {
   Badge, Card, CardBody, CardHeader, Note, PageHeader, Section, Stat, StatGrid, Table, TextLink,
 } from "@/components/ui";
+import { LogoRetention } from "@/components/logo-retention";
 import { UnitEconomics } from "@/components/unit-economics";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
 import {
@@ -389,44 +390,11 @@ export default async function ActivityPage() {
       </Section>
 
       <Section title="Cohort retention — still a customer">
-        <Card>
-          <CardHeader
-            title="Retention curve (% of cohort still a customer)"
-            action={billing.partialMonth ? (
-              <Badge tone="yellow">
-                {billing.partialMonthLabel} is still running — whichever month
-                lands on it is understated
-              </Badge>
-            ) : null}
-          />
-          <CardBody>
-            <RetentionChart cohorts={retention.cohorts} monthCols={retention.monthCols} />
-          </CardBody>
-        </Card>
-        <Card className="mt-3">
-          <Table
-            headers={["Cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
-            rows={retention.cohorts.map((c) => [
-              <TextLink key="c" href={`/drill/cohort_${c.key}`} className="font-medium">
-                {c.label}
-              </TextLink>,
-              `${c.firms} · ${c.subscribers} sub · ${c.transactional} tx`,
-              ...c.retention.map((r) => (r === null ? "—" : `${r}%`)),
-            ])}
-          />
-        </Card>
-        <Note className="px-0 pb-0">
-          A subscriber is retained while the plan is live and churned the month they
-          cancel {"\u2014"} sending cases does not keep them, and skipping a month
-          does not lose them. A transactional firm is retained while it has submitted
-          a case in the last 90 days, and churned after 90 quiet days (not 30). Month
-          0 is always 100%. A subscription cohort starts the month they subscribed; a
-          transactional one the month of their first case. &ldquo;—&rdquo; = that
-          month hasn&apos;t elapsed yet.
-          {billing.partialMonth ? ` The column landing on ${billing.partialMonthLabel} is measured against an unfinished month.` : ""}{" "}
-          Firms marked Trial in HubSpot are excluded here and from the retention
-          charts below {"\u2014"} they never had a paying relationship to retain.
-        </Note>
+        <LogoRetention
+          cohorts={retention.cohorts}
+          monthCols={retention.monthCols}
+          partialMonthLabel={billing.partialMonth ? billing.partialMonthLabel : null}
+        />
       </Section>
 
       <Section title="Revenue retention — dollars kept, by first-revenue month">
