@@ -212,7 +212,7 @@ export async function syncMetaLeads(sinceMs?: number) {
     hubspot_push_note: `pre-existing; not pushed (went live ${PUSH_SINCE.slice(0, 10)})`,
   }).is("hubspot_pushed_at", null).lt("created_time", PUSH_SINCE));
   const { data: pending } = await sb.from("meta_leads")
-    .select("leadgen_id, created_time, form_name, ad_name, campaign_name, full_name, email, phone, company, answers")
+    .select("leadgen_id, created_time, form_name, ad_name, adset_name, campaign_name, full_name, email, phone, company, answers")
     .is("hubspot_pushed_at", null).eq("is_test", false)
     .order("created_time", { ascending: true }).limit(40);
   // The FlyTech sheet says whether a lead has been qualified (form tab) or
@@ -353,8 +353,24 @@ async function readMeta(sinceMs: number | undefined, rows: Record<string, unknow
 
 interface PendingLead {
   leadgen_id: string; created_time: string; form_name: string | null; ad_name: string | null;
+  adset_name?: string | null;
   campaign_name: string | null; full_name: string | null; email: string | null; phone: string | null;
   company: string | null; answers: Record<string, string>;
+}
+
+/** The Meta placement a lead came from, as HubSpot properties on BOTH the
+ * contact and the deal (owner, 2026-10-21: "a property tag on the meta leads
+ * with the ad campaign name, for example rotator cuff"). All leads sit in
+ * the one campaign (FlyTech_Leads), so the AD name is the tag that means
+ * something - "SW Ad 3A - Rotator Cuff" - with the ad set and campaign
+ * alongside. First touch wins: a repeat submission never overwrites these. */
+export const META_PLACEMENT_PROPS = ["sw_meta_campaign", "sw_meta_adset", "sw_meta_ad"] as const;
+export function metaPlacementProps(lead: Pick<PendingLead, "campaign_name" | "adset_name" | "ad_name">): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (lead.campaign_name) out.sw_meta_campaign = lead.campaign_name;
+  if (lead.adset_name) out.sw_meta_adset = lead.adset_name;
+  if (lead.ad_name) out.sw_meta_ad = lead.ad_name;
+  return out;
 }
 
 interface PushResult {
@@ -370,7 +386,7 @@ const splitName = (full: string) => {
   return { first: parts.shift() ?? "", last: parts.join(" ") };
 };
 
-const CONTACT_PROPS = "email,hubspot_owner_id,firstname,lastname";
+const CONTACT_PROPS = "email,hubspot_owner_id,firstname,lastname,sw_meta_ad";
 
 async function readContact(id: string): Promise<HsObject | null> {
   try {
@@ -421,6 +437,7 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
         sw_lead_source: "meta_ads",
         ...(lead.form_name ? { sw_lead_source_detail: lead.form_name } : {}),
         ...(lead.campaign_name ? { sw_original_campaign: lead.campaign_name } : {}),
+        ...metaPlacementProps(lead),
       });
       if (created.skipped) return { error: true, note: "HubSpot writes disabled (HUBSPOT_APPLY)" };
       if (!created.ok) {
@@ -434,11 +451,15 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
         contactCreated = true;
         contact = { id: created.id!, properties: { email } } as HsObject;
       }
-    } else if (contact.properties.hubspot_owner_id !== ALEX_OWNER_ID) {
-      // HubSpot's FB integration leaves the contact on the default owner
-      // (Chris); the lead is Alex's. The sweep agrees because the stage is in
-      // ALEX_STAGES.
-      await hsUpdateProperties("contacts", contact.id, { hubspot_owner_id: ALEX_OWNER_ID });
+    } else {
+      // HubSpot's FB integration usually gets here first and leaves the
+      // contact on the default owner (Chris) with no placement: the lead is
+      // Alex's (the sweep agrees because the stage is in ALEX_STAGES), and
+      // the ad it came from is stamped once, on the first submission only.
+      await hsUpdateProperties("contacts", contact.id, {
+        ...(contact.properties.hubspot_owner_id !== ALEX_OWNER_ID ? { hubspot_owner_id: ALEX_OWNER_ID } : {}),
+        ...(contact.properties.sw_meta_ad ? {} : metaPlacementProps(lead)),
+      });
     }
 
     // Any deal already in the sales pipeline?
@@ -446,7 +467,7 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
     let existingDeal: HsObject | undefined;
     if (dealIds.length) {
       const read = await hsRequest<{ results: HsObject[] }>("POST", "/crm/v3/objects/deals/batch/read", {
-        inputs: dealIds.map((id) => ({ id })), properties: ["dealname", "dealstage", "pipeline", "createdate", "hubspot_owner_id"],
+        inputs: dealIds.map((id) => ({ id })), properties: ["dealname", "dealstage", "pipeline", "createdate", "hubspot_owner_id", "sw_meta_ad"],
       });
       existingDeal = read.results
         .filter((d) => (d.properties.pipeline ?? SALES_PIPELINE_ID) === SALES_PIPELINE_ID)
@@ -475,8 +496,14 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
       const stage = existingDeal.properties.dealstage ?? "";
       let ownerId = existingDeal.properties.hubspot_owner_id ?? null;
       let reassigned = "";
-      if (ALEX_STAGES.has(stage) && ownerId !== ALEX_OWNER_ID) {
-        await hsUpdateProperties("deals", existingDeal.id, { hubspot_owner_id: ALEX_OWNER_ID });
+      const reassign = ALEX_STAGES.has(stage) && ownerId !== ALEX_OWNER_ID;
+      await hsUpdateProperties("deals", existingDeal.id, {
+        ...(reassign ? { hubspot_owner_id: ALEX_OWNER_ID } : {}),
+        // A deal made by a rep or by the Calendly integration carries no
+        // placement; the first Meta submission we see supplies it.
+        ...(existingDeal.properties.sw_meta_ad ? {} : metaPlacementProps(lead)),
+      });
+      if (reassign) {
         ownerId = ALEX_OWNER_ID;
         reassigned = ", deal reassigned to Alex";
       }
@@ -494,6 +521,7 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
       dealstage: stage,
       hubspot_owner_id: ALEX_OWNER_ID,
       sw_lead_source: "meta_ads",
+      ...metaPlacementProps(lead),
     }, [{ toId: contact.id, associationTypeId: ASSOC.dealToContact }]);
     if (!deal.ok) return { contactId: contact.id, contactCreated, error: true, note: `deal create failed: ${deal.error ?? deal.skipped}` };
     await hsCreateObject("notes", { hs_timestamp: lead.created_time, hs_note_body: body },
