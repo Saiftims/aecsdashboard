@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Badge, Card, Stat } from "@/components/ui";
+import { Badge, Card, Empty, PageHeader, Pills, Stat, StatGrid, Table } from "@/components/ui";
 import { caseUiReport, UI_WINDOWS, viewFirms, type Ui, type UiFirm, type UiSort, type UiVerdict, type UiWindow } from "@/lib/case-ui";
 import { currentAppUser } from "@/lib/supabase/server";
 
@@ -36,21 +36,14 @@ function Split({ counts }: { counts: UiFirm["counts"] }) {
   );
 }
 
-function Pills<T extends string>({ value, options, param, other }: { value: T; options: { id: T; label: string }[]; param: string; other: Record<string, string> }) {
-  return (
-    <span className="inline-flex overflow-hidden rounded-md border border-zinc-200 text-xs dark:border-zinc-800">
-      {options.map((o) => {
-        const q = new URLSearchParams({ ...other, [param]: o.id }).toString();
-        const on = o.id === value;
-        return (
-          <Link key={o.id} href={`/product/ui?${q}`}
-            className={`px-2.5 py-1 ${on ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}>
-            {o.label}
-          </Link>
-        );
-      })}
-    </span>
-  );
+/** Link-based pill items for one query parameter, keeping the other one. */
+function pillItems<T extends string>(value: T, options: { id: T; label: string }[], param: string, other: Record<string, string>) {
+  return options.map((o) => ({
+    key: o.id,
+    label: o.label,
+    active: o.id === value,
+    href: `/product/ui?${new URLSearchParams({ ...other, [param]: o.id }).toString()}`,
+  }));
 }
 
 export default async function CaseUiPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -70,10 +63,10 @@ export default async function CaseUiPage({ searchParams }: { searchParams: Promi
 
   const FirmRow = ({ f }: { f: UiFirm }) => (
     <details className={`group border-b border-zinc-100 last:border-0 dark:border-zinc-800/60 ${f.verdict === "unseen" ? "opacity-75" : ""}`}>
-      <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/40">
+      <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-3 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
         <span className="w-3 text-xs text-zinc-400 transition-transform group-open:rotate-90">▶</span>
         <span className="min-w-0 flex-1">
-          <span className="font-medium">
+          <span className="font-medium text-zinc-800 dark:text-zinc-100">
             {f.companyId ? <Link href={`/firms/${f.companyId}`} className="hover:underline">{f.name}</Link> : f.name}
           </span>
           <span className="ml-2 text-xs text-zinc-500">
@@ -88,72 +81,61 @@ export default async function CaseUiPage({ searchParams }: { searchParams: Promi
         <span className="w-36 text-right"><VerdictBadge v={f.verdict} lastUi={f.lastUi} /></span>
       </summary>
       {f.cases.length > 0 && (
-        <div className="bg-zinc-50/60 px-4 pb-3 pt-1 dark:bg-zinc-900/30">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-zinc-400">
-                <th className="py-1 pl-7 font-medium">Case</th>
-                <th className="py-1 font-medium">Submitted</th>
-                <th className="py-1 font-medium">Last activity</th>
-                <th className="py-1 font-medium">Since launch</th>
-                <th className="py-1 text-right font-medium">UI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {f.cases.map((c) => (
-                <tr key={c.caseId} className="border-t border-zinc-100 dark:border-zinc-800/60">
-                  <td className="py-1.5 pl-7">
-                    <span className="font-medium">{c.name ?? "Untitled case"}</span>
-                    <span className="ml-2 font-mono text-[11px] text-zinc-400">{c.caseId.replace(/^case_/, "").slice(0, 8)}</span>
-                  </td>
-                  <td className="py-1.5 tabular-nums text-zinc-500">{dayOf(c.submitted)}</td>
-                  <td className="py-1.5 text-xs text-zinc-500" title={c.lastActivity ? `${when(c.lastActivity)} PT` : undefined}>{ago(c.lastActivity, now)}</td>
-                  <td className="py-1.5 text-xs text-zinc-500">
-                    {c.v2 ? <span className="text-emerald-600">{c.v2} new</span> : null}
-                    {c.v2 && c.v1 ? " · " : null}
-                    {c.v1 ? <span className="text-red-600">{c.v1} old</span> : null}
-                    {!c.v1 && !c.v2 ? <span className="text-zinc-400">not opened</span> : null}
-                    {c.staffLastUi ? <span className="ml-2 text-zinc-400">staff on {c.staffLastUi === "v1" ? "old" : "new"}</span> : null}
-                  </td>
-                  <td className="py-1.5 text-right"><VerdictBadge v={c.verdict} lastUi={c.lastUi} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bg-zinc-50/60 pb-2 pl-7 dark:bg-zinc-800/30">
+          <Table
+            dense
+            headers={["Case", "Submitted", "Last activity", "Since launch", { label: "UI", align: "right" }]}
+            rows={f.cases.map((c) => [
+              <span key="case">
+                <span className="font-medium">{c.name ?? "Untitled case"}</span>
+                <span className="ml-2 font-mono text-[11px] text-zinc-400">{c.caseId.replace(/^case_/, "").slice(0, 8)}</span>
+              </span>,
+              <span key="sub" className="tabular-nums text-zinc-500">{dayOf(c.submitted)}</span>,
+              <span key="last" className="text-xs text-zinc-500" title={c.lastActivity ? `${when(c.lastActivity)} PT` : undefined}>{ago(c.lastActivity, now)}</span>,
+              <span key="since" className="text-xs text-zinc-500">
+                {c.v2 ? <span className="text-emerald-600 dark:text-emerald-400">{c.v2} new</span> : null}
+                {c.v2 && c.v1 ? " · " : null}
+                {c.v1 ? <span className="text-red-600 dark:text-red-400">{c.v1} old</span> : null}
+                {!c.v1 && !c.v2 ? <span className="text-zinc-400">not opened</span> : null}
+                {c.staffLastUi ? <span className="ml-2 text-zinc-400">staff on {c.staffLastUi === "v1" ? "old" : "new"}</span> : null}
+              </span>,
+              <VerdictBadge key="ui" v={c.verdict} lastUi={c.lastUi} />,
+            ])}
+          />
         </div>
       )}
     </details>
   );
 
   return (
-    <div className="space-y-4">
-      <div>
-        <div className="text-xs text-zinc-500"><Link href="/product" className="hover:underline">Product</Link> › UI migration</div>
-        <h1 className="text-2xl font-bold">Old UI vs new UI</h1>
-        <p className="text-sm text-zinc-500">
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={<><Link href="/product" className="hover:underline">Product</Link> › UI migration</>}
+        title="Old UI vs new UI"
+        description={<>
           Every firm that has used the product and every case it has had, with the UI each was last worked in
           from PostHog&apos;s <code>case_ui</code> flag. The flag only exists since {dayOf(r.since + "T00:00:00Z")}, so a
           case nobody from the firm has opened since then reads &quot;not seen yet&quot; rather than old or new.
           {r.syncedAt ? ` Updated ${when(r.syncedAt)} PT.` : ""}
-        </p>
-      </div>
+        </>}
+      />
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-zinc-500">
-        <span className="flex items-center gap-2">Active <Pills value={window} options={UI_WINDOWS} param="active" other={{ sort }} /></span>
-        <span className="flex items-center gap-2">Sort <Pills value={sort} options={[{ id: "recent", label: "Most recent" }, { id: "status", label: "Old UI first" }]} param="sort" other={{ active: window }} /></span>
+        <span className="flex items-center gap-2">Active <Pills items={pillItems(window, UI_WINDOWS, "active", { sort })} /></span>
+        <span className="flex items-center gap-2">Sort <Pills items={pillItems(sort, [{ id: "recent", label: "Most recent" }, { id: "status", label: "Old UI first" }], "sort", { active: window })} /></span>
         <span className="ml-auto">{real.length} firm{real.length === 1 ? "" : "s"} · {shownCases.length} case{shownCases.length === 1 ? "" : "s"} active {windowLabel}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <StatGrid cols={5}>
         <Stat label="Firms on new UI" value={String(real.filter((f) => f.lastUi === "v2").length)} tone="good" sub="last activity was in v2" />
         <Stat label="Firms still on old UI" value={String(real.filter((f) => f.lastUi === "v1").length)} tone={real.some((f) => f.lastUi === "v1") ? "bad" : "good"} sub="last activity was in v1" />
         <Stat label="Firms not seen yet" value={String(real.filter((f) => f.verdict === "unseen").length)} sub="no case opened since launch" />
         <Stat label="Cases on new UI" value={String(n("new"))} sub={n("both") ? `+${n("both")} seen in both` : "customer activity since launch"} />
         <Stat label="Cases on old UI" value={String(n("old"))} tone={n("old") ? "warn" : undefined} sub={`${n("unseen")} not opened since launch`} />
-      </div>
+      </StatGrid>
 
       <Card>
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2 text-xs text-zinc-500 dark:border-zinc-800">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 px-4 py-2.5 text-xs text-zinc-500 dark:border-zinc-800">
           <span>{sort === "status" ? "Firms still on the old UI first, then mixed, then new, then not seen." : "Most recently active firms first."} Click a firm to see its cases.</span>
           <span className="flex items-center gap-3">
             <span className="flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> new</span>
@@ -163,11 +145,11 @@ export default async function CaseUiPage({ searchParams }: { searchParams: Promi
           </span>
         </div>
         {firms.length === 0
-          ? <p className="px-4 py-6 text-center text-sm text-zinc-500">No firm was active {windowLabel}.</p>
+          ? <Empty>No firm was active {windowLabel}.</Empty>
           : firms.map((f) => <FirmRow key={f.companyId ?? f.name} f={f} />)}
       </Card>
 
-      <p className="text-xs text-zinc-400">
+      <p className="text-xs leading-relaxed text-zinc-400 dark:text-zinc-500">
         A firm&apos;s UI is decided by its own people&apos;s activity; staff opening a case in the new UI does not move
         the firm, which is why a case an analyst is working can still read &quot;not seen yet&quot;. &quot;Active&quot; is the
         firm&apos;s latest customer activity in the app, signup or case submission.

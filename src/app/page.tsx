@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { FunnelChart } from "@/components/charts";
-import { Card, CardHeader, Stat } from "@/components/ui";
+import { Card, CardBody, CardHeader, PageHeader, Section, Stat, StatGrid } from "@/components/ui";
 import { leadsReport } from "@/lib/leads";
 import { execOverview } from "@/lib/queries";
 import { loadSettings } from "@/lib/settings";
@@ -23,11 +23,10 @@ export default async function ExecutivePage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Executive Overview</h1>
+      <PageHeader title="Executive overview" description="Sales, customers and usage at a glance. Click any tile for the list behind it." />
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Sales</h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <Section title="Sales">
+        <StatGrid cols={5}>
           {leads.ok ? (
             <Stat label="New leads (7d)" value={leads.leads.length} tone="good" href="/drill/leads_7d" />
           ) : (
@@ -61,12 +60,11 @@ export default async function ExecutivePage() {
             value={fmtMoney(kpis.mrr)}
             sub={`${kpis.subscriptionFirms} firm(s) on monthly plans`}
           />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Customers & Usage</h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <Section title="Customers & usage">
+        <StatGrid cols={5}>
           <Stat label="Customer firms" value={kpis.totalCustomerFirms} href="/firms" />
           <Stat
             label="New customers (month)"
@@ -83,21 +81,17 @@ export default async function ExecutivePage() {
           <Stat label="At risk" value={kpis.atRiskAccounts} tone={kpis.atRiskAccounts ? "bad" : "good"} href="/drill/cs_at_risk" />
           <Stat label="Churned" value={kpis.churnedAccounts} tone={kpis.churnedAccounts ? "bad" : "good"} href="/drill/cs_churned" />
           <Stat label="Avg cases / active firm" value={kpis.avgCasesPerActiveFirm} sub="last 30 days" />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader title="Sales funnel (MQL -> Closed Won)" />
-          <div className="p-4">
-            <FunnelChart data={funnel} />
-          </div>
+          <CardHeader title="Sales funnel" description="MQL to Closed Won, open pipeline" />
+          <CardBody><FunnelChart data={funnel} /></CardBody>
         </Card>
         <Card>
-          <CardHeader title="Post-sale funnel (Closed Won -> Healthy)" />
-          <div className="p-4">
-            <FunnelChart data={postSaleFunnel} />
-          </div>
+          <CardHeader title="Post-sale funnel" description="Closed Won to healthy account" />
+          <CardBody><FunnelChart data={postSaleFunnel} /></CardBody>
         </Card>
       </div>
     </div>

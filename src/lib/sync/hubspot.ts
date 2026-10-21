@@ -7,7 +7,7 @@ import {
 import { SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
 import { HS_COMMUNICATION_CHANNELS, channelFromText } from "@/lib/activity-channels";
 import { env } from "@/lib/env";
-import { supabaseService } from "@/lib/supabase/server";
+import { must, selectAll, supabaseService } from "@/lib/supabase/server";
 
 /** Interview/hiring candidates and staff that a connected HubSpot integration
  * keeps re-creating as deals (they default into "Demo Scheduled" and flood the
@@ -118,16 +118,30 @@ function parseMarker(body: string | null, key: string): string | null {
 }
 
 /** On full syncs, remove cache rows that no longer exist in HubSpot (records
- * deleted in the CRM must disappear from the dashboard too). */
+ * deleted in the CRM must disappear from the dashboard too).
+ *
+ * Reads the cached ids and deletes the missing ones in small batches rather
+ * than sending one `NOT IN (<every live id>)` filter: that filter travels in
+ * the request URL, and with thousands of ids it is too long to be accepted -
+ * a failure the old version only logged, so the purge never ran and nobody
+ * knew. Throws on a failed batch. Returns how many rows went. */
 async function purgeStale(
   sb: ReturnType<typeof supabaseService>,
   table: string,
   keepIds: string[],
-) {
-  if (!keepIds.length) return;
-  const list = `(${keepIds.map((id) => `"${id}"`).join(",")})`;
-  const { error } = await sb.from(table).delete().not("hubspot_id", "in", list);
-  if (error) console.error(`purgeStale ${table}: ${error.message}`);
+): Promise<number> {
+  if (!keepIds.length) return 0;
+  const keep = new Set(keepIds);
+  const cached = await selectAll<{ hubspot_id: string }>(table, "hubspot_id");
+  const gone = cached.map((r) => r.hubspot_id).filter((id) => !keep.has(id));
+  const BATCH = 200;
+  for (let i = 0; i < gone.length; i += BATCH) {
+    await must(
+      `purgeStale ${table} batch ${i / BATCH + 1}/${Math.ceil(gone.length / BATCH)}`,
+      sb.from(table).delete().in("hubspot_id", gone.slice(i, i + BATCH)),
+    );
+  }
+  return gone.length;
 }
 
 /** Incremental syncs only see records that still exist, so a deal deleted in
@@ -138,8 +152,11 @@ async function purgeStale(
  * table is still only reconciled on a full sync. */
 async function purgeDeletedRecentDeals(sb: ReturnType<typeof supabaseService>, days = 14) {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const { data, error } = await sb.from("deals").select("hubspot_id").gte("hs_created_at", since);
-  if (error || !data?.length) return 0;
+  const { data } = await must(
+    "purgeDeletedRecentDeals read",
+    sb.from("deals").select("hubspot_id").gte("hs_created_at", since),
+  );
+  if (!data?.length) return 0;
   const ids = data.map((d) => d.hubspot_id as string);
   const alive = new Set<string>();
   for (let i = 0; i < ids.length; i += 100) {
@@ -151,11 +168,7 @@ async function purgeDeletedRecentDeals(sb: ReturnType<typeof supabaseService>, d
   }
   const gone = ids.filter((id) => !alive.has(id));
   if (!gone.length) return 0;
-  const { error: delErr } = await sb.from("deals").delete().in("hubspot_id", gone);
-  if (delErr) {
-    console.error(`purgeDeletedRecentDeals: ${delErr.message}`);
-    return 0;
-  }
+  await must("purgeDeletedRecentDeals delete", sb.from("deals").delete().in("hubspot_id", gone));
   return gone.length;
 }
 
@@ -175,23 +188,31 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   const assocKnown = makeAssocKnown(mode, sinceMs);
 
   // ---- owners (small list; keeps per-rep reporting able to name people) ----
+  let owners: Awaited<ReturnType<typeof hsListOwners>> = [];
   try {
-    const owners = await hsListOwners();
+    owners = await hsListOwners();
     stats.owners = owners.length;
-    if (owners.length) {
-      await sb.from("crm_owners").upsert(owners, { onConflict: "owner_id" });
-    }
   } catch (e) {
-    // A roster hiccup must not fail the whole sync.
+    // A roster READ hiccup must not fail the whole sync; a failed write below
+    // does, like every other cache write.
     console.error("owner sync:", e instanceof Error ? e.message : e);
   }
+  if (owners.length) {
+    await must("crm_owners upsert", sb.from("crm_owners").upsert(owners, { onConflict: "owner_id" }));
+  }
+
+  // Every cache write below goes through `must`. Before that these upserts
+  // were bare `await`s and supabase-js resolves a failed statement instead of
+  // rejecting it, so `?full=1` reported success while persisting nothing - the
+  // documented "full sync does not persist upserts" bug. A failed write now
+  // throws, the run is recorded as an error and the route answers 500.
 
   // ---- companies ----
   const companies = await fetchObjects("companies", COMPANY_PROPS);
   stats.companies = companies.length;
   fetchedIds.companies = companies.map((c) => c.id);
   if (companies.length) {
-    await sb.from("companies").upsert(
+    await must("companies upsert", sb.from("companies").upsert(
       companies.map((c) => ({
         hubspot_id: c.id,
         name: c.properties.name,
@@ -201,7 +222,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
         updated_at: new Date().toISOString(),
       })),
       { onConflict: "hubspot_id" },
-    );
+    ));
   }
 
   // ---- contacts (associations to companies come from the company prop set by
@@ -210,7 +231,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   stats.contacts = contacts.length;
   fetchedIds.contacts = contacts.map((c) => c.id);
   if (contacts.length) {
-    await sb.from("contacts").upsert(
+    await must("contacts upsert", sb.from("contacts").upsert(
       contacts.map((c) => ({
         hubspot_id: c.id,
         email: c.properties.email,
@@ -224,7 +245,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
         updated_at: new Date().toISOString(),
       })),
       { onConflict: "hubspot_id" },
-    );
+    ));
   }
 
   // ---- deals ----
@@ -242,7 +263,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
   stats.deals = deals.length;
   fetchedIds.deals = deals.map((d) => d.id);
   if (deals.length) {
-    await sb.from("deals").upsert(
+    await must("deals upsert", sb.from("deals").upsert(
       deals.map((d) => ({
         hubspot_id: d.id,
         name: d.properties.dealname,
@@ -264,7 +285,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
         updated_at: new Date().toISOString(),
       })),
       { onConflict: "hubspot_id" },
-    );
+    ));
   }
 
   // ---- engagements (always full: volumes are small; search API not available
@@ -288,7 +309,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
     stats[kind] = rows.length;
     activityIds.push(...rows.map((r) => r.id));
     if (!rows.length) continue;
-    await sb.from("activities").upsert(
+    await must(`activities upsert (${kind})`, sb.from("activities").upsert(
       rows.map((a) => {
         const body =
           a.properties.hs_call_body ?? a.properties.hs_meeting_body ??
@@ -333,23 +354,21 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
         };
       }),
       { onConflict: "hubspot_id" },
-    );
+    ));
   }
 
   // Engagements are always fetched in full, so stale ones can always be purged
   // (unless a kind was skipped for missing scope - then the id list is partial);
   // core objects only on full mode (incremental fetches are partial by design).
-  if (!engagementScopeMissing) await purgeStale(sb, "activities", activityIds);
+  // A purge failure throws: the upserts above are already committed, so the
+  // run is marked error and retried, and the error names the table and batch.
+  if (!engagementScopeMissing) stats.activitiesPurged = await purgeStale(sb, "activities", activityIds);
   if (mode === "full") {
-    await purgeStale(sb, "deals", fetchedIds.deals ?? []);
-    await purgeStale(sb, "contacts", fetchedIds.contacts ?? []);
-    await purgeStale(sb, "companies", fetchedIds.companies ?? []);
+    stats.dealsPurged = await purgeStale(sb, "deals", fetchedIds.deals ?? []);
+    stats.contactsPurged = await purgeStale(sb, "contacts", fetchedIds.contacts ?? []);
+    stats.companiesPurged = await purgeStale(sb, "companies", fetchedIds.companies ?? []);
   } else {
-    try {
-      stats.deletedDealsPurged = await purgeDeletedRecentDeals(sb);
-    } catch (e) {
-      console.error("purgeDeletedRecentDeals:", e instanceof Error ? e.message : e);
-    }
+    stats.deletedDealsPurged = await purgeDeletedRecentDeals(sb);
   }
 
   return stats;

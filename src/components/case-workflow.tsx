@@ -4,7 +4,7 @@
  * and a manual add-case form. Writes to /api/cases (Supabase, audited). */
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Badge, Button, Card, CardHeader, inputCls } from "@/components/ui";
+import { Badge, Button, Callout, Card, CardBody, CardHeader, Empty, Field, inputCls } from "@/components/ui";
 
 export interface CaseItem {
   case_id: string;
@@ -61,11 +61,10 @@ export function CaseWorkflow({
         title="Cases & CS workflow"
         action={<Badge tone="blue">{cases.length} cases</Badge>}
       />
-      <div className="space-y-4 p-4">
+      <CardBody className="space-y-4">
         {canEdit ? (
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs text-zinc-500">
-              Segment
+            <Field label="Segment">
               <select
                 className={inputCls} defaultValue={segment ?? ""}
                 onChange={(e) => e.target.value && run({ action: "set_segment", companyId, segment: e.target.value })}
@@ -76,30 +75,30 @@ export function CaseWorkflow({
                 <option value="large">Large (10/mo)</option>
                 <option value="strategic">Strategic (custom)</option>
               </select>
-            </label>
+            </Field>
             <form
-              className="text-xs text-zinc-500"
               onSubmit={(e) => {
                 e.preventDefault();
                 const v = Number(new FormData(e.currentTarget).get("target"));
                 if (!Number.isNaN(v)) run({ action: "set_monthly_target", companyId, target: v });
               }}
             >
-              Monthly target
-              <div className="flex gap-1">
-                <input name="target" type="number" defaultValue={monthlyTarget ?? ""} className={inputCls} />
-                <Button variant="secondary" disabled={busy}>Set</Button>
-              </div>
+              <Field label="Monthly target">
+                <div className="flex gap-1">
+                  <input name="target" type="number" defaultValue={monthlyTarget ?? ""} className={inputCls} />
+                  <Button type="submit" variant="secondary" disabled={busy}>Set</Button>
+                </div>
+              </Field>
             </form>
           </div>
         ) : null}
 
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {cases.length === 0 ? (
-            <p className="py-4 text-sm text-zinc-400">No cases yet.</p>
+            <Empty>No cases yet.</Empty>
           ) : cases.map((c) => (
             <div key={c.case_id} className="py-2.5 text-sm">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{c.case_name ?? c.case_id}</span>
                 <Badge tone={STATUS_TONE[c.case_status ?? ""] ?? "default"}>
                   {(c.case_status ?? "-").replace("_", " ")}
@@ -118,36 +117,36 @@ export function CaseWorkflow({
               {canEdit ? (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {c.case_status !== "delivered" ? (
-                    <Button variant="secondary" disabled={busy}
+                    <Button size="sm" variant="secondary" disabled={busy}
                       onClick={() => run({ action: "update_case_status", caseId: c.case_id, status: "delivered" })}>
                       Mark delivered
                     </Button>
                   ) : null}
                   {c.case_status === "delivered" && !c.expert_review_offered ? (
-                    <Button variant="secondary" disabled={busy}
+                    <Button size="sm" variant="secondary" disabled={busy}
                       onClick={() => run({ action: "offer_expert_review", caseId: c.case_id })}>
                       Offer review
                     </Button>
                   ) : null}
                   {c.expert_review_offered && !c.expert_review_booked ? (
-                    <Button variant="secondary" disabled={busy}
+                    <Button size="sm" variant="secondary" disabled={busy}
                       onClick={() => run({ action: "book_expert_review", caseId: c.case_id })}>
                       Booked
                     </Button>
                   ) : null}
                   {c.expert_review_booked && !c.expert_review_completed ? (
-                    <Button variant="secondary" disabled={busy}
+                    <Button size="sm" variant="secondary" disabled={busy}
                       onClick={() => run({ action: "complete_expert_review", caseId: c.case_id })}>
                       Review done
                     </Button>
                   ) : null}
                   {c.issue_flag ? (
-                    <Button variant="secondary" disabled={busy}
+                    <Button size="sm" variant="secondary" disabled={busy}
                       onClick={() => run({ action: "resolve_issue", caseId: c.case_id })}>
                       Resolve issue
                     </Button>
                   ) : (
-                    <Button variant="danger" disabled={busy}
+                    <Button size="sm" variant="danger" disabled={busy}
                       onClick={() => run({ action: "flag_issue", caseId: c.case_id })}>
                       Flag issue
                     </Button>
@@ -170,14 +169,14 @@ export function CaseWorkflow({
             }}
           >
             <input name="caseName" placeholder="Add a case (name)" className={inputCls} />
-            <Button disabled={busy}>Add case</Button>
+            <Button type="submit" disabled={busy}>Add case</Button>
           </form>
         ) : null}
 
         {msg ? (
-          <p className={`text-sm ${msg === "Saved" ? "text-emerald-600" : "text-red-600"}`}>{msg}</p>
+          <Callout tone={msg === "Saved" ? "good" : "bad"}>{msg}</Callout>
         ) : null}
-      </div>
+      </CardBody>
     </Card>
   );
 }

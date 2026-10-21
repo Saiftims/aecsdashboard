@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { ActionQueue } from "@/components/action-queue";
-import { Card, CardHeader, Stat, Table, TargetCard } from "@/components/ui";
+import { Card, CardHeader, PageHeader, Section, Stat, StatGrid, Table, TargetCard } from "@/components/ui";
 import { aeDashboard } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
 
@@ -18,13 +18,10 @@ export default async function AePage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">AE Dashboard</h1>
+      <PageHeader title="AE Dashboard" />
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Today
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <Section title="Today">
+        <StatGrid cols={4}>
           <TargetCard
             label="Activity today"
             value={today.activity.value}
@@ -41,10 +38,10 @@ export default async function AePage() {
             href="/activity"
           />
           <TargetCard label="Tasks completed" value={today.tasksCompleted.value} target={today.tasksCompleted.target} sub="7-day view →" href="/activity" />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+      <StatGrid cols={6}>
         <Stat label="Leads assigned" value={metrics.leadsAssigned} href="/drill/leads_assigned" />
         <Stat
           label="Awaiting first contact"
@@ -103,7 +100,7 @@ export default async function AePage() {
           href="/drill/deals_no_future_task"
         />
         <Stat label="Stalled deals" value={metrics.stalledDeals} tone={metrics.stalledDeals ? "warn" : "good"} href="/drill/stalled" />
-      </div>
+      </StatGrid>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">

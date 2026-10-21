@@ -1,11 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   DailyActivityChart, FunnelChart, LeadSourceChart, MonthlyBarChart, MonthlyMqlChart,
   MonthlyNewFirmsChart,
   MonthlyRevenueChart, RetentionChart, RevenueRetentionChart,
 } from "@/components/charts";
-import { Card, CardHeader, Stat, Table } from "@/components/ui";
+import {
+  Badge, Card, CardBody, CardHeader, Note, PageHeader, Section, Stat, StatGrid, Table, TextLink,
+} from "@/components/ui";
 import { UnitEconomics } from "@/components/unit-economics";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
 import {
@@ -66,19 +67,16 @@ export default async function ActivityPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Activity &amp; funnel — last 7 days</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+      <PageHeader
+        title="Activity & funnel — last 7 days"
+        description={<>
           {scope === "your" ? "Your" : "Team"} activity and this week&apos;s new-business
           funnel. Days are in the dashboard timezone.
-        </p>
-      </div>
+        </>}
+      />
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Results (7 days)
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <Section title="Results (7 days)">
+        <StatGrid cols={5}>
           {leads.ok ? (
             <Stat label="New leads" value={leads.leads.length} tone="good"
               sub="deals, ad forms & bookings" href="/drill/leads_7d" />
@@ -99,23 +97,23 @@ export default async function ActivityPage() {
             href="/drill/cases_7d"
           />
           <Stat label="Deals signed" value={dealsWon} sub="closed-won this week" href="/drill/funnel_closed_won" />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
       {leads.ok ? (
         <Card>
           <CardHeader
             title="New leads by source — last 7 days"
             action={
-              <Link href="/drill/leads_7d" className="text-xs text-blue-600 hover:underline">
+              <TextLink href="/drill/leads_7d">
                 {leads.leads.length} leads · see the list
-              </Link>
+              </TextLink>
             }
           />
-          <div className="p-4">
+          <CardBody>
             <LeadSourceChart data={leads.daily} series={LEAD_SOURCES} drillHref="/drill/leads_7d" />
-          </div>
-          <p className="px-4 pb-4 text-xs text-zinc-500">
+          </CardBody>
+          <Note>
             Every lead counted once, wherever it landed: new sales-pipeline deals,
             every Meta ad-form submission read directly from Meta (including ones
             nobody has turned into a deal yet), and sheet rows that never reached
@@ -124,15 +122,12 @@ export default async function ActivityPage() {
             is a submission Meta has that the sheet does not {"\u2014"} both are MQLs.
             &ldquo;Existing lead came back&rdquo; is someone already in HubSpot filling the
             form or booking again {"\u2014"} intent, not a new person. Case intakes and activation deals are not leads.
-          </p>
+          </Note>
         </Card>
       ) : null}
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Activity (7 days)
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-9">
+      <Section title="Activity (7 days)">
+        <StatGrid cols={5}>
           <Stat label="Total touches" value={activityTotals.touches} />
           <Stat label="Calls" value={activityTotals.calls} />
           <Stat label="Emails" value={activityTotals.emails} />
@@ -143,52 +138,44 @@ export default async function ActivityPage() {
           <Stat label="Meetings" value={activityTotals.meetings} />
           <Stat label="In-person visits" value={activityTotals.inPersonVisits} />
           <Stat label="Connected" value={activityTotals.connected} tone="good" />
-        </div>
-        <p className="mt-2 text-xs text-zinc-500">
+        </StatGrid>
+        <Note className="px-0 pb-0">
           Texts come from Quo, the same source as dials. &ldquo;Other
           channels&rdquo; is every touch that is not a dial, an email or a text
           — the DMs a rep logged plus meetings, demos and visits.
           {dmSplit ? <> DMs this week: {dmSplit}.</> : null}
-        </p>
-      </section>
+        </Note>
+      </Section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         {roleDaily.map((r) => (
           <Card key={r.role}>
             <CardHeader
               title={`${r.label} — daily activity vs target`}
-              action={
-                <span className="text-xs text-zinc-500">
-                  {r.dailyAverage} of {r.activityTarget} a day
-                </span>
-              }
+              action={<span>{r.dailyAverage} of {r.activityTarget} a day</span>}
             />
-            <div className="p-4">
+            <CardBody>
               <DailyActivityChart data={r.data} activityTarget={r.activityTarget} />
-              <p className="mt-2 text-xs text-zinc-500">
-                {r.people.length
-                  ? <>{r.people.join(", ")} · every channel stacked to one
-                      total against the {r.activityTarget}/day target · calls from{" "}
-                      {r.callSource === "quo"
-                        ? "Quo (every dial)"
-                        : "HubSpot logged calls"}
-                      {", texts from "}
-                      {r.smsSource === "quo" ? "Quo" : "HubSpot logged messages"}.</>
-                  : "No activity logged in this role over the last 7 days."}
-              </p>
-            </div>
+            </CardBody>
+            <Note>
+              {r.people.length
+                ? <>{r.people.join(", ")} · every channel stacked to one
+                    total against the {r.activityTarget}/day target · calls from{" "}
+                    {r.callSource === "quo"
+                      ? "Quo (every dial)"
+                      : "HubSpot logged calls"}
+                    {", texts from "}
+                    {r.smsSource === "quo" ? "Quo" : "HubSpot logged messages"}.</>
+                : "No activity logged in this role over the last 7 days."}
+            </Note>
           </Card>
         ))}
-      </section>
+      </div>
 
       <Card>
         <CardHeader
           title={`Demos booked by rep \u2014 ${demoCredit.monthLabel}`}
-          action={
-            <span className="text-xs text-zinc-500">
-              {demoCredit.total} demos, {demoCredit.totalFirstCases} first cases
-            </span>
-          }
+          action={<span>{demoCredit.total} demos, {demoCredit.totalFirstCases} first cases</span>}
         />
         <Table
           headers={["Booked by", "Demos booked", "First case this month", "Cases this month"]}
@@ -199,7 +186,7 @@ export default async function ActivityPage() {
             r.cases ? String(r.cases) : "\u2014",
           ])}
         />
-        <p className="px-4 pb-4 pt-2 text-xs text-zinc-500">
+        <Note>
           Credit is the rep who owned the deal in the minute BEFORE it entered
           Demo Scheduled, not the current deal owner {"\u2014"} the owner sweep hands
           every booked deal to Chris within hours, so the owner field cannot
@@ -209,14 +196,11 @@ export default async function ActivityPage() {
           landed this month, so it is genuinely new revenue rather than a repeat
           submission. Stamping began {demoCredit.creditFrom}, so demos booked
           earlier in a month that starts before then read as self-serve.
-        </p>
+        </Note>
       </Card>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Full funnel — {cohortSize} deals created this week
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <Section title={<>Full funnel — {cohortSize} deals created this week</>}>
+        <StatGrid cols={4}>
           {funnel.map((f) => (
             <Stat
               key={f.label}
@@ -227,8 +211,8 @@ export default async function ActivityPage() {
               href={FUNNEL_HREF[f.label]}
             />
           ))}
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
       <Card>
         <CardHeader title="Funnel conversion" />
@@ -243,22 +227,19 @@ export default async function ActivityPage() {
         />
       </Card>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Monthly MQLs
-        </h2>
+      <Section title="Monthly MQLs">
         <Card>
           <CardHeader
             title="MQLs per month"
             action={
-              <span className="text-xs text-zinc-500">
+              <span>
                 {progress(thisMonth(retention.monthlyMqls)?.count ?? 0, settings.monthlyMqlsTarget)}
                 {" \u00b7 "}
                 {retention.monthlyMqls.reduce((s, m) => s + m.count, 0)} MQLs all-time
               </span>
             }
           />
-          <div className="p-4">
+          <CardBody>
             {retention.mqlSourcesKnown ? (
               <MonthlyMqlChart data={retention.monthlyMqls} series={LEAD_SOURCES}
                 target={settings.monthlyMqlsTarget} drillBase="/drill/month_mqls_" />
@@ -266,8 +247,8 @@ export default async function ActivityPage() {
               <MonthlyBarChart data={retention.monthlyMqls} color="hsl(210 70% 50%)"
                 target={settings.monthlyMqlsTarget} drillBase="/drill/month_mqls_" />
             )}
-          </div>
-          <p className="px-4 pb-4 text-xs text-zinc-500">
+          </CardBody>
+          <Note>
             An MQL is a new lead {"\u2014"} the same definition and the same records as the
             &ldquo;New leads&rdquo; tile above, so month-to-date here always covers the
             7-day figure. Every person who arrived is counted once per month, whichever
@@ -277,109 +258,97 @@ export default async function ActivityPage() {
             a website or wait-list form, or a lead a rep added. Someone already in HubSpot who submits again is &ldquo;existing lead
             came back&rdquo;. Reps&rsquo; test submissions and staff addresses are excluded.
             {!retention.mqlSourcesKnown && " HubSpot could not be read live, so this shows cached sales deals only."}
-          </p>
+          </Note>
         </Card>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Monthly demos
-        </h2>
+      <Section title="Monthly demos">
         <Card>
           <CardHeader
             title="Demos run per month"
             action={
-              <span className="text-xs text-zinc-500">
+              <span>
                 {progress(thisMonth(retention.monthlyDemos)?.count ?? 0, settings.monthlyDemosTarget)}
                 {" \u00b7 "}
                 {retention.monthlyDemos.reduce((s, m) => s + m.count, 0)} demos all-time
               </span>
             }
           />
-          <div className="p-4">
+          <CardBody>
             <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42%)"
               target={settings.monthlyDemosTarget} drillBase="/drill/month_demos_" />
-          </div>
-          <p className="px-4 pb-4 text-xs text-zinc-500">
+          </CardBody>
+          <Note>
             A demo counts only once someone actually attended it. Calendly is the
             source of truth: a no-show stays a booking and never lands here, and
             demos still on the calendar are not counted until they happen.
-          </p>
+          </Note>
         </Card>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Monthly new firms
-        </h2>
+      <Section title="Monthly new firms">
         <Card>
           <CardHeader
             title="New firms per month"
             action={
-              <span className="text-xs text-zinc-500">
+              <span>
                 {progress(thisMonth(retention.monthlyNewFirms)?.count ?? 0, settings.monthlyNewFirmsTarget)}
                 {" \u00b7 "}
                 {retention.monthlyNewFirms.reduce((s, m) => s + m.count, 0)} firms all-time
               </span>
             }
           />
-          <div className="p-4">
+          <CardBody>
             <MonthlyNewFirmsChart data={retention.monthlyNewFirms}
               target={settings.monthlyNewFirmsTarget} drillBase="/drill/month_firms_" />
-          </div>
-          <p className="px-4 pb-4 text-xs text-zinc-500">
+          </CardBody>
+          <Note>
             A firm counts once, in the month it first signed up for the app or
             submitted its first case, whichever came first. The dark part has
             submitted a case; the pale part has signed up but not sent one yet,
             and moves into the dark part of its own month when it does. A
             closed-won deal with no signup and no case is still pipeline. The
             cohort tables below stay on first-case months.
-          </p>
+          </Note>
         </Card>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Monthly case volume
-        </h2>
+      <Section title="Monthly case volume">
         <Card>
           <CardHeader
             title="Total cases submitted per month"
             action={
-              <span className="text-xs text-zinc-500">
+              <span>
                 {progress(thisMonth(retention.monthlyCases)?.count ?? 0, settings.monthlyCasesTarget)}
                 {" \u00b7 "}
                 {retention.monthlyCases.reduce((s, m) => s + m.count, 0)} cases all-time
               </span>
             }
           />
-          <div className="p-4">
+          <CardBody>
             <MonthlyBarChart data={retention.monthlyCases} target={settings.monthlyCasesTarget}
               drillBase="/drill/month_cases_" />
-          </div>
+          </CardBody>
         </Card>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Monthly revenue
-        </h2>
+      <Section title="Monthly revenue">
         <Card>
           <CardHeader
             title="Revenue per month"
             action={
-              <span className="text-xs text-zinc-500">
+              <span>
                 {progress(thisMonth(retention.monthlyRevenue)?.total ?? 0, settings.monthlyRevenueTarget, money)}
                 {" \u00b7 "}
                 {money(retention.monthlyRevenue.reduce((s, m) => s + m.total, 0))} all-time
               </span>
             }
           />
-          <div className="p-4">
+          <CardBody>
             <MonthlyRevenueChart data={retention.monthlyRevenue} target={settings.monthlyRevenueTarget}
               drillBase="/drill/month_revenue_" />
-          </div>
-          <p className="px-4 pb-4 text-xs text-zinc-500">
+          </CardBody>
+          <Note>
             The solid bar is cash Stripe actually collected that month, net of
             refunds {"\u2014"} a refunded payment is not revenue, so a firm that was
             billed and refunded in full reads as zero. The pale bar is the firms
@@ -388,20 +357,17 @@ export default async function ActivityPage() {
             case. That part is an estimate, not money in the bank. Revenue counts
             in the month it was TAKEN, which is not always the month the case was
             submitted, so this will not track the case chart above exactly.
-          </p>
+          </Note>
         </Card>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Retention funnel — {freq.activatedFirms} activated firms
-        </h2>
+      <Section title={<>Retention funnel — {freq.activatedFirms} activated firms</>}>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader title="Activation → repeat → retained" />
-            <div className="p-4">
+            <CardBody>
               <FunnelChart data={retention.funnel.map((f) => ({ label: f.label, count: f.count }))} />
-            </div>
+            </CardBody>
           </Card>
           <Card>
             <CardHeader title="Stage conversion" />
@@ -416,43 +382,40 @@ export default async function ActivityPage() {
             />
           </Card>
         </div>
-        <p className="mt-2 text-xs text-zinc-400">
+        <Note className="px-0 pb-0">
           Activation = firm submitted ≥1 case. 2nd/3rd = firms with ≥2/≥3 lifetime cases.
           &ldquo;Active in N-day window&rdquo; = submitted an additional case in that window after the first case.
-        </p>
-      </section>
+        </Note>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Cohort retention — still a customer
-        </h2>
+      <Section title="Cohort retention — still a customer">
         <Card>
           <CardHeader
             title="Retention curve (% of cohort still a customer)"
             action={billing.partialMonth ? (
-              <span className="text-xs text-amber-600">
+              <Badge tone="yellow">
                 {billing.partialMonthLabel} is still running — whichever month
                 lands on it is understated
-              </span>
+              </Badge>
             ) : null}
           />
-          <div className="p-4">
+          <CardBody>
             <RetentionChart cohorts={retention.cohorts} monthCols={retention.monthCols} />
-          </div>
+          </CardBody>
         </Card>
-        <div className="mt-3">
+        <Card className="mt-3">
           <Table
             headers={["Cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
             rows={retention.cohorts.map((c) => [
-              <Link key="c" href={`/drill/cohort_${c.key}`} className="font-medium text-blue-600 hover:underline">
+              <TextLink key="c" href={`/drill/cohort_${c.key}`} className="font-medium">
                 {c.label}
-              </Link>,
+              </TextLink>,
               `${c.firms} · ${c.subscribers} sub · ${c.transactional} tx`,
               ...c.retention.map((r) => (r === null ? "—" : `${r}%`)),
             ])}
           />
-        </div>
-        <p className="mt-2 text-xs text-zinc-400">
+        </Card>
+        <Note className="px-0 pb-0">
           A subscriber is retained while the plan is live and churned the month they
           cancel {"\u2014"} sending cases does not keep them, and skipping a month
           does not lose them. A transactional firm is retained while it has submitted
@@ -463,39 +426,38 @@ export default async function ActivityPage() {
           {billing.partialMonth ? ` The column landing on ${billing.partialMonthLabel} is measured against an unfinished month.` : ""}{" "}
           Firms marked Trial in HubSpot are excluded here and from the retention
           charts below {"\u2014"} they never had a paying relationship to retain.
-        </p>
-      </section>
+        </Note>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Revenue retention — dollars kept, by first-revenue month
-        </h2>
-        <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat label="Revenue firms" value={billing.subscriptionFirms + billing.transactionalFirms} sub="have billed at least once" />
-          <Stat label="On subscription" value={billing.subscriptionFirms} sub={`${money(billing.mrr)} / month`} tone="good" />
-          <Stat label="Transactional" value={billing.transactionalFirms} sub={`$${settings.defaultCasePrice} per case`} />
-          <Stat label="Cohorts tracked" value={revRetention.cohorts.length} sub="months with a first sale" />
+      <Section title="Revenue retention — dollars kept, by first-revenue month">
+        <div className="mb-3">
+          <StatGrid cols={4}>
+            <Stat label="Revenue firms" value={billing.subscriptionFirms + billing.transactionalFirms} sub="have billed at least once" />
+            <Stat label="On subscription" value={billing.subscriptionFirms} sub={`${money(billing.mrr)} / month`} tone="good" />
+            <Stat label="Transactional" value={billing.transactionalFirms} sub={`$${settings.defaultCasePrice} per case`} />
+            <Stat label="Cohorts tracked" value={revRetention.cohorts.length} sub="months with a first sale" />
+          </StatGrid>
         </div>
         <Card>
           <CardHeader
             title="Revenue retention curve (% of each cohort's month-0 dollars)"
             action={billing.partialMonth ? (
-              <span className="text-xs text-amber-600">
+              <Badge tone="yellow">
                 {billing.partialMonthLabel} is still running — its dollars are incomplete
-              </span>
+              </Badge>
             ) : null}
           />
-          <div className="p-4">
+          <CardBody>
             <RevenueRetentionChart cohorts={revRetention.cohorts} monthCols={billing.monthCols} />
-          </div>
+          </CardBody>
         </Card>
-        <div className="mt-3">
+        <Card className="mt-3">
           <Table
             headers={["First-revenue cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
             rows={revRetention.cohorts.map((c) => [
-              <Link key="c" href={`/drill/revcohort_${c.key}`} className="font-medium text-blue-600 hover:underline">
+              <TextLink key="c" href={`/drill/revcohort_${c.key}`} className="font-medium">
                 {c.label}
-              </Link>,
+              </TextLink>,
               String(c.firms),
               ...c.retention.map((r, i) =>
                 r === null || c.values[i] === null
@@ -503,37 +465,34 @@ export default async function ActivityPage() {
                   : `${money(c.values[i]!)} · ${r}%`),
             ])}
           />
-        </div>
-        <div className="mt-3">
+        </Card>
+        <Card className="mt-3">
           <Table
             headers={["Cohort", "Still billing", "Stopped after month 0"]}
             rows={revRetention.cohorts.map((c) => [
-              <Link key="c" href={`/drill/revcohort_${c.key}`} className="text-blue-600 hover:underline">
+              <TextLink key="c" href={`/drill/revcohort_${c.key}`}>
                 {c.label}
-              </Link>,
+              </TextLink>,
               c.members.filter((m) => !m.lapsed)
                 .map((m) => `${m.name} (${money(m.latest || m.base)})`).join(", ") || "—",
-              <span key="lapsed" className={c.members.some((m) => m.lapsed) ? "text-amber-600" : ""}>
+              <span key="lapsed" className={c.members.some((m) => m.lapsed) ? "text-amber-600 dark:text-amber-400" : ""}>
                 {c.members.filter((m) => m.lapsed)
                   .map((m) => `${m.name} (was ${money(m.base)})`).join(", ") || "—"}
               </span>,
             ])}
           />
-        </div>
-        <p className="mt-2 text-xs text-zinc-400">
+        </Card>
+        <Note className="px-0 pb-0">
           A cohort is the firms that first billed in that month. Month N = the dollars that cohort
           billed N months later, as a share of what it billed in month 0 — above 100% means the
           cohort grew. Subscription firms count their flat monthly fee; everyone else counts
           cases × ${settings.defaultCasePrice}. A curve that falls is a named firm that stopped,
           listed above, not a data problem.
-        </p>
-      </section>
+        </Note>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Usage frequency
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+      <Section title="Usage frequency">
+        <StatGrid cols={5}>
           <Stat label="Cases / activated firm" value={freq.casesPerActivatedFirm} />
           <Stat label="Cases / active firm (30d)" value={freq.casesPerActiveFirm} />
           <Stat label="Median cases / active firm" value={freq.medianCasesPerActiveFirm} />
@@ -544,27 +503,24 @@ export default async function ActivityPage() {
           <Stat label="Two-plus cases" value={freq.twoPlusCases} tone="good" />
           <Stat label="Three-plus cases" value={freq.threePlusCases} tone="good" />
           <Stat label="Active 2+ consecutive months" value={freq.activeTwoPlusConsecutiveMonths} tone="good" />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
       {unitEcon ? (
-        <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-            Unit economics — paid acquisition payback, {unitEcon.monthLabel}
-          </h2>
+        <Section title={<>Unit economics — paid acquisition payback, {unitEcon.monthLabel}</>}>
           <UnitEconomics snap={unitEcon} />
-        </section>
+        </Section>
       ) : null}
 
-      <p className="text-xs text-zinc-400">
+      <Note className="px-0 pb-0">
         Funnel cohort = deals created in the last 7 days, shown at the furthest stage
         each has reached (Closed Won counts as passing every prior stage). Activity
         counts every logged call/email/meeting in the window.
         <span className="mx-1">·</span>
-        <Link href={user.role === "cs" ? "/cs" : "/ae"} className="hover:underline">
+        <TextLink href={user.role === "cs" ? "/cs" : "/ae"}>
           Back to dashboard
-        </Link>
-      </p>
+        </TextLink>
+      </Note>
     </div>
   );
 }

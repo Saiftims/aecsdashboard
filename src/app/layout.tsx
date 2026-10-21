@@ -1,67 +1,44 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Geist } from "next/font/google";
 import "./globals.css";
-import { RefreshButton } from "@/components/refresh-button";
+import { Shell, type NavItem } from "@/components/shell";
 import { currentAppUser } from "@/lib/supabase/server";
 
-const geist = Geist({ subsets: ["latin"] });
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
 export const metadata: Metadata = {
   title: "Silent Witness GTM",
   description: "Sales & Customer Success operating system",
 };
 
-const NAV = [
-  { href: "/", label: "Executive", roles: ["executive"] },
-  { href: "/ae", label: "AE", roles: ["executive", "ae"] },
-  { href: "/activity", label: "Activity & Funnel", roles: ["executive", "ae", "cs"] },
-  { href: "/marketing", label: "Marketing", roles: ["executive"] },
-  { href: "/product", label: "Product", roles: ["executive", "cs"] },
-  { href: "/cs", label: "Customer Success", roles: ["executive", "cs"] },
-  { href: "/firms", label: "Firms", roles: ["executive", "ae", "cs"] },
-  { href: "/data-quality", label: "Data Quality", roles: ["executive", "ae", "cs"] },
-  { href: "/settings", label: "Settings", roles: ["executive"] },
+const NAV: (NavItem & { roles: string[] })[] = [
+  { href: "/", label: "Executive", icon: "executive", group: "Overview", roles: ["executive"] },
+  { href: "/activity", label: "Activity & funnel", icon: "activity", group: "Overview", roles: ["executive", "ae", "cs"] },
+  { href: "/ae", label: "Sales (AE)", icon: "ae", group: "Teams", roles: ["executive", "ae"] },
+  { href: "/cs", label: "Customer success", icon: "cs", group: "Teams", roles: ["executive", "cs"] },
+  { href: "/marketing", label: "Marketing", icon: "marketing", group: "Teams", roles: ["executive"] },
+  { href: "/product", label: "Product", icon: "product", group: "Teams", roles: ["executive", "cs"] },
+  { href: "/firms", label: "Firms", icon: "firms", group: "Records", roles: ["executive", "ae", "cs"] },
+  { href: "/data-quality", label: "Data quality", icon: "quality", group: "Records", roles: ["executive", "ae", "cs"] },
+  { href: "/health", label: "System health", icon: "health", group: "Admin", roles: ["executive"] },
+  { href: "/settings", label: "Settings", icon: "settings", group: "Admin", roles: ["executive"] },
 ];
 
-export default async function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+/** Applies the saved theme before first paint so dark mode does not flash. */
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await currentAppUser().catch(() => null);
-  const nav = user ? NAV.filter((n) => n.roles.includes(user.role)) : [];
+  const nav = user ? NAV.filter((n) => n.roles.includes(user.role)).map((n) => ({ href: n.href, label: n.label, icon: n.icon, group: n.group })) : [];
 
   return (
-    <html lang="en">
-      <body className={`${geist.className} min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100`}>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body className={`${geist.variable} ${geist.className} min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100`}>
         {user ? (
-          <div className="flex min-h-screen">
-            <aside className="hidden w-56 shrink-0 border-r border-zinc-200 bg-white px-3 py-5 dark:border-zinc-800 dark:bg-zinc-900 md:block">
-              <div className="mb-4 px-2 text-lg font-bold">
-                Silent Witness <span className="text-zinc-400">GTM</span>
-              </div>
-              <div className="mb-4 px-1">
-                <RefreshButton />
-              </div>
-              <nav className="space-y-1">
-                {nav.map((n) => (
-                  <Link
-                    key={n.href}
-                    href={n.href}
-                    className="block rounded-lg px-2 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                  >
-                    {n.label}
-                  </Link>
-                ))}
-              </nav>
-              <div className="mt-8 border-t border-zinc-100 px-2 pt-3 text-xs text-zinc-500 dark:border-zinc-800">
-                {user.full_name ?? user.email}
-                <div className="uppercase tracking-wide">{user.role}</div>
-              </div>
-            </aside>
-            <main className="min-w-0 flex-1 p-6">{children}</main>
-          </div>
+          <Shell items={nav} user={{ name: user.full_name ?? user.email, role: user.role }}>{children}</Shell>
         ) : (
           <main>{children}</main>
         )}

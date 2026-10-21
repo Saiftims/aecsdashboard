@@ -34,4 +34,27 @@ export const env = {
   metaAdAccountId: () => clean("META_AD_ACCOUNT_ID") || "act_993053423296349",
   /** HubSpot writes are gated: nothing is written unless explicitly enabled. */
   hubspotWritesEnabled: () => clean("HUBSPOT_APPLY") === "true",
+  /** True on Vercel (build and runtime, every environment). */
+  isVercel: () => Boolean(clean("VERCEL")),
 };
+
+/** Gate for every `/api/cron/*` route. Vercel calls them with
+ * `Authorization: Bearer <CRON_SECRET>`.
+ *
+ * - Secret set: the header must match.
+ * - Secret unset ON VERCEL: refuse everything. An unconfigured production
+ *   deployment must fail closed, not run full syncs for anyone who finds the
+ *   URL.
+ * - Secret unset locally: allow, so `curl localhost:3000/api/cron/...` works
+ *   in dev without configuration.
+ *
+ * Returns the 401 response to send, or null when the request may proceed. */
+export function cronUnauthorized(req: { headers: { get(name: string): string | null } }): Response | null {
+  const secret = env.cronSecret();
+  const ok = secret
+    ? req.headers.get("authorization") === `Bearer ${secret}`
+    : !env.isVercel();
+  if (ok) return null;
+  const body = secret ? { error: "unauthorized" } : { error: "unauthorized: CRON_SECRET is not set" };
+  return Response.json(body, { status: 401 });
+}

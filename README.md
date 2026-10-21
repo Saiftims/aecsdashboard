@@ -10,13 +10,31 @@ HubSpot (gated by `HUBSPOT_APPLY`).
 - **Next.js (App Router, TS, Tailwind)** on Vercel - 6 pages + API routes
 - **Supabase Postgres** - read cache, settings, targets, firm mapping, audit log, sync runs
 - **Supabase Auth** - email/password, 3 roles: `executive`, `ae`, `cs`
-- **Sync** (Vercel cron):
-  - `/api/cron/hubspot` every 15 min - incremental HubSpot sync (companies,
-    contacts, deals, calls/meetings/notes/tasks)
-  - `/api/cron/cases` nightly - Silent Witness case pull, per-firm usage
-    metrics, health scores, risk flags, activation-lifecycle automation,
-    rollup write-back to HubSpot, handoff automation
-  - Manual "Sync now" / "Full sync" buttons in Admin Settings
+- **Sync** (Vercel cron, schedules are in `vercel.json` - keep this table
+  identical to it):
+
+  | Route | Schedule | `sync_runs.kind` | What |
+  |---|---|---|---|
+  | `/api/cron/hubspot` | `*/5 * * * *` (every 5 min) | `hubspot_incremental` (`?full=1` -> `hubspot_full`) | HubSpot companies, contacts, deals, engagements |
+  | `/api/cron/stripe` | `*/15 * * * *` (every 15 min) | `stripe` | Stripe customers, charges, subscriptions (revenue truth) |
+  | `/api/cron/cases-probe` | `* * * * *` (every minute) | `cases_probe` (only when it triggers or fails) | Cheap PostHog look for a case id the table lacks; triggers `cases` + `rollup` + `stripe` |
+  | `/api/cron/cases` | `5 * * * *` (hourly at :05) | `cases`, `rollup` | Case pull, per-firm usage, health, lifecycle automation, HubSpot write-back, handoffs |
+  | `/api/cron/calendly` | `*/5 * * * *` (every 5 min) | `calendly` | Demo bookings / attendance stamps |
+  | `/api/cron/quo` | `*/5 * * * *` (every 5 min) | `quo` (`?full=1` -> `quo_full`, `?messages=1` -> `quo_messages_full`) | Quo calls and texts |
+  | `/api/cron/meta` | `* * * * *` (every minute) | `meta` (`?full=1` -> `meta_full`) | Meta Lead Ads submissions -> `meta_leads` -> HubSpot + Slack (owner rule: within 60s) |
+  | `/api/cron/meta-spend` | `20 */6 * * *` (every 6 h at :20) | `meta_spend` (`?full=1` -> `meta_spend_full`) | Meta ad spend, ads, creatives, per-ad insights |
+
+  - Manual "Sync now" / "Full sync" buttons in Admin Settings (`POST /api/sync`)
+  - Every run writes a `sync_runs` row (kind, status, started/finished, stats,
+    error). A cron route answers **HTTP 500** when any kind failed - same JSON
+    body - so Vercel's cron monitoring marks the invocation failed. A kind that
+    starts failing posts `:rotating_light: Sync failed: <kind>` to the Slack
+    webhook once, and `:white_check_mark: Sync recovered: <kind>` once when it
+    comes back (`src/lib/sync/run.ts`); nothing is posted while it keeps failing.
+  - Every Supabase write in the syncs goes through `must()` in
+    `src/lib/supabase/server.ts`, which throws on a PostgREST error. supabase-js
+    resolves failed statements instead of rejecting, so an unchecked `await`
+    used to report success while persisting nothing.
 - **Virtual activation pipeline**: the HubSpot tier allows one deal pipeline,
   so the 12-stage Customer Activation lifecycle lives in the
   `sw_activation_stage` deal property. Re-run `hubspot_migration.py` after a
@@ -55,7 +73,11 @@ Copy `.env.example` to `.env.local` and fill everything in. Key flags:
 - `HUBSPOT_APPLY=false` - the app runs read-only against HubSpot (writes are
   refused with a clear error and still audited). Set `true` to go live.
 - `CRON_SECRET` - set the same value in Vercel project env; cron calls are
-  rejected without it.
+  rejected without it. **Required on Vercel**: if it is unset where `VERCEL`
+  is set, every cron route answers 401 rather than running for anyone.
+  Locally, with neither set, the routes are open for `curl`.
+- `SLACK_WEBHOOK_URL` - #sales incoming webhook; also receives the sync
+  failed/recovered alerts above. Unset = alerts skipped silently.
 
 ### 4. Local dev
 
@@ -69,7 +91,7 @@ npx vitest run     # unit tests
 
 1. Push this folder to a Git repo; import into Vercel.
 2. Set every var from `.env.example` in Project Settings -> Environment Variables.
-3. `vercel.json` registers the two crons automatically.
+3. `vercel.json` registers the crons in the table above automatically.
 4. After first deploy: log in, open **Settings**, run **Full sync**, then map
    each customer firm to its Silent Witness id in **Firm mapping** (one-time,
    human-confirmed - never name-matching).
@@ -79,8 +101,8 @@ npx vitest run     # unit tests
 ```
 HubSpot  <-- write-back (gated) --  Next.js API  <-- users
    |                                    ^
-   +--> 15-min incremental sync --> Supabase cache --> pages
-SilentWitness API --> nightly case sync --> usage metrics/health/lifecycle
+   +--> 5-min incremental sync --> Supabase cache --> pages
+PostHog --> hourly case sync (+ per-minute probe) --> usage metrics/health/lifecycle
                                             --> rollups written back to HubSpot
 ```
 

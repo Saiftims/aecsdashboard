@@ -3,7 +3,7 @@
 /** Write-back panel: quick activity logger, next step, stage moves, handoff. */
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button, Card, CardHeader, inputCls } from "@/components/ui";
+import { Button, Callout, Card, CardBody, CardHeader, Empty, Field, Pills, inputCls } from "@/components/ui";
 import {
   ACTIVATION_STAGE_LABELS, ACTIVATION_STAGES, SALES_STAGE_LABELS, SALES_STAGE_ORDER,
 } from "@/lib/hubspot/stages";
@@ -31,6 +31,13 @@ const CS_OUTCOMES = ["handoff_accepted", "onboarding_scheduled",
   "first_result_reviewed", "training_completed", "usage_follow_up",
   "expansion_opportunity", "at_risk", "issue_escalated",
   "reactivation_started", "reactivated"];
+
+const TABS = [
+  { id: "log", label: "Log activity" },
+  { id: "next", label: "Next step" },
+  { id: "stage", label: "Stage" },
+  { id: "handoff", label: "Handoff" },
+] as const;
 
 interface Props {
   role: "executive" | "ae" | "cs";
@@ -76,24 +83,15 @@ export function FirmActions(p: Props) {
       <CardHeader
         title="Actions"
         action={
-          <div className="flex gap-1 text-xs">
-            {(["log", "next", "stage", "handoff"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`rounded-md px-2 py-1 font-medium ${
-                  tab === t ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                            : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                }`}
-              >
-                {t === "log" ? "Log activity" : t === "next" ? "Next step"
-                  : t === "stage" ? "Stage" : "Handoff"}
-              </button>
-            ))}
-          </div>
+          <Pills
+            size="xs"
+            items={TABS.map((t) => ({
+              key: t.id, label: t.label, active: tab === t.id, onClick: () => setTab(t.id),
+            }))}
+          />
         }
       />
-      <div className="p-4">
+      <CardBody>
         {tab === "log" ? (
           <form
             className="space-y-2"
@@ -125,18 +123,22 @@ export function FirmActions(p: Props) {
             }}
           >
             <div className="grid grid-cols-2 gap-2">
-              <select name="type" className={inputCls} required>
-                {(isCs ? ["cs_touch", ...AE_TYPES] : AE_TYPES).map((t) => (
-                  <option key={t} value={t}>
-                    {TYPE_LABELS[t] ?? t.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
-              <select name="outcome" className={inputCls} required>
-                {outcomes.map((o) => (
-                  <option key={o} value={o}>{o.replaceAll("_", " ")}</option>
-                ))}
-              </select>
+              <Field label="Channel">
+                <select name="type" className={inputCls} required>
+                  {(isCs ? ["cs_touch", ...AE_TYPES] : AE_TYPES).map((t) => (
+                    <option key={t} value={t}>
+                      {TYPE_LABELS[t] ?? t.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Outcome">
+                <select name="outcome" className={inputCls} required>
+                  {outcomes.map((o) => (
+                    <option key={o} value={o}>{o.replaceAll("_", " ")}</option>
+                  ))}
+                </select>
+              </Field>
             </div>
             <textarea name="summary" placeholder="Short summary (1-2 lines)" required
               className={`${inputCls} h-16`} />
@@ -148,10 +150,14 @@ export function FirmActions(p: Props) {
             </div>
             <VisitFields />
             <div className="grid grid-cols-2 gap-2">
-              <input name="nextStep" placeholder="Next step" className={inputCls} />
-              <input name="nextStepDate" type="date" className={inputCls} />
+              <Field label="Next step">
+                <input name="nextStep" placeholder="Next step" className={inputCls} />
+              </Field>
+              <Field label="Next step date">
+                <input name="nextStepDate" type="date" className={inputCls} />
+              </Field>
             </div>
-            <Button disabled={busy}>{busy ? "Saving..." : "Log to HubSpot"}</Button>
+            <Button type="submit" disabled={busy}>{busy ? "Saving..." : "Log to HubSpot"}</Button>
           </form>
         ) : null}
 
@@ -167,19 +173,22 @@ export function FirmActions(p: Props) {
               });
             }}
           >
-            <input name="nextStep" placeholder="Next step" required className={inputCls} />
-            <input name="nextStepDate" type="date" required className={inputCls} />
-            <Button disabled={busy}>Save next step</Button>
+            <Field label="Next step">
+              <input name="nextStep" placeholder="Next step" required className={inputCls} />
+            </Field>
+            <Field label="Next step date">
+              <input name="nextStepDate" type="date" required className={inputCls} />
+            </Field>
+            <Button type="submit" disabled={busy}>Save next step</Button>
           </form>
         ) : null}
         {tab === "next" && !p.dealId ? (
-          <p className="text-sm text-zinc-400">No deal on this firm yet.</p>
+          <Empty>No deal on this firm yet.</Empty>
         ) : null}
 
         {tab === "stage" && p.dealId ? (
           <div className="space-y-3">
             <form
-              className="flex gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
                 submit({
@@ -188,16 +197,19 @@ export function FirmActions(p: Props) {
                 });
               }}
             >
-              <select name="stage" defaultValue={p.currentStage} className={inputCls}>
-                {SALES_STAGE_ORDER.map((s) => (
-                  <option key={s} value={s}>{SALES_STAGE_LABELS[s]}</option>
-                ))}
-              </select>
-              <Button disabled={busy}>Move</Button>
+              <Field label="Sales stage">
+                <div className="flex gap-2">
+                  <select name="stage" defaultValue={p.currentStage} className={inputCls}>
+                    {SALES_STAGE_ORDER.map((s) => (
+                      <option key={s} value={s}>{SALES_STAGE_LABELS[s]}</option>
+                    ))}
+                  </select>
+                  <Button type="submit" disabled={busy}>Move</Button>
+                </div>
+              </Field>
             </form>
             {p.role !== "ae" ? (
               <form
-                className="flex gap-2"
                 onSubmit={(e) => {
                   e.preventDefault();
                   submit({
@@ -206,12 +218,18 @@ export function FirmActions(p: Props) {
                   });
                 }}
               >
-                <select name="stage" defaultValue={p.currentActivationStage} className={inputCls}>
-                  {ACTIVATION_STAGES.map((s) => (
-                    <option key={s} value={s}>{ACTIVATION_STAGE_LABELS[s]}</option>
-                  ))}
-                </select>
-                <Button disabled={busy} variant="secondary">Move activation stage</Button>
+                <Field label="Activation stage">
+                  <div className="flex gap-2">
+                    <select name="stage" defaultValue={p.currentActivationStage} className={inputCls}>
+                      {ACTIVATION_STAGES.map((s) => (
+                        <option key={s} value={s}>{ACTIVATION_STAGE_LABELS[s]}</option>
+                      ))}
+                    </select>
+                    <Button type="submit" disabled={busy} variant="secondary" className="whitespace-nowrap">
+                      Move activation stage
+                    </Button>
+                  </div>
+                </Field>
               </form>
             ) : null}
           </div>
@@ -222,11 +240,11 @@ export function FirmActions(p: Props) {
         ) : null}
 
         {msg ? (
-          <p className={`mt-3 text-sm ${msg === "Saved to HubSpot" ? "text-emerald-600" : "text-red-600"}`}>
-            {msg}
-          </p>
+          <div className="mt-3">
+            <Callout tone={msg === "Saved to HubSpot" ? "good" : "bad"}>{msg}</Callout>
+          </div>
         ) : null}
-      </div>
+      </CardBody>
     </Card>
   );
 }
@@ -234,7 +252,7 @@ export function FirmActions(p: Props) {
 function VisitFields() {
   return (
     <details className="rounded-lg border border-dashed border-zinc-300 p-2 text-sm dark:border-zinc-700">
-      <summary className="cursor-pointer text-zinc-500">In-person visit details</summary>
+      <summary className="cursor-pointer select-none text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">In-person visit details</summary>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <input name="visitLocation" placeholder="Office location" className={inputCls} />
         <input name="visitPerson" placeholder="Person spoken to" className={inputCls} />
@@ -296,13 +314,17 @@ function HandoffForm({
           <option value="">Payment status *</option>
           <option>not_invoiced</option><option>invoiced</option><option>paid</option>
         </select>
-        <input name="firstCaseTargetDate" type="date" required className={inputCls} />
-        <select name="csOwnerId" required className={inputCls}>
-          <option value="">CS owner *</option>
-          {owners.map((o) => (
-            <option key={o.id} value={o.id}>{o.label}</option>
-          ))}
-        </select>
+        <Field label="First case target date *">
+          <input name="firstCaseTargetDate" type="date" required className={inputCls} />
+        </Field>
+        <Field label="CS owner *">
+          <select name="csOwnerId" required className={inputCls}>
+            <option value="">CS owner *</option>
+            {owners.map((o) => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
+        </Field>
       </div>
       <textarea name="whyBought" placeholder="Why the firm bought *" required className={`${inputCls} h-12`} />
       <textarea name="primaryUseCase" placeholder="Primary use case *" required className={`${inputCls} h-12`} />
@@ -316,7 +338,7 @@ function HandoffForm({
         <input name="demoRecordingUrl" placeholder="Demo recording link" className={inputCls} />
       </div>
       <textarea name="aeNotes" placeholder="AE notes" className={`${inputCls} h-12`} />
-      <Button disabled={busy}>{busy ? "Submitting..." : "Complete handoff"}</Button>
+      <Button type="submit" disabled={busy}>{busy ? "Submitting..." : "Complete handoff"}</Button>
     </form>
   );
 }

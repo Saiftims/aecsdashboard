@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ActionQueue } from "@/components/action-queue";
-import { Badge, Card, CardHeader, Stat, Table } from "@/components/ui";
+import {
+  Badge, Card, CardHeader, Cell, PageHeader, Pills, Section, Stat, StatGrid, Table,
+} from "@/components/ui";
 import { csDashboard, type CsSegment } from "@/lib/queries";
 import { currentAppUser } from "@/lib/supabase/server";
 
@@ -42,65 +44,56 @@ export default async function CsPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Customer Success</h1>
-        <div className="flex gap-1">
-          {SEGMENTS.map((s) => (
-            <Link
-              key={s.id}
-              href={s.id === "all" ? "/cs" : `/cs?segment=${s.id}`}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                segment === s.id
-                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "border border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              }`}
-            >
-              {s.label}
-            </Link>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="Customer Success"
+        actions={
+          <Pills
+            items={SEGMENTS.map((s) => ({
+              key: s.id,
+              label: s.label,
+              active: segment === s.id,
+              href: s.id === "all" ? "/cs" : `/cs?segment=${s.id}`,
+            }))}
+          />
+        }
+      />
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Accounts</h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <Section title="Accounts">
+        <StatGrid cols={6}>
           <Stat label="Activated firms" value={metrics.activatedFirms} tone="good" href="/drill/cs_activated" />
           <Stat label="Healthy" value={metrics.healthyFirms} tone="good" href="/drill/cs_healthy" />
           <Stat label="Active below target" value={metrics.activeBelowTarget} tone="warn" href="/drill/cs_below_target" />
           <Stat label="At risk" value={metrics.atRiskFirms} tone={metrics.atRiskFirms ? "bad" : "good"} href="/drill/cs_at_risk" />
           <Stat label="Churned" value={metrics.churnedFirms} tone={metrics.churnedFirms ? "bad" : "good"} href="/drill/cs_churned" />
           <Stat label="Reactivation" value={metrics.reactivationInProgress} />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Activation gaps</h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      <Section title="Activation gaps">
+        <StatGrid cols={3}>
           <Stat label="Signed up · no case" value={metrics.signedUpNoCase} tone={metrics.signedUpNoCase ? "warn" : "good"} href="/drill/cs_signed_up_no_case" />
           <Stat label="Case (intake) · no signup" value={metrics.caseNoSignup} tone={metrics.caseNoSignup ? "warn" : "good"} href="/drill/cs_case_no_signup" />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Usage & revenue</h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+      <Section title="Usage & revenue">
+        <StatGrid cols={6}>
           <Stat label="Cases this month" value={metrics.casesThisMonth} href="/drill/cs_cases_month" />
           <Stat label="Revenue this month" value={money(metrics.revenueThisMonth)} tone="good" sub={`incl. ${money(metrics.mrr)} MRR`} href="/drill/cs_cases_month" />
           <Stat label="Monthly active firms" value={`${metrics.monthlyActiveFirms}/${metrics.totalCustomers}`} href="/drill/cs_active_firms" />
           <Stat label="Target attainment (avg)" value={metrics.targetAttainmentAvg == null ? "-" : `${metrics.targetAttainmentAvg}%`} />
           <Stat label="2nd-case conversion" value={metrics.secondCaseConversionRate == null ? "-" : `${metrics.secondCaseConversionRate}%`} />
           <Stat label="Avg days to first case" value={metrics.avgDaysToFirstCase == null ? "-" : `${metrics.avgDaysToFirstCase}d`} />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Expert reviews</h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      <Section title="Expert reviews">
+        <StatGrid cols={3}>
           <Stat label="Offered" value={metrics.expertReviewsOffered} href="/drill/cs_expert_missing" />
           <Stat label="Booked" value={metrics.expertReviewsBooked} />
           <Stat label="Completed" value={metrics.expertReviewsCompleted} tone="good" />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ActionQueue title="Today's CS priorities" items={queue} />
@@ -108,7 +101,21 @@ export default async function CsPage({
         <Card>
           <CardHeader title="Account health board" action={<Badge>{board.length} firms</Badge>} />
           <Table
-            headers={["Firm", "Seg", "Target", "MTD", "30d", "Attain", "Last case", "Days", "Health", "Issues", "Review", "Next action"]}
+            dense
+            headers={[
+              "Firm",
+              "Seg",
+              { label: "Target", align: "right" },
+              { label: "MTD", align: "right" },
+              { label: "30d", align: "right" },
+              { label: "Attain", align: "right" },
+              "Last case",
+              { label: "Days", align: "right" },
+              "Health",
+              { label: "Issues", align: "right" },
+              "Review",
+              "Next action",
+            ]}
             rows={board.map((r) => [
               <Link key="f" href={`/firms/${r.companyId}`} className="font-medium hover:underline">{r.firm}</Link>,
               r.segment ? r.segment.replace("_", " ") : "-",
@@ -122,8 +129,8 @@ export default async function CsPage({
               r.openIssues || "-",
               r.expertReviewMissing ? <Badge key="r" tone="red">missing</Badge> : "-",
               r.nextAction
-                ? <span>{r.nextAction}{r.nextActionDue ? <span className="text-xs text-zinc-400"> ({r.nextActionDue.slice(0, 10)})</span> : null}</span>
-                : <span className="text-zinc-400">none set</span>,
+                ? <Cell key="n" sub={r.nextActionDue ? r.nextActionDue.slice(0, 10) : undefined}>{r.nextAction}</Cell>
+                : <span key="n" className="text-zinc-400">none set</span>,
             ])}
           />
         </Card>

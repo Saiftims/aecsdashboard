@@ -1,18 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import { env } from "@/lib/env";
-import { runSync } from "@/lib/sync/run";
+import { NextRequest } from "next/server";
+import { cronUnauthorized } from "@/lib/env";
+import { runSync, syncResponse } from "@/lib/sync/run";
 
 export const maxDuration = 300;
 
-function authorized(req: NextRequest): boolean {
-  const secret = env.cronSecret();
-  if (!secret) return true;
-  return req.headers.get("authorization") === `Bearer ${secret}`;
-}
-
-/** Nightly: case pull + rollups + lifecycle automation + HubSpot write-back. */
+/** Hourly (at :05): case pull + rollups + lifecycle automation + HubSpot
+ * write-back. The cases-probe cron triggers the same pair early when PostHog
+ * shows a case the table does not have yet. */
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const results = await runSync(["cases", "rollup"]);
-  return NextResponse.json(results);
+  const denied = cronUnauthorized(req);
+  if (denied) return denied;
+  return syncResponse(await runSync(["cases", "rollup"]));
 }

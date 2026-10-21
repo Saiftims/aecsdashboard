@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentAppUser } from "@/lib/supabase/server";
-import { runSync, type SyncKind } from "@/lib/sync/run";
+import { runSync, syncResponse, type SyncKind } from "@/lib/sync/run";
 
 export const maxDuration = 300;
 
@@ -17,6 +17,6 @@ export async function POST(req: Request) {
   const kinds: SyncKind[] = body.full
     ? ["hubspot_full", "calendly", "quo", "cases", "rollup", "stripe"]
     : ["hubspot_incremental", "calendly", "quo", "cases", "rollup", "stripe"];
-  const results = await runSync(kinds);
-  return NextResponse.json(results);
+  // 500 when any kind failed; the body still lists every kind's outcome.
+  return syncResponse(await runSync(kinds));
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Badge, Card, CardHeader, Table } from "@/components/ui";
+import { Badge, Card, CardHeader, Cell, Note, PageHeader, Table, TextLink } from "@/components/ui";
 import { drill } from "@/lib/drill";
 import { hubspotDealUrl } from "@/lib/hubspot/stages";
 import { loadSettings } from "@/lib/settings";
@@ -23,11 +23,11 @@ export default async function DrillPage({
   const settings = await loadSettings();
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{result.label}</h1>
-        <Badge tone="blue">{result.rows.length} records</Badge>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={result.label}
+        actions={<Badge tone="blue">{result.rows.length} records</Badge>}
+      />
 
       <Card>
         <CardHeader title="Related records" />
@@ -47,26 +47,19 @@ export default async function DrillPage({
               ? <span key="lt">{r.lastTouch}</span>
               : <span key="lt" className="text-zinc-400">no touch logged</span>,
             r.nextStep ? (
-              <span key="n">
-                {r.nextStep}
-                {r.nextStepDate ? (
-                  <span className="text-xs text-zinc-400"> (by {r.nextStepDate})</span>
-                ) : null}
-              </span>
+              <Cell key="n" sub={r.nextStepDate ? `by ${r.nextStepDate}` : undefined}>{r.nextStep}</Cell>
             ) : (
               <span key="n" className="text-zinc-400">none set</span>
             ),
             <span key="l" className="space-x-2 text-xs">
               {r.companyId ? (
-                <Link href={`/firms/${r.companyId}`} className="text-blue-600 hover:underline">
-                  Account
-                </Link>
+                <TextLink href={`/firms/${r.companyId}`}>Account</TextLink>
               ) : null}
               {r.dealId ? (
                 <a
                   href={hubspotDealUrl(settings.hubspotPortalId, r.dealId)}
                   target="_blank" rel="noreferrer"
-                  className="text-blue-600 hover:underline"
+                  className="text-blue-600 hover:underline dark:text-blue-400"
                 >
                   HubSpot
                 </a>
@@ -75,11 +68,11 @@ export default async function DrillPage({
           ])}
         />
       </Card>
-      <p className="text-xs text-zinc-400">
-        <Link href={user.role === "cs" ? "/cs" : "/ae"} className="hover:underline">
+      <Note className="px-0 pb-0">
+        <TextLink href={user.role === "cs" ? "/cs" : "/ae"}>
           &larr; Back to dashboard
-        </Link>
-      </p>
+        </TextLink>
+      </Note>
     </div>
   );
 }

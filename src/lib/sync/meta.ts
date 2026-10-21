@@ -17,7 +17,7 @@ import {
   readCreatives, type MetaCreative, type MetaLead,
 } from "@/lib/meta/client";
 import { loadMetaSheetRows, normName } from "@/lib/meta-leads";
-import { supabaseService } from "@/lib/supabase/server";
+import { must, supabaseService } from "@/lib/supabase/server";
 
 /** Ahmad "Alex" Qoqazeh - every new Meta lead is his (owner, 2026-10-13). */
 const ALEX_OWNER_ID = "36480771";
@@ -207,10 +207,10 @@ export async function syncMetaLeads(sinceMs?: number) {
   // surface an older submission the archive had missed; HubSpot already has
   // that person from its own Facebook integration, and announcing a July
   // lead as new would mislead the team. Mark those handled instead.
-  await sb.from("meta_leads").update({
+  await must("meta_leads mark pre-existing", sb.from("meta_leads").update({
     hubspot_pushed_at: new Date().toISOString(),
     hubspot_push_note: `pre-existing; not pushed (went live ${PUSH_SINCE.slice(0, 10)})`,
-  }).is("hubspot_pushed_at", null).lt("created_time", PUSH_SINCE);
+  }).is("hubspot_pushed_at", null).lt("created_time", PUSH_SINCE));
   const { data: pending } = await sb.from("meta_leads")
     .select("leadgen_id, created_time, form_name, ad_name, campaign_name, full_name, email, phone, company, answers")
     .is("hubspot_pushed_at", null).eq("is_test", false)
@@ -246,7 +246,9 @@ export async function syncMetaLeads(sinceMs?: number) {
     }
     if (r.repeat) stats.repeats += 1;
     if (r.error) stats.pushErrors += 1;
-    await sb.from("meta_leads").update({
+    // Fatal: if this write is lost the lead is pushed - and announced - again
+    // next minute.
+    await must(`meta_leads push state ${lead.leadgen_id}`, sb.from("meta_leads").update({
       hubspot_contact_id: r.contactId ?? null,
       hubspot_deal_id: r.dealId ?? null,
       // An error leaves hubspot_pushed_at null so the next minute retries it;
@@ -254,7 +256,7 @@ export async function syncMetaLeads(sinceMs?: number) {
       hubspot_pushed_at: r.error ? null : new Date().toISOString(),
       hubspot_push_note: r.note,
       ...(r.dealCreated && qualified ? { qualified_at: new Date().toISOString(), qualified_via: via } : {}),
-    }).eq("leadgen_id", lead.leadgen_id);
+    }).eq("leadgen_id", lead.leadgen_id));
   }
   if (sheet) {
     try { stats.promoted = await promoteQualified(sheet, qualifiedVia); } catch (e) { console.error("promoteQualified", e); }
@@ -303,9 +305,9 @@ async function promoteQualified(
     } else if (deal) {
       note += ` - deal already in ${SALES_STAGE_LABELS[deal.properties.dealstage ?? ""] ?? deal.properties.dealstage}, left`;
     }
-    await sb.from("meta_leads").update({
+    await must(`meta_leads qualified ${c.leadgen_id}`, sb.from("meta_leads").update({
       qualified_at: now, qualified_via: c.via, hubspot_push_note: `${c.hubspot_push_note ?? ""} · ${note}`,
-    }).eq("leadgen_id", c.leadgen_id);
+    }).eq("leadgen_id", c.leadgen_id));
   }
   return promoted;
 }

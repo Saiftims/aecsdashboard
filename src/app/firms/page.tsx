@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Badge, Card, CardHeader, Table, healthTone } from "@/components/ui";
+import {
+  Badge, Button, Card, CardBody, CardHeader, PageHeader, Table, healthTone, inputCls,
+} from "@/components/ui";
 import { supabaseService, currentAppUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -30,41 +32,47 @@ export default async function FirmsPage({
   if (params.active === "no") rows = rows.filter((c) => c.cases_30d === 0);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Firms</h1>
-        <form className="flex gap-2" action="/firms">
-          <input
-            name="q" placeholder="Search firms..." defaultValue={params.q ?? ""}
-            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <select
-            name="health" defaultValue={params.health ?? ""}
-            className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          >
-            <option value="">Any health</option>
-            <option value="green">Green</option>
-            <option value="yellow">Yellow</option>
-            <option value="red">Red</option>
-          </select>
-          <select
-            name="active" defaultValue={params.active ?? ""}
-            className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          >
-            <option value="">Active + inactive</option>
-            <option value="yes">Active (case in 30d)</option>
-            <option value="no">Inactive</option>
-          </select>
-          <button className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
-            Filter
-          </button>
-        </form>
-      </div>
+    <div className="space-y-6">
+      <PageHeader title="Firms" />
+
+      <Card>
+        <CardBody className="p-3">
+          <form className="flex flex-wrap items-center gap-2" action="/firms">
+            <div className="min-w-48 flex-1">
+              <input name="q" placeholder="Search firms..." defaultValue={params.q ?? ""} className={inputCls} />
+            </div>
+            <div className="w-full sm:w-44">
+              <select name="health" defaultValue={params.health ?? ""} className={inputCls}>
+                <option value="">Any health</option>
+                <option value="green">Green</option>
+                <option value="yellow">Yellow</option>
+                <option value="red">Red</option>
+              </select>
+            </div>
+            <div className="w-full sm:w-48">
+              <select name="active" defaultValue={params.active ?? ""} className={inputCls}>
+                <option value="">Active + inactive</option>
+                <option value="yes">Active (case in 30d)</option>
+                <option value="no">Inactive</option>
+              </select>
+            </div>
+            <Button type="submit">Filter</Button>
+          </form>
+        </CardBody>
+      </Card>
 
       <Card>
         <CardHeader title={`${rows.length} firms`} />
         <Table
-          headers={["Firm", "Health", "Cases (30d)", "Lifetime", "Last case", "Est. revenue", "Trend"]}
+          headers={[
+            "Firm",
+            "Health",
+            "Cases (30d)",
+            { label: "Lifetime", align: "right" },
+            "Last case",
+            { label: "Est. revenue", align: "right" },
+            "Trend",
+          ]}
           rows={rows.map((c) => [
             <Link key="l" href={`/firms/${c.hubspot_id}`} className="font-medium hover:underline">
               {c.name ?? c.domain ?? c.hubspot_id}

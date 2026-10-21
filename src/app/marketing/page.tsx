@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { MarketingAds } from "@/components/marketing-ads";
+import { PageHeader } from "@/components/ui";
 import { marketingReport, type MarketingRange } from "@/lib/marketing";
 import { currentAppUser } from "@/lib/supabase/server";
 
@@ -29,16 +30,14 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   const report = await marketingReport(range, now);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Marketing</h1>
-          <p className="text-sm text-zinc-500">
-            Every ad in the Meta account with its creative and {report.rangeLabel.toLowerCase()} performance.
-            {report.syncedAt ? ` Synced ${new Date(report.syncedAt).toLocaleString("en-GB", { timeZone: "Europe/London", dateStyle: "medium", timeStyle: "short" })}.` : ""}
-          </p>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Marketing"
+        description={<>
+          Every ad in the Meta account with its creative and {report.rangeLabel.toLowerCase()} performance.
+          {report.syncedAt ? ` Synced ${new Date(report.syncedAt).toLocaleString("en-GB", { timeZone: "Europe/London", dateStyle: "medium", timeStyle: "short" })}.` : ""}
+        </>}
+      />
       <MarketingAds report={report} ranges={[...RANGES, ...monthOptions(now)]} />
     </div>
   );

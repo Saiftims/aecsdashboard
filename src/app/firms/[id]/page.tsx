@@ -3,7 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { MonthlyBarChart } from "@/components/charts";
 import { AcceptHandoffButton, FirmActions } from "@/components/firm-actions";
 import { CaseWorkflow, type CaseItem } from "@/components/case-workflow";
-import { Badge, Card, CardHeader, Stat, Table, healthTone } from "@/components/ui";
+import {
+  Badge, Card, CardBody, CardHeader, Cell, Empty, PageHeader, Stat, StatGrid, Table, TextLink,
+  healthTone,
+} from "@/components/ui";
 import {
   ACTIVATION_STAGE_LABELS, hubspotCompanyUrl, hubspotDealUrl, type ActivationStage,
 } from "@/lib/hubspot/stages";
@@ -75,43 +78,48 @@ export default async function FirmPage({
   const ownerOptions = (owners ?? [])
     .filter((o) => o.hubspot_owner_id)
     .map((o) => ({ id: o.hubspot_owner_id as string, label: o.full_name ?? o.email }));
+  const segment = company.firm_segment ?? (p.sw_firm_segment as string | null) ?? null;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">{company.name ?? company.domain}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+      <PageHeader
+        eyebrow="Firm"
+        title={company.name ?? company.domain}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-2">
             {mapping ? <Badge tone="blue">Firm ID: {mapping.sw_organization_id ?? mapping.sw_account_id}</Badge>
                      : <Badge tone="yellow">No firm mapping</Badge>}
             <span>HubSpot: {company.hubspot_id}</span>
-            {activationDeal?.activation_stage ? (
-              <Badge tone="blue">
-                {ACTIVATION_STAGE_LABELS[activationDeal.activation_stage as ActivationStage]}
-              </Badge>
-            ) : salesDeal ? <Badge>{salesDeal.stage_label}</Badge> : null}
+          </span>
+        }
+        actions={
+          <>
             {company.health_score !== null ? (
               <Badge tone={healthTone(company.health_category)}>
                 Health {company.health_score} ({company.health_category})
               </Badge>
             ) : null}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {activationDeal?.activation_stage === "handoff_pending" && user.role !== "ae" ? (
-            <AcceptHandoffButton dealId={activationDeal.hubspot_id} />
-          ) : null}
-          <a
-            href={hubspotCompanyUrl(settings.hubspotPortalId, company.hubspot_id)}
-            target="_blank" rel="noreferrer"
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            Open in HubSpot
-          </a>
-        </div>
-      </div>
+            {segment ? <Badge tone="violet">{segment.replace("_", " ")}</Badge> : null}
+            {activationDeal?.activation_stage ? (
+              <Badge tone="blue">
+                {ACTIVATION_STAGE_LABELS[activationDeal.activation_stage as ActivationStage]}
+              </Badge>
+            ) : salesDeal ? <Badge>{salesDeal.stage_label}</Badge> : null}
+            {activationDeal?.activation_stage === "handoff_pending" && user.role !== "ae" ? (
+              <AcceptHandoffButton dealId={activationDeal.hubspot_id} />
+            ) : null}
+            <a
+              href={hubspotCompanyUrl(settings.hubspotPortalId, company.hubspot_id)}
+              target="_blank" rel="noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              Open in HubSpot
+            </a>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+      <StatGrid cols={6}>
         <Stat label="Lifetime cases" value={company.cases_lifetime} />
         <Stat label="Cases 30d" value={company.cases_30d} />
         <Stat label="Cases 90d" value={company.cases_90d} />
@@ -127,21 +135,17 @@ export default async function FirmPage({
           value={`$${Math.round(company.est_revenue).toLocaleString()}`}
           sub={company.actual_revenue === null ? "estimated" : "actual available"}
         />
-      </div>
+      </StatGrid>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Card>
             <CardHeader title="Cases by month" />
-            <div className="p-4">
-              {firmCases.length ? (
-                <MonthlyBarChart data={monthly} />
-              ) : (
-                <p className="py-8 text-center text-sm text-zinc-400">
-                  {mapping ? "No cases submitted yet" : "Map this firm in Settings to see case data"}
-                </p>
-              )}
-            </div>
+            {firmCases.length ? (
+              <CardBody><MonthlyBarChart data={monthly} /></CardBody>
+            ) : (
+              <Empty>{mapping ? "No cases submitted yet" : "Map this firm in Settings to see case data"}</Empty>
+            )}
           </Card>
 
           <Card>
@@ -164,25 +168,26 @@ export default async function FirmPage({
 
           <Card>
             <CardHeader title="Activity timeline (latest 50)" />
-            <div className="max-h-96 divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
-              {(activities ?? []).map((a) => (
-                <div key={a.hubspot_id} className="px-4 py-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Badge tone={a.kind === "task" ? "yellow" : "default"}>{a.kind}</Badge>
-                    {a.outcome ? <Badge tone="blue">{a.outcome}</Badge> : null}
-                    <span className="text-xs text-zinc-400">
-                      {a.occurred_at ? new Date(a.occurred_at).toLocaleString() : ""}
-                    </span>
+            {activities?.length ? (
+              <div className="max-h-96 divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
+                {activities.map((a) => (
+                  <div key={a.hubspot_id} className="px-4 py-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone={a.kind === "task" ? "yellow" : "default"}>{a.kind}</Badge>
+                      {a.outcome ? <Badge tone="blue">{a.outcome}</Badge> : null}
+                      <span className="text-xs text-zinc-500">
+                        {a.occurred_at ? new Date(a.occurred_at).toLocaleString() : ""}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-zinc-600 dark:text-zinc-300">
+                      {a.subject ?? stripHtml(a.body ?? "").slice(0, 180)}
+                    </p>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-zinc-600 dark:text-zinc-300">
-                    {a.subject ?? stripHtml(a.body ?? "").slice(0, 180)}
-                  </p>
-                </div>
-              ))}
-              {!activities?.length ? (
-                <p className="px-4 py-6 text-center text-sm text-zinc-400">No activity yet</p>
-              ) : null}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <Empty>No activity yet</Empty>
+            )}
           </Card>
         </div>
 
@@ -199,7 +204,7 @@ export default async function FirmPage({
 
           <CaseWorkflow
             companyId={company.hubspot_id}
-            segment={company.firm_segment ?? (p.sw_firm_segment as string | null) ?? null}
+            segment={segment}
             monthlyTarget={company.monthly_case_target ?? null}
             cases={caseItems}
             canEdit={user.role !== "ae"}
@@ -210,57 +215,40 @@ export default async function FirmPage({
               title="Contacts"
               action={<Badge>{contacts?.length ?? 0}</Badge>}
             />
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {(contacts ?? []).map((c) => {
+            <Table
+              dense
+              headers={["Contact", "Reach"]}
+              empty="No contacts on this firm yet - log a visit or add one in HubSpot."
+              rows={(contacts ?? []).map((c) => {
                 const name = `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || c.email;
                 const cp = c.properties ?? {};
                 const role = cp.sw_contact_role as string | undefined;
                 const isChampion = cp.sw_champion_status === "active";
-                return (
-                  <div key={c.hubspot_id} className="px-4 py-2.5 text-sm">
-                    <div className="flex items-center gap-2">
+                return [
+                  <Cell key="n" sub={cp.jobtitle ? String(cp.jobtitle) : undefined}>
+                    <span className="inline-flex flex-wrap items-center gap-2">
                       <span className="font-medium">{name}</span>
                       {isChampion ? <Badge tone="green">champion</Badge> : null}
                       {role && role !== "other" && !isChampion ? (
                         <Badge>{role.replaceAll("_", " ")}</Badge>
                       ) : null}
-                    </div>
-                    {cp.jobtitle ? (
-                      <div className="text-xs text-zinc-500">{cp.jobtitle}</div>
+                    </span>
+                  </Cell>,
+                  <div key="r" className="space-y-0.5 text-xs">
+                    {c.email ? <div><TextLink href={`mailto:${c.email}`}>{c.email}</TextLink></div> : null}
+                    {cp.phone ? <div><TextLink href={`tel:${cp.phone}`}>{cp.phone}</TextLink></div> : null}
+                    {!c.email && !cp.phone ? (
+                      <span className="text-zinc-400">no email / phone on record</span>
                     ) : null}
-                    <div className="mt-0.5 space-y-0.5 text-xs">
-                      {c.email ? (
-                        <div>
-                          <a href={`mailto:${c.email}`} className="text-blue-600 hover:underline">
-                            {c.email}
-                          </a>
-                        </div>
-                      ) : null}
-                      {cp.phone ? (
-                        <div>
-                          <a href={`tel:${cp.phone}`} className="text-blue-600 hover:underline">
-                            {cp.phone}
-                          </a>
-                        </div>
-                      ) : null}
-                      {!c.email && !cp.phone ? (
-                        <span className="text-zinc-400">no email / phone on record</span>
-                      ) : null}
-                    </div>
-                  </div>
-                );
+                  </div>,
+                ];
               })}
-              {!contacts?.length ? (
-                <p className="px-4 py-4 text-sm text-zinc-400">
-                  No contacts on this firm yet - log a visit or add one in HubSpot.
-                </p>
-              ) : null}
-            </div>
+            />
           </Card>
 
           <Card>
             <CardHeader title="Key people & next step" />
-            <div className="space-y-1 p-4 text-sm">
+            <CardBody className="space-y-1 text-sm">
               <Row k="Champion" v={champion ? `${champion.first_name ?? ""} ${champion.last_name ?? ""}` : p.sw_active_champion ?? "-"} />
               <Row k="Decision-maker" v={decisionMaker ? `${decisionMaker.first_name ?? ""} ${decisionMaker.last_name ?? ""}` : "-"} />
               <Row k="Est. monthly volume" v={p.sw_estimated_monthly_case_volume ?? "-"} />
@@ -268,23 +256,23 @@ export default async function FirmPage({
               <Row k="Expansion potential" v={p.sw_expansion_potential ?? "-"} />
               <Row k="Next step" v={mainDeal?.properties?.sw_next_step ?? "-"} />
               <Row k="Next-step date" v={mainDeal?.properties?.sw_next_step_date ?? "-"} />
-            </div>
+            </CardBody>
           </Card>
 
           <Card>
             <CardHeader title="Health breakdown" />
-            <div className="space-y-1.5 p-4 text-sm">
+            <CardBody className="space-y-1.5 text-sm">
               {healthFactors.length ? healthFactors.map((f) => (
                 <div key={f.label} className="flex items-center justify-between">
                   <span className={f.earned ? "" : "text-zinc-400"}>{f.label}</span>
-                  <span className={f.earned ? "font-medium text-emerald-600" : "text-zinc-400"}>
+                  <span className={f.earned ? "font-medium tabular-nums text-emerald-600 dark:text-emerald-400" : "tabular-nums text-zinc-400"}>
                     {f.earned}/{f.points}
                   </span>
                 </div>
               )) : <p className="text-zinc-400">Computed on next rollup sync</p>}
               {(company.risk_flags ?? []).length ? (
                 <div className="mt-3 border-t border-zinc-100 pt-2 dark:border-zinc-800">
-                  <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">Risk flags</div>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Risk flags</div>
                   <div className="flex flex-wrap gap-1">
                     {company.risk_flags.map((f: string) => (
                       <Badge key={f} tone="red">{f}</Badge>
@@ -292,14 +280,14 @@ export default async function FirmPage({
                   </div>
                 </div>
               ) : null}
-            </div>
+            </CardBody>
           </Card>
 
           <Card>
             <CardHeader title="Handoff summary" />
-            <div className="p-4 text-sm whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
+            <CardBody className="whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-300">
               {activationDeal?.properties?.sw_handoff_summary ?? "No handoff recorded."}
-            </div>
+            </CardBody>
           </Card>
         </div>
       </div>

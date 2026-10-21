@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button, inputCls } from "@/components/ui";
+import { Badge, Button, Field, inputCls } from "@/components/ui";
 
 export function SettingField({
   settingKey, label, defaultValue, type = "number",
@@ -32,16 +32,19 @@ export function SettingField({
 
   return (
     <div className="flex items-end gap-2">
-      <label className="flex-1">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">{label}</span>
-        <input
-          className={inputCls} type={type} value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-      </label>
+      <div className="min-w-0 flex-1">
+        <Field label={label}>
+          <input
+            className={inputCls} type={type} value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </Field>
+      </div>
       <Button variant="secondary" onClick={save} disabled={state === "busy"}>
-        {state === "busy" ? "..." : state === "ok" ? "Saved" : "Save"}
+        {state === "busy" ? "..." : "Save"}
       </Button>
+      {state === "ok" ? <Badge tone="green" className="mb-1.5">Saved</Badge> : null}
+      {state === "err" ? <Badge tone="red" className="mb-1.5">Failed</Badge> : null}
     </div>
   );
 }
@@ -85,7 +88,7 @@ export function MappingEditor({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="w-56 truncate text-sm font-medium">{companyName}</span>
+      <span className="w-56 truncate text-sm font-medium text-zinc-800 dark:text-zinc-100" title={companyName}>{companyName}</span>
       <input
         list={`sw-options-${hubspotCompanyId}`}
         className={`${inputCls} flex-1`}

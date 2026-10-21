@@ -1,5 +1,21 @@
 "use client";
 
+/** Shared palette - the HSL triplets live in globals.css so charts follow the theme. */
+const C = {
+  blue: "hsl(var(--chart-1))",
+  green: "hsl(var(--chart-2))",
+  greenSoft: "hsl(var(--chart-2) / 0.35)",
+  amber: "hsl(var(--chart-3))",
+  violet: "hsl(var(--chart-4))",
+  violetSoft: "hsl(var(--chart-4) / 0.35)",
+  red: "hsl(var(--chart-5))",
+  slate: "hsl(var(--chart-6))",
+  text: "hsl(var(--chart-text))",
+  grid: "hsl(var(--chart-grid))",
+};
+/** Ordered series colours for multi-line charts. */
+const SERIES_COLOURS = [C.blue, C.green, C.amber, C.violet, C.red, C.slate];
+
 import { useRouter } from "next/navigation";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine,
@@ -29,7 +45,7 @@ export function FunnelChart({ data }: { data: { label: string; count: number }[]
         <Tooltip />
         <Bar dataKey="count" radius={[0, 6, 6, 0]}>
           {data.map((_, i) => (
-            <Cell key={i} fill={`hsl(${210 - i * 12} 70% ${45 + i * 3}%)`} />
+            <Cell key={i} fill={`hsl(var(--chart-1) / ${Math.max(0.35, 1 - i * 0.09)})`} />
           ))}
         </Bar>
       </BarChart>
@@ -56,15 +72,15 @@ export function DailyActivityChart({
   // above the tallest stack so its label is readable.
   const maxVal = Math.max(activityTarget ?? 0, ...data.map(height), 1);
   const SERIES = [
-    { key: "calls", name: "Calls", fill: "hsl(210 70% 50%)", always: true,
+    { key: "calls", name: "Calls", fill: C.blue, always: true,
       get: (d: (typeof data)[number]) => d.calls },
-    { key: "emails", name: "Emails", fill: "hsl(160 60% 45%)", always: true,
+    { key: "emails", name: "Emails", fill: C.green, always: true,
       get: (d: (typeof data)[number]) => d.emails },
-    { key: "sms", name: "Texts", fill: "hsl(38 92% 50%)", always: false,
+    { key: "sms", name: "Texts", fill: C.amber, always: false,
       get: (d: (typeof data)[number]) => d.sms },
     // DMs, meetings, demos and visits together. Split out, each was a sliver
     // too thin to read on the stack.
-    { key: "other", name: "Other channels", fill: "hsl(280 55% 58%)", always: false,
+    { key: "other", name: "Other channels", fill: C.violet, always: false,
       get: (d: (typeof data)[number]) => d.other },
   ];
   // Hide a channel nobody used, so a team that only calls and emails still
@@ -92,11 +108,11 @@ export function DailyActivityChart({
         {activityTarget ? (
           <ReferenceLine
             y={activityTarget}
-            stroke="hsl(220 9% 40%)"
+            stroke={C.text}
             strokeDasharray="5 4"
             label={{
               value: `Target ${activityTarget}/day`,
-              position: "right", fontSize: 10, fill: "hsl(220 9% 40%)",
+              position: "right", fontSize: 10, fill: C.text,
             }}
           />
         ) : null}
@@ -132,7 +148,7 @@ export function RetentionChart({
             key={c.label}
             type="monotone"
             dataKey={c.label}
-            stroke={`hsl(${210 - i * 40} 70% 50%)`}
+            stroke={SERIES_COLOURS[i % SERIES_COLOURS.length]}
             strokeWidth={2}
             connectNulls
             dot={{ r: 3 }}
@@ -168,13 +184,13 @@ export function RevenueRetentionChart({
                tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
         <Tooltip formatter={(v) => (v === null ? "-" : `${v}% of month 0`)} />
         <Legend />
-        <ReferenceLine y={100} stroke="hsl(0 0% 60%)" strokeDasharray="5 4" />
+        <ReferenceLine y={100} stroke={C.slate} strokeDasharray="5 4" />
         {cohorts.map((c, i) => (
           <Line
             key={c.label}
             type="monotone"
             dataKey={c.label}
-            stroke={`hsl(${210 - i * 40} 70% 50%)`}
+            stroke={SERIES_COLOURS[i % SERIES_COLOURS.length]}
             strokeWidth={2}
             connectNulls
             dot={{ r: 3 }}
@@ -202,8 +218,8 @@ export function BillingRetentionChart({
   });
   const peak = Math.max(100, ...curves.flatMap((c) => c.points.map((p) => p.pct ?? 0)));
   const color: Record<string, string> = {
-    Subscription: "hsl(160 60% 40%)",
-    Transactional: "hsl(210 70% 50%)",
+    Subscription: C.green,
+    Transactional: C.blue,
   };
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -214,14 +230,14 @@ export function BillingRetentionChart({
                tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
         <Tooltip formatter={(v) => (v === null ? "-" : `${v}% of month 0`)} />
         <Legend />
-        <ReferenceLine y={100} stroke="hsl(0 0% 60%)" strokeDasharray="5 4"
-                       label={{ value: "held", position: "right", fontSize: 10, fill: "hsl(0 0% 45%)" }} />
+        <ReferenceLine y={100} stroke={C.slate} strokeDasharray="5 4"
+                       label={{ value: "held", position: "right", fontSize: 10, fill: C.text }} />
         {curves.map((c) => (
           <Line
             key={c.label}
             type="monotone"
             dataKey={c.label}
-            stroke={color[c.label] ?? "hsl(280 60% 50%)"}
+            stroke={color[c.label] ?? C.violet}
             strokeWidth={2.5}
             connectNulls
             dot={{ r: 4 }}
@@ -260,9 +276,9 @@ export function MonthlyRevenueChart({
         <Tooltip formatter={(v, name) => [money(Number(v)), name]} />
         {hasModelled && <Legend wrapperStyle={{ fontSize: 11 }} />}
         <Bar dataKey="collected" stackId="rev" name="Collected (Stripe)"
-             fill="hsl(150 55% 40%)" radius={hasModelled ? undefined : [4, 4, 0, 0]} />
+             fill={C.green} radius={hasModelled ? undefined : [4, 4, 0, 0]} />
         <Bar dataKey="modelled" stackId="rev" name="Estimated (not in Stripe)"
-             fill="hsl(150 30% 72%)" radius={[4, 4, 0, 0]} />
+             fill={C.greenSoft} radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -356,8 +372,8 @@ export function MonthlyNewFirmsChart({
         <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="firstCase" stackId="firms" name="Submitted a case" fill="hsl(265 60% 55%)" />
-        <Bar dataKey="signupOnly" stackId="firms" name="Signed up, no case yet" fill="hsl(265 45% 78%)"
+        <Bar dataKey="firstCase" stackId="firms" name="Submitted a case" fill={C.violet} />
+        <Bar dataKey="signupOnly" stackId="firms" name="Signed up, no case yet" fill={C.violetSoft}
              radius={[4, 4, 0, 0]} />
         {target ? targetLine(target, `Target ${target}`) : null}
       </BarChart>
@@ -371,17 +387,17 @@ function targetLine(y: number, label: string) {
   return (
     <ReferenceLine
       y={y}
-      stroke="hsl(220 9% 40%)"
+      stroke={C.text}
       strokeDasharray="5 4"
       ifOverflow="extendDomain"
-      label={{ value: label, position: "right", fontSize: 10, fill: "hsl(220 9% 40%)" }}
+      label={{ value: label, position: "right", fontSize: 10, fill: C.text }}
     />
   );
 }
 
 export function MonthlyBarChart({
   data,
-  color = "hsl(210 70% 50%)",
+  color = C.blue,
   target,
   drillBase,
 }: {

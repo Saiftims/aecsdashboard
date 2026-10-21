@@ -1,8 +1,11 @@
 "use client";
 
 import { clsx } from "clsx";
-import { useState, type ReactNode } from "react";
-import { Card, CardHeader, Stat, inputCls } from "@/components/ui";
+import { useState } from "react";
+import {
+  Badge, Card, CardBody, CardHeader, Cell, Empty, Field, Note, Stat, StatGrid, Table, inputCls, selectCls,
+  type Column,
+} from "@/components/ui";
 import type { LeadSource, UnitEconomicsSnapshot } from "@/lib/unit-economics";
 
 type Bands = [number, number, number, number];
@@ -81,46 +84,32 @@ const day = (iso: string) => iso.slice(0, 10);
 type SubSort = "renews" | "left" | "lead" | "subscribed" | "firm";
 type Basis = "started" | "lead";
 
-const selectCls = "mt-1 w-full rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900";
+const right = (label: string, width?: string): Column => ({ label, align: "right", width });
+const left = (label: string, width?: string): Column => ({ label, align: "left", width });
 
-function Input({ label, value: v, onChange, hint }: {
+const COHORT_HEADERS: Column[] = [
+  left("Month", "14%"), left("Firms signed up", "15%"), right("Ad spend", "10%"), right("Cost / lead", "9%"),
+  right("Paying", "11%"), right("CAC", "10%"), right("Avg $/mo", "8%"), right("LTV", "9%"),
+  right("LTV : CAC", "7%"), right("Payback", "7%"),
+];
+
+const SCENARIO_HEADERS: Column[] = [
+  left("Churn"), right("M1 / M2 / M3 / M4+"), right("Still paying at M12"), right("12-mo value"),
+  right("LTV, fully loaded"), right("LTV : CAC"), right("Payback"),
+];
+
+const SUBSCRIBER_HEADERS: Column[] = [
+  left("Firm"), left("Plan"), right("$/mo"), right("Subscribed"), right("Renews"), right("Cases this period"),
+  right("Cases left"), right("Lead in"), right("Source"),
+];
+
+function NumberInput({ label, value: v, onChange, hint }: {
   label: string; value: string; onChange: (v: string) => void; hint?: string;
 }) {
   return (
-    <label className="block text-xs">
-      <span className="font-medium text-zinc-600 dark:text-zinc-300">{label}</span>
-      <input type="number" min={0} value={v} onChange={(e) => onChange(e.target.value)} className={selectCls} />
-      {hint ? <span className="mt-0.5 block text-zinc-400">{hint}</span> : null}
-    </label>
-  );
-}
-
-function Grid({ headers, rows, highlight, left = 1, strong = -1 }: {
-  headers: string[]; rows: ReactNode[][]; highlight: number; left?: number; strong?: number;
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
-            {headers.map((h, i) => (
-              <th key={h + i} className={clsx("px-4 py-2 font-medium", i < left ? "text-left" : "text-right")}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className={clsx("border-b border-zinc-100 last:border-0 dark:border-zinc-800/60",
-              i === highlight && "bg-blue-50 dark:bg-blue-950/30", i === strong && "font-semibold")}>
-              {r.map((c, j) => (
-                <td key={j} className={clsx("px-4 py-2", j < left ? "text-left" : "text-right tabular-nums",
-                  j === 0 && "font-medium")}>{c}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Field label={label} hint={hint}>
+      <input type="number" min={0} value={v} onChange={(e) => onChange(e.target.value)} className={inputCls} />
+    </Field>
   );
 }
 
@@ -203,8 +192,8 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
 
   if (!Number.isFinite(total.cac)) {
     return (
-      <Card className="p-4 text-sm text-zinc-500">
-        No paid-sourced lead has become a paying customer yet, so there is no CAC to pay back.
+      <Card>
+        <Empty>No paid-sourced lead has become a paying customer yet, so there is no CAC to pay back.</Empty>
       </Card>
     );
   }
@@ -223,7 +212,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <StatGrid cols={4}>
         <Stat label="CAC, fully loaded" value={usd(total.cac)} tone="warn"
           sub={`${usd(total.adCac)} ads + ${usd(total.teamCac)} sales & CS salaries (${usd(snap.teamCost * 12)}/yr now)`} />
         <Stat label={`LTV, fully loaded · ${active.label}`} value={usd(total.ltv)}
@@ -233,75 +222,48 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           sub={`${allCusts.length} firms since July: ${kindsText(total.kinds)}`} />
         <Stat label="Payback" value={mo(total.payback)} tone={total.payback <= 12 ? "good" : "bad"}
           sub={`${usd(total.contribution)}/mo margin per paying firm`} />
-      </div>
+      </StatGrid>
 
       <Card>
         <CardHeader title={basis === "started" ? "Unit economics by month started" : "Unit economics by lead month"}
           action={
-            <label className="flex items-center gap-2 text-xs text-zinc-500">
+            <label className="flex items-center gap-2">
               <span>{active.label} churn · {ATTR_LABEL[attr]}</span>
-              <select className={inputCls} value={basis} onChange={(e) => setBasis(e.target.value as Basis)}>
+              <select className={selectCls} value={basis} onChange={(e) => setBasis(e.target.value as Basis)}>
                 <option value="started">Count firms by month they started</option>
                 <option value="lead">Count firms by month their lead came in</option>
               </select>
             </label>
           } />
-        <table className="w-full table-fixed text-sm">
-          <colgroup>
-            <col className="w-[14%]" /><col className="w-[15%]" /><col className="w-[10%]" /><col className="w-[9%]" />
-            <col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[8%]" /><col className="w-[9%]" />
-            <col className="w-[7%]" /><col className="w-[7%]" />
-          </colgroup>
-          <thead>
-            <tr className="border-b border-zinc-200 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
-              {[["Month", true], ["Firms signed up", true], ["Ad spend", false], ["Cost / lead", false], ["Paying", false],
-                ["CAC", false], ["Avg $/mo", false], ["LTV", false], ["LTV : CAC", false], ["Payback", false]]
-                .map(([h, l]) => (
-                  <th key={String(h)} className={clsx("px-3 py-2 font-medium", l ? "text-left" : "text-right")}>{String(h)}</th>
-                ))}
-            </tr>
-          </thead>
-          <tbody>
-            {cohortRows.map((c, i) => {
-              const last = i === cohortRows.length - 1;
-              const sub = "block text-[11px] font-normal leading-tight text-zinc-400";
-              return (
-                <tr key={c.name} className={clsx("border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800/60",
-                  last && "bg-zinc-50 font-semibold dark:bg-zinc-900/40")}>
-                  <td className="px-3 py-2.5">
-                    {"label" in c ? c.label : c.name}
-                    {"mature" in c && !c.mature ? <span className={sub}>still converting</span> : null}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className="text-base font-semibold">{c.arrived.length}</span>
-                    <span className={sub}>{kindsText(kindCount(c.arrived))}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {usd(c.spend)}
-                    {c.spendSource !== "meta" ? <span className={sub}>{c.spendSource === "planned" ? "planned" : "typed"}</span> : null}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {c.adLeads ? usd(c.spend / c.adLeads) : "—"}
-                    {c.adLeads ? <span className={sub}>{c.adLeads} leads</span> : null}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {c.paying}
-                    <span className={sub}>{c.paid} from ads</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{usd(c.cac)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{c.paying ? usd(c.plan) : "—"}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{usd(c.ltv)}</td>
-                  <td className={clsx("px-3 py-2.5 text-right tabular-nums",
-                    Number.isFinite(c.ltv / c.cac) && (c.ltv / c.cac >= 3 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"))}>
-                    {ratio(c.ltv, c.cac)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{mo(c.payback)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <p className="px-4 pb-3 pt-2 text-xs text-zinc-400">
+        <Table
+          dense
+          strongLast
+          headers={COHORT_HEADERS}
+          rows={cohortRows.map((c) => [
+            <Cell key="m" sub={"mature" in c && !c.mature ? "still converting" : undefined}>
+              {"label" in c ? c.label : c.name}
+            </Cell>,
+            <Cell key="f" sub={kindsText(kindCount(c.arrived))}>
+              <span className="text-base font-semibold">{c.arrived.length}</span>
+            </Cell>,
+            <Cell key="s" sub={c.spendSource !== "meta" ? (c.spendSource === "planned" ? "planned" : "typed") : undefined}>
+              {usd(c.spend)}
+            </Cell>,
+            <Cell key="cpl" sub={c.adLeads ? `${c.adLeads} leads` : undefined}>
+              {c.adLeads ? usd(c.spend / c.adLeads) : "—"}
+            </Cell>,
+            <Cell key="p" sub={`${c.paid} from ads`}>{c.paying}</Cell>,
+            usd(c.cac),
+            c.paying ? usd(c.plan) : "—",
+            usd(c.ltv),
+            <Cell key="r" className={clsx(
+              Number.isFinite(c.ltv / c.cac) && (c.ltv / c.cac >= 3 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"))}>
+              {ratio(c.ltv, c.cac)}
+            </Cell>,
+            mo(c.payback),
+          ])}
+        />
+        <Note>
           Firms signed up = every firm that started using the product that month (first app signup, first case or
           plan), whether on a plan, paying per case, or signed up with no case yet.
           {basis === "started"
@@ -311,31 +273,32 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           Avg $/mo is what a paying firm bills (plan, or per-case cash run rate); LTV is gross margin on that under
           the selected churn.
           {fromMeta ? " Ad spend is actual from the Meta Ads account." : " Ad spend is the Settings ledger; the Meta spend sync has not run yet."}
-        </p>
+        </Note>
       </Card>
 
       <Card>
         <CardHeader title="All months under each churn assumption" />
-        <Grid
-          headers={["Churn", "M1 / M2 / M3 / M4+", "Still paying at M12", "12-mo value", "LTV, fully loaded", "LTV : CAC", "Payback"]}
+        <Table
+          headers={SCENARIO_HEADERS}
+          rowClassName={(i) => (i === focusIdx ? "bg-blue-50 dark:bg-blue-950/30" : undefined)}
           rows={scenarios.map((sc) => {
             const ltv = value(total.contribution, sc.s, HORIZON);
             return [
-              sc.label, sc.bands.map((b) => `${b}%`).join(" / "), `${Math.round(sc.s[12] * 100)}%`,
+              <span key="l" className="font-medium">{sc.label}</span>,
+              sc.bands.map((b) => `${b}%`).join(" / "), `${Math.round(sc.s[12] * 100)}%`,
               usd(value(total.contribution, sc.s, 12)), usd(ltv), ratio(ltv, total.cac),
               mo(payback(total.cac, total.contribution, sc.s)),
             ];
           })}
-          highlight={focusIdx}
         />
       </Card>
 
       <Card>
         <CardHeader title="Every subscriber"
           action={
-            <label className="flex items-center gap-2 text-xs text-zinc-500">
+            <label className="flex items-center gap-2">
               <span>{liveCount} live · {unusedCount} with cases left{dueSoon ? ` · ${dueSoon} renewing within 7 days` : ""}</span>
-              <select className={inputCls} value={subSort} onChange={(e) => setSubSort(e.target.value as SubSort)}>
+              <select className={selectCls} value={subSort} onChange={(e) => setSubSort(e.target.value as SubSort)}>
                 <option value="renews">Renews soonest</option>
                 <option value="left">Most cases left</option>
                 <option value="lead">Lead date</option>
@@ -344,78 +307,73 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
               </select>
             </label>
           } />
-        <Grid left={2}
-          headers={["Firm", "Plan", "$/mo", "Subscribed", "Renews", "Cases this period", "Cases left", "Lead in", "Source"]}
+        <Table
+          headers={SUBSCRIBER_HEADERS}
           rows={sortedSubs.map((x) => {
             const soon = x.live && (x.left ?? 0) > 0 && (x.daysToRenewal ?? 99) <= 7;
             return [
-              x.firm,
-              <span key="p">
+              <span key="f" className="font-medium">{x.firm}</span>,
+              <Cell key="p" sub={x.note || undefined}>
                 {x.live ? x.planName : <span className="text-zinc-400">Cancelled</span>}
-                {x.note ? <span className="block text-xs text-zinc-400">{x.note}</span> : null}
-              </span>,
+              </Cell>,
               `${usd(x.plan)}`,
               day(x.subscribedAt),
               x.periodEnd
-                ? <span key="r" className={clsx(soon && "font-semibold text-amber-600")}>
+                ? <span key="r" className={clsx(soon && "font-semibold text-amber-600 dark:text-amber-400")}>
                     {day(x.periodEnd)}{x.daysToRenewal !== null ? <span className="ml-1 text-xs opacity-70">{x.daysToRenewal <= 0 ? "today" : `${x.daysToRenewal}d`}</span> : null}
                   </span>
                 : "—",
               x.casesThisPeriod === null ? "—" : `${x.casesThisPeriod}${x.included !== null ? ` / ${x.included}` : ""}`,
               x.left === null ? "—"
-                : <span key="l" className={clsx((x.left ?? 0) > 0 ? "font-semibold text-amber-600" : "text-zinc-400")}>{x.left}</span>,
+                : <span key="l" className={clsx((x.left ?? 0) > 0 ? "font-semibold text-amber-600 dark:text-amber-400" : "text-zinc-400")}>{x.left}</span>,
               day(x.leadAt),
-              <span key="s" className={clsx("rounded-full px-2 py-0.5 text-xs",
-                !x.preSwitch && paidSet.includes(x.source)
-                  ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
-                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300")}>
+              <Badge key="s" tone={!x.preSwitch && paidSet.includes(x.source) ? "blue" : "default"}>
                 {x.preEra ? "Before plans launched" : x.preSwitch ? "Lead from before July" : SOURCE_LABEL[x.source]}
-              </span>,
+              </Badge>,
             ];
           })}
-          highlight={-1}
         />
-        <p className="px-4 pb-3 pt-1 text-xs text-zinc-400">
+        <Note>
           Plan and renewal date from Stripe (synced every 3 hours); cases this period are the firm&apos;s submitted
           cases dated inside the current billing period, against the plan&apos;s allowance (Solo 2, Boutique 5,
           Growth 10). Firms renewing within 7 days with cases left are amber. Blue sources count as paid under the
           selected attribution; a plan from before August is listed but belongs to no cohort. Sources come from
           Lead Source on the firm&apos;s converting deal or contacts in HubSpot; correct a firm there.
-        </p>
+        </Note>
       </Card>
 
-      <Card className="p-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <label className="block text-xs">
-            <span className="font-medium text-zinc-600 dark:text-zinc-300">Churn assumption</span>
-            <select value={focus} onChange={(e) => setFocus(e.target.value)} className={selectCls}>
-              {scenarios.map((sc) => <option key={sc.key} value={sc.key}>{sc.label}</option>)}
-            </select>
-          </label>
-          <label className="block text-xs">
-            <span className="font-medium text-zinc-600 dark:text-zinc-300">Attribution</span>
-            <select value={attr} onChange={(e) => setAttr(e.target.value as Attribution)} className={selectCls}>
-              {(Object.keys(PAID) as Attribution[]).map((k) => <option key={k} value={k}>{ATTR_LABEL[k]}</option>)}
-            </select>
-          </label>
-          <Input label="Gross margin (%)" value={marginS} onChange={setMargin}
-            hint={`default ${defaultMargin}% from Settings`} />
-          <div />
-          {["M1", "M2", "M3", "M4+"].map((l, i) => (
-            <Input key={l} label={`Custom ${l} churn (%)`} value={custom[i]}
-              onChange={(v) => setCustom((c) => c.map((x, j) => (j === i ? v : x)))}
-              hint={i === 0 ? "cancel before 2nd payment" : i === 3 ? "every month after" : undefined} />
-          ))}
-        </div>
+      <Card>
+        <CardBody>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Field label="Churn assumption">
+              <select value={focus} onChange={(e) => setFocus(e.target.value)} className={inputCls}>
+                {scenarios.map((sc) => <option key={sc.key} value={sc.key}>{sc.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Attribution">
+              <select value={attr} onChange={(e) => setAttr(e.target.value as Attribution)} className={inputCls}>
+                {(Object.keys(PAID) as Attribution[]).map((k) => <option key={k} value={k}>{ATTR_LABEL[k]}</option>)}
+              </select>
+            </Field>
+            <NumberInput label="Gross margin (%)" value={marginS} onChange={setMargin}
+              hint={`default ${defaultMargin}% from Settings`} />
+            <div />
+            {["M1", "M2", "M3", "M4+"].map((l, i) => (
+              <NumberInput key={l} label={`Custom ${l} churn (%)`} value={custom[i]}
+                onChange={(v) => setCustom((c) => c.map((x, j) => (j === i ? v : x)))}
+                hint={i === 0 ? "cancel before 2nd payment" : i === 3 ? "every month after" : undefined} />
+            ))}
+          </div>
+        </CardBody>
       </Card>
 
-      <p className="text-xs text-zinc-500">
+      <Note className="px-0 pb-0">
         Per-case charges and expert sign-offs on top of plans would shorten payback. The people cost in CAC is the
         sales & CS salary bill in force each month ({usd(snap.teamCost * 12)}/yr now), customer success included
         because the CSM runs demos and owns the book. Ad spend comes from Meta; the salary ledger and the margin
         are set in Settings. Live billed MRR is {usd(snap.liveMrr)} across{" "}
         {snap.activeSubscribers} paying subscribers.
-      </p>
+      </Note>
     </div>
   );
 }

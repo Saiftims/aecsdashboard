@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FunnelChart } from "@/components/charts";
-import { Badge, Card, CardHeader, Stat, Table } from "@/components/ui";
+import { Badge, Callout, Card, CardBody, CardHeader, PageHeader, Section, Stat, StatGrid, Table } from "@/components/ui";
 import { caseUiReport } from "@/lib/case-ui";
 import { productDashboard } from "@/lib/product-analytics";
 import { currentAppUser } from "@/lib/supabase/server";
@@ -37,42 +37,36 @@ export default async function ProductPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Product Analytics</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Live PostHog product telemetry · health uses 7 days · workflow, engagement,
-          funnel, and errors use 30 days.
-        </p>
-      </div>
+      <PageHeader
+        title="Product Analytics"
+        description="Live PostHog product telemetry · health uses 7 days · workflow, engagement, funnel, and errors use 30 days."
+      />
 
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+      <Callout tone="warn">
         Product telemetry is joined to all reconciled cases. Form/CSV intakes are
         shown separately and firms using intake without creating product cases are
         flagged “not using product.” PostHog&apos;s <code>case_created</code> event is
         known to under-report, so the tracked funnel remains a telemetry floor.
-      </div>
+      </Callout>
 
       <Link href="/product/ui" className="block">
-        <Card className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/40">
+        <Card className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 transition hover:border-zinc-300 hover:shadow-md dark:hover:border-zinc-700">
           <div>
-            <div className="text-sm font-semibold">Old UI vs new UI</div>
+            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Old UI vs new UI</div>
             <div className="text-xs text-zinc-500">Which firms and cases are still on the old case UI · click for the list by firm</div>
           </div>
-          <div className="flex items-center gap-6 text-sm">
-            <span><span className="font-semibold text-emerald-600">{ui.totals.firmsOnNew}</span> <span className="text-zinc-500">firms on new</span></span>
-            <span><span className={ui.totals.firmsOnOld ? "font-semibold text-red-600" : "font-semibold"}>{ui.totals.firmsOnOld}</span> <span className="text-zinc-500">still on old</span></span>
+          <div className="flex flex-wrap items-center gap-6 text-sm tabular-nums">
+            <span><span className="font-semibold text-emerald-600 dark:text-emerald-400">{ui.totals.firmsOnNew}</span> <span className="text-zinc-500">firms on new</span></span>
+            <span><span className={ui.totals.firmsOnOld ? "font-semibold text-red-600 dark:text-red-400" : "font-semibold"}>{ui.totals.firmsOnOld}</span> <span className="text-zinc-500">still on old</span></span>
             <span><span className="font-semibold">{ui.totals.firmsUnseen}</span> <span className="text-zinc-500">not seen yet</span></span>
-            <span><span className="font-semibold">{ui.totals.new}</span><span className="text-zinc-500"> / </span><span className={ui.totals.old ? "font-semibold text-red-600" : "font-semibold"}>{ui.totals.old}</span> <span className="text-zinc-500">cases new / old</span></span>
+            <span><span className="font-semibold">{ui.totals.new}</span><span className="text-zinc-500"> / </span><span className={ui.totals.old ? "font-semibold text-red-600 dark:text-red-400" : "font-semibold"}>{ui.totals.old}</span> <span className="text-zinc-500">cases new / old</span></span>
             <span className="text-zinc-400">›</span>
           </div>
         </Card>
       </Link>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Product health · 7 days
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <Section title="Product health · 7 days">
+        <StatGrid cols={5}>
           <Stat label="Active firms" value={data.health.activeFirms7d} tone="good" />
           <Stat label="Active users" value={data.health.activeUsers7d} tone="good" />
           <Stat
@@ -90,14 +84,11 @@ export default async function ProductPage() {
             label="Sessions / active firm"
             value={data.health.sessionsPerActiveFirm ?? "—"}
           />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Workflow performance · 30 days
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+      <Section title="Workflow performance · 30 days">
+        <StatGrid cols={4}>
           <Stat
             label="Tracked case starts"
             value={data.workflow.caseStarts}
@@ -134,22 +125,19 @@ export default async function ProductPage() {
             label="Report download rate"
             value={percent(data.workflow.reportDownloadRate)}
           />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Product funnel · 30 days
-        </h2>
+      <Section title="Product funnel · 30 days">
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader title="Login → report downloaded" />
-            <div className="p-4">
+            <CardBody>
               <FunnelChart data={data.funnel.map((step) => ({
                 label: step.label,
                 count: step.count,
               }))} />
-            </div>
+            </CardBody>
           </Card>
           <Card>
             <CardHeader title="Funnel conversion" />
@@ -163,12 +151,9 @@ export default async function ProductPage() {
             />
           </Card>
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Account engagement · 30 days
-        </h2>
+      <Section title="Account engagement · 30 days">
         <Card>
           <CardHeader
             title="Product engagement by firm"
@@ -211,13 +196,10 @@ export default async function ProductPage() {
             ])}
           />
         </Card>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Friction and errors · 30 days
-        </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <Section title="Friction and errors · 30 days">
+        <StatGrid cols={6}>
           <Stat label="Failed login rate" value="—" sub="Not instrumented" />
           <Stat label="Forgot-password requests" value="—" sub="Not instrumented" />
           <Stat label="Upload failure rate" value="—" sub="Not instrumented" />
@@ -234,17 +216,19 @@ export default async function ProductPage() {
             tone={data.friction.reportGenerationFailureRate ? "bad" : "good"}
             sub="distinct failed / attempted cases"
           />
-        </div>
-      </section>
+        </StatGrid>
+      </Section>
 
       <Card>
         <CardHeader title="Instrumentation required for complete product analytics" />
-        <ul className="list-disc space-y-1 px-8 py-4 text-sm text-zinc-600 dark:text-zinc-300">
-          {data.instrumentationNotes.map((note) => <li key={note}>{note}</li>)}
-        </ul>
+        <CardBody>
+          <ul className="list-disc space-y-1 pl-4 text-sm text-zinc-600 dark:text-zinc-300">
+            {data.instrumentationNotes.map((note) => <li key={note}>{note}</li>)}
+          </ul>
+        </CardBody>
       </Card>
 
-      <p className="text-xs text-zinc-400">
+      <p className="text-xs leading-relaxed text-zinc-400 dark:text-zinc-500">
         Generated {new Date(data.generatedAt).toLocaleString()}. Reload this page to query
         PostHog again; the global Refresh button also refreshes HubSpot/case rollups.
       </p>

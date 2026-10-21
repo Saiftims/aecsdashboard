@@ -35,6 +35,30 @@ export function supabaseService(): SupabaseClient {
   return service;
 }
 
+/** Await a Supabase statement and throw if PostgREST reported an error.
+ *
+ * supabase-js never rejects on a failed statement - it resolves with
+ * `{ data: null, error }` - so a bare `await sb.from(t).upsert(rows)` discards
+ * the failure and the caller carries on as if the rows were written. That is
+ * how a sync could report success while persisting nothing. Every sync write
+ * (and the reads a sync depends on) goes through this so a failure fails the
+ * run, lands in `sync_runs.error`, and alerts, instead of leaving the cache
+ * silently stale or half-written.
+ *
+ *   await must("deals upsert", sb.from("deals").upsert(rows, { onConflict: "hubspot_id" }));
+ *   const { data } = await must("companies read", sb.from("companies").select("hubspot_id"));
+ *
+ * Best-effort writes opt out explicitly: `await must(label, q).catch(console.error)`.
+ */
+export async function must<T extends { error: { message: string } | null }>(
+  label: string,
+  q: PromiseLike<T>,
+): Promise<T> {
+  const res = await q;
+  if (res.error) throw new Error(`${label}: ${res.error.message}`);
+  return res;
+}
+
 /** Read a whole table, in pages.
  *
  * PostgREST answers at most 1000 rows per request and says nothing about the

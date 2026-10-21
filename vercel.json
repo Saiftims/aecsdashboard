@@ -1,13 +1,14 @@
 {
   "regions": ["lhr1"],
   "crons": [
-    { "path": "/api/cron/hubspot", "schedule": "* * * * *" },
-    { "path": "/api/cron/stripe", "schedule": "* * * * *" },
+    { "path": "/api/cron/hubspot", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/stripe", "schedule": "*/15 * * * *" },
     { "path": "/api/cron/cases-probe", "schedule": "* * * * *" },
     { "path": "/api/cron/cases", "schedule": "5 * * * *" },
     { "path": "/api/cron/calendly", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/quo", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/meta", "schedule": "* * * * *" },
-    { "path": "/api/cron/meta-spend", "schedule": "20 */6 * * *" }
+    { "path": "/api/cron/meta-spend", "schedule": "20 */6 * * *" },
+    { "path": "/api/cron/health", "schedule": "*/30 * * * *" }
   ]
 }

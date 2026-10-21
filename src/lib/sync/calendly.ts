@@ -8,7 +8,7 @@
  */
 import { hsUpdateProperties } from "@/lib/hubspot/client";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
-import { supabaseService } from "@/lib/supabase/server";
+import { must, supabaseService } from "@/lib/supabase/server";
 
 const BASE = "https://api.calendly.com";
 
@@ -119,9 +119,9 @@ export async function syncCalendly() {
     const res = await hsUpdateProperties("deals", deal.hubspot_id, upd);
     if (res.ok) {
       updated += 1;
-      await sb.from("deals").update({
+      await must(`deals demo-date update ${deal.hubspot_id}`, sb.from("deals").update({
         properties: { ...(deal.properties ?? {}), ...upd },
-      }).eq("hubspot_id", deal.hubspot_id);
+      }).eq("hubspot_id", deal.hubspot_id));
     }
   }
   // 4. hand-moved demos: a deal the CSM put in Demo Completed with no attended
@@ -143,9 +143,9 @@ export async function syncCalendly() {
     const res = await hsUpdateProperties("deals", d.hubspot_id, upd);
     if (res.ok) {
       handMoved += 1;
-      await sb.from("deals").update({
+      await must(`deals hand-moved demo update ${d.hubspot_id}`, sb.from("deals").update({
         properties: { ...props, ...upd },
-      }).eq("hubspot_id", d.hubspot_id);
+      }).eq("hubspot_id", d.hubspot_id));
     }
   }
 

@@ -1,26 +1,70 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafafa;
+  --foreground: #18181b;
+  /* Chart palette - one hue per series role, shared by every chart. */
+  --chart-1: 221 83% 53%;  /* blue    - primary series */
+  --chart-2: 160 84% 39%;  /* emerald - good / revenue */
+  --chart-3: 38 92% 50%;   /* amber   - warning / secondary */
+  --chart-4: 262 83% 58%;  /* violet  - tertiary */
+  --chart-5: 0 72% 51%;    /* red     - bad */
+  --chart-6: 200 18% 46%;  /* slate   - other / neutral */
+  --chart-grid: 240 6% 90%;
+  --chart-text: 240 4% 46%;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --chart-grid: 240 4% 20%;
+  --chart-text: 240 5% 65%;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Recharts: inherit the type colour and drop the default focus outline. */
+.recharts-wrapper,
+.recharts-surface {
+  outline: none;
+}
+.recharts-cartesian-axis-tick-value,
+.recharts-legend-item-text {
+  fill: hsl(var(--chart-text));
+  color: hsl(var(--chart-text)) !important;
+}
+.recharts-cartesian-grid line {
+  stroke: hsl(var(--chart-grid));
+}
+.recharts-default-tooltip {
+  border-radius: 0.5rem !important;
+  border: 1px solid hsl(var(--chart-grid)) !important;
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+}
+.recharts-tooltip-label {
+  color: var(--foreground) !important;
+  font-weight: 600;
 }

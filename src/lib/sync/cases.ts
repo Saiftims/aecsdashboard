@@ -18,7 +18,7 @@ import { hsCreateObject, hsUpdateProperties, ASSOC } from "@/lib/hubspot/client"
 import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
 import { computeFirmUsage } from "@/lib/metrics";
 import { loadSettings } from "@/lib/settings";
-import { supabaseService } from "@/lib/supabase/server";
+import { must, selectAll, supabaseService } from "@/lib/supabase/server";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -107,8 +107,10 @@ async function syncCaseUiUsage(provider: PostHogProvider): Promise<number> {
   }));
   const sb = supabaseService();
   for (let i = 0; i < out.length; i += 500) {
-    const { error } = await sb.from("case_ui_usage").upsert(out.slice(i, i + 500), { onConflict: "case_id" });
-    if (error) throw new Error(`case_ui_usage upsert: ${error.message}`);
+    await must(
+      `case_ui_usage upsert batch ${i / 500 + 1}`,
+      sb.from("case_ui_usage").upsert(out.slice(i, i + 500), { onConflict: "case_id" }),
+    );
   }
   return out.length;
 }
@@ -129,20 +131,27 @@ export async function syncCases() {
   if (EXCLUDED_CASE_IDS.length) {
     purgeOr.push(`case_id.in.(${EXCLUDED_CASE_IDS.join(",")})`);
   }
-  const purge = await sb.from("cases").delete({ count: "exact" }).or(purgeOr.join(","));
+  const purge = await must(
+    "cases purge (test actors)",
+    sb.from("cases").delete({ count: "exact" }).or(purgeOr.join(",")),
+  );
   stats.purgedTest = purge.count ?? 0;
   // Also drop cases whose creator is an internal silentwitness.ai / saif+ user.
-  await sb.from("cases").delete().like("creator_email", "%@silentwitness.ai");
-  await sb.from("cases").delete().like("creator_email", "saif+%");
+  await must("cases purge (silentwitness.ai)", sb.from("cases").delete().like("creator_email", "%@silentwitness.ai"));
+  await must("cases purge (saif+)", sb.from("cases").delete().like("creator_email", "saif+%"));
 
-  const { data: companies } = await sb
-    .from("companies")
-    .select("hubspot_id, name, domain, sw_account_id, properties");
-  const { data: mappings } = await sb.from("firm_mapping").select("*");
-  const { data: deals } = await sb
-    .from("deals")
-    .select("hubspot_id, name, company_hubspot_id, stage, hs_created_at, properties");
-  const { data: existingCases } = await sb.from("cases").select("case_id, case_status, company_hubspot_id, submitted_date, source");
+  // Paginated reads (`selectAll`): PostgREST caps a plain select at 1000 rows
+  // and returns the first page WITHOUT an error, so once companies passed
+  // 1000 (983 on 2026-10-21) the sync would silently have run against a
+  // slice and filed the missing firms' cases as unmapped. A failed read
+  // throws rather than coming back `null`, for the same reason.
+  const companies = await selectAll<CompanyLite & { sw_account_id: string | null; properties: Record<string, unknown> | null }>(
+    "companies", "hubspot_id, name, domain, sw_account_id, properties");
+  const { data: mappings } = await must("firm_mapping read", sb.from("firm_mapping").select("*"));
+  const deals = await selectAll<{ hubspot_id: string; name: string | null; company_hubspot_id: string | null; stage: string | null; hs_created_at: string | null; properties: Record<string, unknown> | null }>(
+    "deals", "hubspot_id, name, company_hubspot_id, stage, hs_created_at, properties");
+  const existingCases = await selectAll<{ case_id: string; case_status: string | null; company_hubspot_id: string | null; submitted_date: string | null; source: string | null }>(
+    "cases", "case_id, case_status, company_hubspot_id, submitted_date, source", "case_id");
 
   const byDomain = new Map<string, CompanyLite>();
   const byAccount = new Map<string, string>(); // acc -> hubspot_company_id
@@ -533,12 +542,24 @@ export async function syncCases() {
   }
 
   if (bootstrapMappings.length) {
-    await sb.from("firm_mapping").upsert(bootstrapMappings, { onConflict: "sw_account_id,sw_organization_id" }).then(
-      () => undefined, () => undefined,
+    // Best-effort by design: firm_mapping is also unique on hubspot_company_id,
+    // so a firm already mapped under another account id rejects the row. Logged,
+    // never fatal.
+    await must(
+      "firm_mapping bootstrap upsert",
+      sb.from("firm_mapping").upsert(bootstrapMappings, { onConflict: "sw_account_id,sw_organization_id" }),
+    ).catch((e) => console.error(e instanceof Error ? e.message : e));
+  }
+  const INSERT_BATCH = 500;
+  for (let i = 0; i < inserts.length; i += INSERT_BATCH) {
+    await must(
+      `cases insert batch ${i / INSERT_BATCH + 1}/${Math.ceil(inserts.length / INSERT_BATCH)}`,
+      sb.from("cases").insert(inserts.slice(i, i + INSERT_BATCH)),
     );
   }
-  if (inserts.length) await sb.from("cases").insert(inserts);
-  for (const u of updates) await sb.from("cases").update(u.row).eq("case_id", u.case_id);
+  for (const u of updates) {
+    await must(`cases update ${u.case_id}`, sb.from("cases").update(u.row).eq("case_id", u.case_id));
+  }
 
   // ---- Signups: firms that created an app account -------------------------
   // Map each signed-up account to a firm (account id -> email domain). Unmapped
@@ -580,11 +601,12 @@ export async function syncCases() {
           };
           byDomain.set(dom, lite);
           companyName.set(companyId, name);
-          // Seed the Supabase cache row so it shows before the next HubSpot sync.
-          await sb.from("companies").upsert(
+          // Seed the Supabase cache row so it shows before the next HubSpot
+          // sync. Best-effort: the next HubSpot sync writes the real row.
+          await must(`companies seed ${companyId}`, sb.from("companies").upsert(
             { hubspot_id: companyId, name, domain: dom, properties: {} },
             { onConflict: "hubspot_id" },
-          ).then(() => undefined, () => undefined);
+          )).catch((e) => console.error(e instanceof Error ? e.message : e));
           // MQL-style deal so it also appears in the sales funnel.
           await hsCreateObject("deals", {
             dealname: name,
@@ -614,8 +636,8 @@ export async function syncCases() {
     // the same way a failed association must never write null over a live link.
     if (s.signedUpAt) row.signed_up_at = s.signedUpAt;
     if (s.subscribedAt) row.subscribed_at = s.subscribedAt;
-    await sb.from("companies").update(row).eq("hubspot_id", companyId)
-      .then(() => undefined, () => undefined);
+    // Fatal: a dropped signup date silently removes the firm from "new firms".
+    await must(`companies signup update ${companyId}`, sb.from("companies").update(row).eq("hubspot_id", companyId));
   }
   void companyName;
 
@@ -652,12 +674,25 @@ export async function computeRollups() {
   const nowMs = now.getTime();
   const stats = { firms: 0, writebacks: 0, expertTasks: 0, handoffs: 0, dealsClosed: 0 };
 
-  const [{ data: companies }, { data: cases }, { data: deals }, { data: handoffs }] =
+  // Paginated + checked reads: a plain select caps at 1000 rows without an
+  // error, and a failed read coming back null would roll every firm up to zero.
+  type RollupCompany = {
+    hubspot_id: string; name: string | null; domain: string | null;
+    properties: Record<string, string | null> | null;
+    monthly_case_target: number | null; firm_segment: string | null;
+    first_case_commitment_date: string | null; actual_revenue: number | null;
+  };
+  type RollupDeal = {
+    hubspot_id: string; name: string | null; company_hubspot_id: string | null;
+    stage: string | null; activation_stage: string | null; owner_id: string | null;
+    closed_at: string | null; hs_created_at: string | null; properties: Record<string, string | null> | null;
+  };
+  const [companies, cases, deals, { data: handoffs }] =
     await Promise.all([
-      sb.from("companies").select("hubspot_id, name, domain, properties, monthly_case_target, firm_segment, first_case_commitment_date, actual_revenue"),
-      sb.from("cases").select("case_id, company_hubspot_id, case_status, submitted_date, completed_date, delivered_date, revenue_amount, expert_review_offered, expert_review_task_created, case_name, issue_flag"),
-      sb.from("deals").select("hubspot_id, name, company_hubspot_id, stage, activation_stage, owner_id, closed_at, hs_created_at, properties"),
-      sb.from("handoffs").select("company_hubspot_id"),
+      selectAll<RollupCompany>("companies", "hubspot_id, name, domain, properties, monthly_case_target, firm_segment, first_case_commitment_date, actual_revenue"),
+      selectAll<CaseRow>("cases", "case_id, company_hubspot_id, case_status, submitted_date, completed_date, delivered_date, revenue_amount, expert_review_offered, expert_review_task_created, case_name, issue_flag", "case_id"),
+      selectAll<RollupDeal>("deals", "hubspot_id, name, company_hubspot_id, stage, activation_stage, owner_id, closed_at, hs_created_at, properties"),
+      must("rollup handoffs read", sb.from("handoffs").select("company_hubspot_id")),
     ]);
 
   const casesByCompany = new Map<string, CaseRow[]>();
@@ -665,7 +700,7 @@ export async function computeRollups() {
     if (!c.company_hubspot_id) continue;
     casesByCompany.set(c.company_hubspot_id, [...(casesByCompany.get(c.company_hubspot_id) ?? []), c]);
   }
-  const dealsByCompany = new Map<string, Record<string, unknown>[]>();
+  const dealsByCompany = new Map<string, RollupDeal[]>();
   for (const d of deals ?? []) {
     if (!d.company_hubspot_id) continue;
     dealsByCompany.set(d.company_hubspot_id, [...(dealsByCompany.get(d.company_hubspot_id) ?? []), d]);
@@ -775,7 +810,7 @@ export async function computeRollups() {
       ? Math.round((usage.casesThisMonth / monthlyTarget) * 100) : null;
 
     // ---- cache ----
-    await sb.from("companies").update({
+    await must(`rollup companies update ${company.hubspot_id}`, sb.from("companies").update({
       firm_segment: segment,
       monthly_case_target: monthlyTarget,
       account_health: health.status,
@@ -800,7 +835,7 @@ export async function computeRollups() {
       health_category: health.category === "neutral" ? "yellow" : health.category,
       risk_flags: health.reasons,
       updated_at: new Date().toISOString(),
-    }).eq("hubspot_id", company.hubspot_id);
+    }).eq("hubspot_id", company.hubspot_id));
 
     // ---- HubSpot write-back (firm/account source of truth) ----
     const wb = await hsUpdateProperties("companies", company.hubspot_id, {
@@ -837,7 +872,11 @@ export async function computeRollups() {
         hs_timestamp: now.toISOString(),
       }, [{ toId: company.hubspot_id, associationTypeId: ASSOC.taskToCompany }]);
       if (res.ok || res.skipped) {
-        await sb.from("cases").update({ expert_review_task_created: true }).eq("case_id", c.case_id);
+        // Fatal: if this flag is lost the same task is created again next run.
+        await must(
+          `cases expert_review_task_created ${c.case_id}`,
+          sb.from("cases").update({ expert_review_task_created: true }).eq("case_id", c.case_id),
+        );
         stats.expertTasks += 1;
       }
     }
@@ -868,9 +907,9 @@ export async function computeRollups() {
           closedate: closeIso,
         });
         if (wb.ok || wb.skipped) {
-          await sb.from("deals").update({
+          await must(`deals closed-won update ${dealId}`, sb.from("deals").update({
             stage: SALES_STAGES.closedWon, stage_label: "Closed Won", closed_at: closeIso,
-          }).eq("hubspot_id", dealId).then(() => undefined, () => undefined);
+          }).eq("hubspot_id", dealId));
           stats.dealsClosed += 1;
         }
       }
@@ -889,7 +928,7 @@ export async function computeRollups() {
         const isNew = nowMs - new Date(triggerDate).getTime() < 3 * DAY;
         const deal = companyDeals.find((d) => d.stage === "closedwon") ?? companyDeals[0];
         const props = (deal?.properties ?? {}) as Record<string, string | null>;
-        await sb.from("handoffs").insert({
+        await must(`handoffs insert ${company.hubspot_id}`, sb.from("handoffs").insert({
           company_hubspot_id: company.hubspot_id,
           trigger_type: triggerType,
           deal_hubspot_id: (deal?.hubspot_id as string | undefined) ?? null,
@@ -899,7 +938,7 @@ export async function computeRollups() {
           handoff_accepted_date: isNew ? null : new Date().toISOString(),
           source: props.sw_lead_source ?? (triggerType === "signup" ? "app_signup" : null),
           next_step: props.sw_next_step ?? null,
-        }).then(() => undefined, () => undefined);
+        }));
         existingHandoffCompanies.add(company.hubspot_id);
         stats.handoffs += 1;
       }

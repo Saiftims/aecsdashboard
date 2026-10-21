@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { MappingEditor, SettingField, SyncButton } from "@/components/admin-widgets";
-import { Badge, Card, CardHeader, Table } from "@/components/ui";
+import { Badge, Card, CardBody, CardHeader, PageHeader, Table } from "@/components/ui";
 import { loadSettings } from "@/lib/settings";
 import { currentAppUser, supabaseService } from "@/lib/supabase/server";
 
@@ -30,30 +30,30 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Admin Settings</h1>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        title="Admin Settings"
+        actions={<>
           <SyncButton />
           <SyncButton full />
-        </div>
-      </div>
+        </>}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader title="Business thresholds" />
-          <div className="space-y-3 p-4">
+          <CardBody className="space-y-3">
             <SettingField settingKey="default_case_price" label="Default case price ($)" defaultValue={settings.defaultCasePrice} />
             <SettingField settingKey="first_case_target_days" label="First-case target (days after closed won)" defaultValue={settings.firstCaseTargetDays} />
             <SettingField settingKey="second_case_target_days" label="Second-case target (days)" defaultValue={settings.secondCaseTargetDays} />
             <SettingField settingKey="at_risk_inactivity_days" label="At-risk inactivity threshold (days)" defaultValue={settings.atRiskInactivityDays} />
             <SettingField settingKey="healthy_cases_per_30d" label="Healthy account: cases per 30 days" defaultValue={settings.healthyCasesPer30d} />
             <SettingField settingKey="stalled_deal_days" label="Stalled deal threshold (days without touch)" defaultValue={settings.stalledDealDays} />
-          </div>
+          </CardBody>
         </Card>
 
         <Card>
           <CardHeader title="Daily targets by role" />
-          <div className="space-y-3 p-4">
+          <CardBody className="space-y-3">
             <p className="text-xs text-zinc-500">
               AEs prospect and CSMs work a book of accounts, so each role is
               charted against its own number. The activity target is the total
@@ -76,12 +76,12 @@ export default async function SettingsPage() {
             <SettingField settingKey="daily_tasks_target" label="Tasks completed per day" defaultValue={settings.dailyTasksTarget} />
             <SettingField settingKey="sla_first_contact_hours" label="First-contact SLA (hours)" defaultValue={settings.slaFirstContactHours} />
             <SettingField settingKey="dashboard_timezone" label="Dashboard timezone (day boundaries)" defaultValue={settings.dashboardTimezone} type="text" />
-          </div>
+          </CardBody>
         </Card>
 
         <Card>
           <CardHeader title="Monthly targets" />
-          <div className="space-y-3 p-4">
+          <CardBody className="space-y-3">
             <p className="text-xs text-zinc-500">
               Company-wide goals for each calendar month, drawn as a dotted line
               on the Activity page&apos;s monthly charts.
@@ -100,12 +100,12 @@ export default async function SettingsPage() {
             <SettingField settingKey="people_cost_by_month" type="text" label='Sales + CS salaries per YEAR, from the month each applies (JSON, e.g. {"2026-07": 60000, "2026-08": 85000})' defaultValue={JSON.stringify(settings.peopleCostByMonth)} />
             <SettingField settingKey="monthly_team_cost" label="People cost per month for a month before that ledger starts ($)" defaultValue={settings.monthlyTeamCost} />
             <SettingField settingKey="gross_margin_pct" label="Gross margin (%)" defaultValue={settings.grossMarginPct} />
-          </div>
+          </CardBody>
         </Card>
 
         <Card>
           <CardHeader title="HubSpot" />
-          <div className="space-y-3 p-4">
+          <CardBody className="space-y-3">
             <SettingField settingKey="hubspot_portal_id" label="Portal ID" defaultValue={settings.hubspotPortalId} type="text" />
             <SettingField settingKey="hubspot_sales_pipeline_id" label="Sales pipeline ID" defaultValue={settings.hubspotSalesPipelineId} type="text" />
             <p className="text-xs text-zinc-500">
@@ -114,7 +114,7 @@ export default async function SettingsPage() {
               <code>ae_scorecard_weights</code>, <code>cs_scorecard_weights</code>)
               and are editable via the API or Supabase Studio.
             </p>
-          </div>
+          </CardBody>
         </Card>
       </div>
 
@@ -123,7 +123,7 @@ export default async function SettingsPage() {
           title="Firm mapping (Silent Witness -> HubSpot company)"
           action={<Badge tone={mappingByCompany.size ? "green" : "yellow"}>{mappingByCompany.size} mapped</Badge>}
         />
-        <div className="space-y-2 p-4">
+        <CardBody className="space-y-2">
           <p className="text-xs text-zinc-500">
             Map each customer firm once using its stable Silent Witness id (never by
             name). Unmapped firms with case data appear in Data Quality. Optional
@@ -145,17 +145,13 @@ export default async function SettingsPage() {
               />
             );
           })}
-        </div>
+        </CardBody>
       </Card>
 
       <Card>
         <CardHeader
           title="Sync status"
-          action={lastOk ? (
-            <span className="text-xs text-zinc-500">
-              Last OK: {new Date(lastOk.finished_at).toLocaleString()}
-            </span>
-          ) : undefined}
+          action={lastOk ? <span>Last OK: {new Date(lastOk.finished_at).toLocaleString()}</span> : undefined}
         />
         <Table
           headers={["Kind", "Status", "Started", "Finished", "Stats / error"]}
