@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/api/cron"];
+// /api/cron and /api/investor authenticate themselves with a bearer token
+// (CRON_SECRET / INVESTOR_FEED_TOKEN) - no dashboard session is involved.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/cron", "/api/investor"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
