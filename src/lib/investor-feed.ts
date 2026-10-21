@@ -14,6 +14,8 @@ export interface InvestorMonth {
   key: string;          // "2026-07"
   label: string;        // "Jul 26"
   mqls: number;
+  /** Sales deals created this month that moved past MQL. */
+  contacted: number;
   demosBooked: number;
   demosCompleted: number;
   noShow: number;
@@ -44,7 +46,11 @@ export interface InvestorFeed {
   generatedAt: string;
   period: { from: string; to: string; label: string };
   months: InvestorMonth[];
-  funnel: { mqls: number; contacted: number; demosBooked: number; demosCompleted: number; signedUp: number; paid: number };
+  funnel: {
+    mqls: number; contacted: number; demosBooked: number; demosCompleted: number; signedUp: number; paid: number;
+    /** Paying firms whose lead source is Meta ads (incl. the meta_leads archive match). */
+    paidFromMeta: number;
+  };
   stages: { stage: string; deals: number }[];
   meta: { spend: number; leads: number; impressions: number; clicks: number; lastMonth: { label: string; spend: number; impressions: number } };
   revenue: {
@@ -89,7 +95,6 @@ export async function investorFeed(): Promise<InvestorFeed> {
     sb.from("meta_ad_spend_daily").select("day, spend_cents, impressions, clicks, leads"),
   ]);
   const now = new Date();
-  const thisMonth = now.toISOString().slice(0, 7);
 
   // Month axis: the master's own series (first case month onward).
   const keys = report.monthlyCases.map((m) => m.key);
@@ -115,6 +120,16 @@ export async function investorFeed(): Promise<InvestorFeed> {
     spend.set(k, cur);
   }
 
+  // "Initial contact": a sales deal created in the month that got past MQL.
+  const notContacted = new Set<string>([SALES_STAGES.unqualified, SALES_STAGES.mql, SALES_STAGES.nurture, SALES_STAGES.closedLost]);
+  const passedMql = new Set<string>(SALES_STAGE_ORDER.filter((s) => !notContacted.has(s)));
+  const contactedBy = new Map<string, number>();
+  for (const d of salesDeals) {
+    if (!d.hs_created_at || !passedMql.has(d.stage ?? "")) continue;
+    const k = d.hs_created_at.slice(0, 7);
+    contactedBy.set(k, (contactedBy.get(k) ?? 0) + 1);
+  }
+
   const months: InvestorMonth[] = keys.map((k) => {
     const completed = demos.get(k)?.count ?? 0;
     const b = booked.has(k) ? Math.max(booked.get(k)!, completed) : completed;
@@ -122,6 +137,7 @@ export async function investorFeed(): Promise<InvestorFeed> {
     return {
       key: k, label: shortLabel(k),
       mqls: mqls.get(k)?.count ?? 0,
+      contacted: contactedBy.get(k) ?? 0,
       demosBooked: b, demosCompleted: completed, noShow: Math.max(0, b - completed),
       newFirms: firms.get(k)?.count ?? 0,
       cases: cases.get(k)?.count ?? 0,
@@ -132,11 +148,7 @@ export async function investorFeed(): Promise<InvestorFeed> {
   });
   const sum = (f: (m: InvestorMonth) => number) => months.reduce((a, m) => a + f(m), 0);
 
-  // "Initial contact": a sales deal created in the period that got past MQL.
-  const from = keys[0] ? `${keys[0]}-01` : thisMonth + "-01";
-  const notContacted = new Set<string>([SALES_STAGES.unqualified, SALES_STAGES.mql, SALES_STAGES.nurture, SALES_STAGES.closedLost]);
-  const passedMql = new Set<string>(SALES_STAGE_ORDER.filter((s) => !notContacted.has(s)));
-  const contacted = salesDeals.filter((d) => d.hs_created_at && d.hs_created_at >= from && passedMql.has(d.stage ?? "")).length;
+  const contacted = sum((m) => m.contacted);
 
   // Open pipeline snapshot by stage, in pipeline order.
   const stageCount = new Map<string, number>();
@@ -179,6 +191,7 @@ export async function investorFeed(): Promise<InvestorFeed> {
       mqls: sum((m) => m.mqls), contacted,
       demosBooked: sum((m) => m.demosBooked), demosCompleted: sum((m) => m.demosCompleted),
       signedUp: ue.customers.length, paid: paying.length,
+      paidFromMeta: paying.filter((c) => c.source === "meta").length,
     },
     stages,
     meta: {
