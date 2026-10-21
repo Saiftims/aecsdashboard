@@ -9,7 +9,7 @@ import {
 } from "@/components/ui";
 import { LogoRetention } from "@/components/logo-retention";
 import { UnitEconomics } from "@/components/unit-economics";
-import { observedChurn } from "@/lib/observed-churn";
+import { observedRetention } from "@/lib/observed-churn";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
 import {
   activityReport, billingRetentionReport, retentionReport,
@@ -386,7 +386,7 @@ export default async function ActivityPage() {
 
       {unitEcon ? (
         <Section title={<>Unit economics — paid acquisition payback, {unitEcon.monthLabel}</>}>
-          <UnitEconomics snap={unitEcon} observed={observedChurn(retention.cohorts)} />
+          <UnitEconomics snap={unitEcon} observed={observedRetention(retention.cohorts)} />
         </Section>
       ) : null}
 

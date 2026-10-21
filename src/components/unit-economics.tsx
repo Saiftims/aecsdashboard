@@ -7,20 +7,7 @@ import {
   type Column,
 } from "@/components/ui";
 import type { LeadSource, UnitEconomicsSnapshot } from "@/lib/unit-economics";
-import type { ObservedChurn } from "@/lib/observed-churn";
-
-type Bands = [number, number, number, number];
-
-/** Subscription cancellations: month 1 is the share that cancels before the
- * second payment, month 2 before the third, month 3 before the fourth, and the
- * last band repeats every month after that. */
-const PRESETS: { key: string; label: string; bands: Bands }[] = [
-  { key: "none", label: "No churn", bands: [0, 0, 0, 0] },
-  { key: "optimistic", label: "Optimistic", bands: [5, 3, 2, 1] },
-  { key: "base", label: "Base", bands: [10, 5, 3, 2] },
-  { key: "pessimistic", label: "Pessimistic", bands: [20, 10, 5, 3] },
-  { key: "severe", label: "Severe", bands: [30, 15, 8, 4] },
-];
+import { observedSurvival, type ObservedRetention } from "@/lib/observed-churn";
 
 const SOURCE_LABEL: Record<LeadSource, string> = {
   meta: "Meta ad lead",
@@ -49,17 +36,6 @@ const ATTR_LABEL: Record<Attribution, string> = {
 };
 
 const HORIZON = 240;
-
-/** Share of an acquired cohort still subscribed and paying in month m+1. */
-function survival(bands: Bands): number[] {
-  const out: number[] = [];
-  let alive = 1;
-  for (let m = 1; m <= HORIZON; m++) {
-    out.push(alive);
-    alive *= 1 - (m <= 3 ? bands[m - 1] : bands[3]) / 100;
-  }
-  return out;
-}
 
 /** Months until expected contribution covers CAC; revenue earned evenly across
  * each month. */
@@ -94,11 +70,6 @@ const COHORT_HEADERS: Column[] = [
   right("LTV : CAC", "7%"), right("Payback", "7%"),
 ];
 
-const SCENARIO_HEADERS: Column[] = [
-  left("Churn"), right("M1 / M2 / M3 / M4+"), right("Still paying at M12"), right("12-mo value"),
-  right("LTV, fully loaded"), right("LTV : CAC"), right("Payback"),
-];
-
 const SUBSCRIBER_HEADERS: Column[] = [
   left("Firm"), left("Plan"), right("$/mo"), right("Subscribed"), right("Renews"), right("Cases this period"),
   right("Cases left"), right("Lead in"), right("Source"),
@@ -114,13 +85,10 @@ function NumberInput({ label, value: v, onChange, hint }: {
   );
 }
 
-export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot; observed: ObservedChurn | null }) {
+export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot; observed: ObservedRetention | null }) {
   const defaultMargin = String(Math.round(snap.grossMargin * 100));
   const [marginS, setMargin] = useState(defaultMargin);
-  const hasObserved = !!observed && observed.exposure[3] > 0;
-  const [focus, setFocus] = useState(hasObserved ? "observed" : "base");
   const [attr, setAttr] = useState<Attribution>("likely");
-  const [custom, setCustom] = useState<string[]>(["10", "5", "3", "2"]);
   const [subSort, setSubSort] = useState<SubSort>("renews");
   // Which month a firm is charged to: the month it started using the product
   // (how the owner reads the table - "we had more than 3 paying in October")
@@ -130,14 +98,10 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
   const margin = num(marginS, snap.grossMargin * 100) / 100;
   const paidSet = PAID[attr];
 
-  const customBands = custom.map((c, i) => num(c, [10, 5, 3, 2][i])) as Bands;
-  const scenarios = [
-    ...(hasObserved && observed ? [{ key: "observed", label: "Observed", bands: observed.bands }] : []),
-    ...PRESETS,
-    { key: "custom", label: "Custom", bands: customBands },
-  ].map((sc) => ({ ...sc, s: survival(sc.bands) }));
-  const focusIdx = Math.max(0, scenarios.findIndex((s) => s.key === focus));
-  const active = scenarios[focusIdx];
+  // The retention curve is the measured average of the subscription cohorts
+  // (table below) - no presets, no scenarios. With no subscriber cohort yet
+  // there is nothing to measure, so firms are assumed to keep paying.
+  const s = observed ? observedSurvival(observed, HORIZON) : Array<number>(HORIZON).fill(1);
 
   /** Fully loaded CAC charges the ad spend to paid-sourced PAYING customers
    * (plan or per-case) and the sales team to every paying customer; a signup
@@ -145,7 +109,7 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
    * LTV and payback run on what the cohort actually bills a month - the
    * billed plan for subscribers, the per-case run rate for transactional
    * firms - not a list price. */
-  const economics = (spend: number, team: number, custs: typeof snap.customers, s: number[]) => {
+  const economics = (spend: number, team: number, custs: typeof snap.customers) => {
     const paying = custs.filter((x) => x.kind !== "signup");
     const paid = paying.filter((x) => paidSet.includes(x.source)).length;
     const adCac = paid > 0 ? spend / paid : Infinity;
@@ -188,12 +152,18 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
     const fromLeads = era.filter((x) => x.leadAt.startsWith(m.month));
     const arrived = snap.customers.filter((x) => x.arrivedAt.startsWith(m.month));
     const custs = basis === "started" ? arrived : fromLeads;
-    return { ...m, custs, fromLeads, arrived, ...economics(m.spend, m.teamCost, custs, active.s) };
+    return { ...m, custs, fromLeads, arrived, ...economics(m.spend, m.teamCost, custs) };
   });
   const totalSpend = cohorts.reduce((a, c) => a + c.spend, 0);
   const totalTeam = cohorts.reduce((a, c) => a + c.teamCost, 0);
   const allCusts = basis === "started" ? startedEra : era;
-  const total = economics(totalSpend, totalTeam, allCusts, active.s);
+  const total = economics(totalSpend, totalTeam, allCusts);
+  const monthCols = observed?.average.length ?? 0;
+  const retentionHeaders: Column[] = [
+    left("Cohort"), right("Firms"), ...Array.from({ length: monthCols }, (_, m) => right(`M${m}`)),
+  ];
+  const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v)}%`);
+  const expectedLife = s.reduce((a, x) => a + x, 0);
 
   if (!Number.isFinite(total.cac)) {
     return (
@@ -220,8 +190,8 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
       <StatGrid cols={4}>
         <Stat label="CAC, fully loaded" value={usd(total.cac)} tone="warn"
           sub={`${usd(total.adCac)} ads + ${usd(total.teamCac)} sales & CS salaries (${usd(snap.teamCost * 12)}/yr now)`} />
-        <Stat label={`LTV, fully loaded · ${active.label}`} value={usd(total.ltv)}
-          sub={`${usd(total.plan)}/mo average per paying firm · ${Math.round(margin * 100)}% margin`} />
+        <Stat label="LTV, fully loaded" value={usd(total.ltv)}
+          sub={`${usd(total.plan)}/mo average per paying firm · ${Math.round(margin * 100)}% margin · ${expectedLife.toFixed(0)}-month average life`} />
         <Stat label="LTV : CAC" value={ratio(total.ltv, total.cac)}
           tone={total.ltv / total.cac >= 3 ? "good" : "bad"}
           sub={`${allCusts.length} firms since July: ${kindsText(total.kinds)}`} />
@@ -233,7 +203,7 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
         <CardHeader title={basis === "started" ? "Unit economics by month started" : "Unit economics by lead month"}
           action={
             <label className="flex items-center gap-2">
-              <span>{active.label} churn · {ATTR_LABEL[attr]}</span>
+              <span>Measured retention · {ATTR_LABEL[attr]}</span>
               <select className={selectCls} value={basis} onChange={(e) => setBasis(e.target.value as Basis)}>
                 <option value="started">Count firms by month they started</option>
                 <option value="lead">Count firms by month their lead came in</option>
@@ -275,48 +245,48 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
             ? " CAC and LTV run on those firms; a month's ad spend is set against firms that started that month even when their lead came in earlier, so the latest month reads high until its leads convert."
             : " CAC and LTV charge each firm to the month its lead came in, so a month's ad spend is set against the firms it actually produced."}
           {" "}CAC, fully loaded = ad spend ÷ paying firms from ads + sales &amp; CS salaries ÷ all paying firms.
-          Avg $/mo is what a paying firm bills (plan, or per-case cash run rate); LTV is gross margin on that under
-          the selected churn.
+          Avg $/mo is what a paying firm bills (plan, or per-case cash run rate); LTV is gross margin on that over
+          the measured retention curve below.
           {fromMeta ? " Ad spend is actual from the Meta Ads account." : " Ad spend is the Settings ledger; the Meta spend sync has not run yet."}
         </Note>
       </Card>
 
       <Card>
-        <CardHeader title="All months under each churn assumption"
-          action={hasObserved && observed ? (
-            <span>Observed = {observed.firms} subscribers on the retention chart above</span>
-          ) : null} />
-        <Table
-          headers={SCENARIO_HEADERS}
-          rowClassName={(i) => (i === focusIdx ? "bg-blue-50 dark:bg-blue-950/30" : undefined)}
-          rows={scenarios.map((sc) => {
-            const ltv = value(total.contribution, sc.s, HORIZON);
-            const isObs = sc.key === "observed" && observed;
-            return [
-              <Cell key="l" sub={isObs ? "measured from subscription cohorts" : undefined}>
-                <span className="font-medium">{sc.label}</span>
-              </Cell>,
-              <Cell key="b" sub={isObs
-                ? `${observed.churned.slice(0, 3).map((n, i) => `${n}/${observed.exposure[i]}`).join(" · ")} · tail ${observed.churned[3]}/${observed.exposure[3]} firm-months`
-                : undefined}>
-                {sc.bands.map((b) => `${b}%`).join(" / ")}
-              </Cell>,
-              `${Math.round(sc.s[12] * 100)}%`,
-              usd(value(total.contribution, sc.s, 12)), usd(ltv), ratio(ltv, total.cac),
-              mo(payback(total.cac, total.contribution, sc.s)),
-            ];
-          })}
-        />
-        {hasObserved && observed ? (
-          <Note>
-            Observed churn is the subscription cohorts above, pooled: of every subscriber still on a plan at the
-            previous month, the share gone the next ({observed.churned[0]} of {observed.exposure[0]} by month 1,{" "}
-            {observed.churned[1]} of {observed.exposure[1]} by month 2, {observed.churned[2]} of {observed.exposure[2]} by
-            month 3). No cohort is older than three months, so the M4+ tail is the pooled rate over all{" "}
-            {observed.exposure[3]} observed firm-months ({observed.bands[3]}%/mo) - a small sample that will move as
-            cohorts age. The presets stay as sensitivity checks.
-          </Note>
-        ) : null}
+        <CardHeader title="Retention the LTV runs on"
+          action={observed ? <span>{observed.firms} subscribers · {Math.round(s[11] * 100)}% still paying at month 12</span> : null} />
+        {observed ? (
+          <Table
+            dense
+            strongLast
+            headers={retentionHeaders}
+            rows={[
+              ...observed.cohorts.map((c) => [
+                c.label, String(c.firms), ...c.retention.map((v) => pct(v)),
+              ]),
+              [
+                "Average",
+                String(observed.firms),
+                ...observed.average.map((v, m) => (
+                  <Cell key={m} sub={`${observed.elapsed[m]} firms`}>{pct(v)}</Cell>
+                )),
+              ],
+            ]}
+          />
+        ) : <Empty>No subscription cohort yet, so retention cannot be measured.</Empty>}
+        <Note>
+          {observed ? (
+            <>
+              The subscription cohorts from the retention chart above (a month with no subscriber is skipped). The
+              average is firm-weighted: at each month, the share of every subscriber whose cohort has reached it who
+              is still on a plan. After month {observed.average.length - 1}, the last observed month, the curve
+              continues at the measured cancellation rate of {observed.tailChurn}% a month ({observed.tailChurned} of{" "}
+              {observed.tailExposure} subscriber-months on a plan ended the next month), which gives an average
+              subscriber life of {expectedLife.toFixed(0)} months and a 12-month value of{" "}
+              {usd(value(total.contribution, s, 12))} per paying firm. LTV, LTV : CAC and payback above all use this
+              curve. The sample is small and the figures will move as cohorts age.
+            </>
+          ) : "Once a cohort of subscribers exists, its measured retention drives LTV here."}
+        </Note>
       </Card>
 
       <Card>
@@ -371,11 +341,6 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
       <Card>
         <CardBody>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Field label="Churn assumption">
-              <select value={focus} onChange={(e) => setFocus(e.target.value)} className={inputCls}>
-                {scenarios.map((sc) => <option key={sc.key} value={sc.key}>{sc.label}</option>)}
-              </select>
-            </Field>
             <Field label="Attribution">
               <select value={attr} onChange={(e) => setAttr(e.target.value as Attribution)} className={inputCls}>
                 {(Object.keys(PAID) as Attribution[]).map((k) => <option key={k} value={k}>{ATTR_LABEL[k]}</option>)}
@@ -383,12 +348,6 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
             </Field>
             <NumberInput label="Gross margin (%)" value={marginS} onChange={setMargin}
               hint={`default ${defaultMargin}% from Settings`} />
-            <div />
-            {["M1", "M2", "M3", "M4+"].map((l, i) => (
-              <NumberInput key={l} label={`Custom ${l} churn (%)`} value={custom[i]}
-                onChange={(v) => setCustom((c) => c.map((x, j) => (j === i ? v : x)))}
-                hint={i === 0 ? "cancel before 2nd payment" : i === 3 ? "every month after" : undefined} />
-            ))}
           </div>
         </CardBody>
       </Card>
