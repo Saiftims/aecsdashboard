@@ -141,7 +141,7 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
   type SpendRow = { day: string; spend_cents: number; leads: number };
   type CompanyRow = { hubspot_id: string; name: string; domain: string | null; signed_up_at: string | null };
   type CaseRow = { company_hubspot_id: string | null; submitted_date: string | null; revenue_amount: number | null };
-  const [deals, { data: subs }, contacts, companies, { data: spendDays }, current, { data: caseRows }, facts] = await Promise.all([
+  const [deals, { data: subs }, contacts, companies, { data: spendDays }, current, { data: caseRows }, facts, { data: metaRows }] = await Promise.all([
     selectAll<DealRow>("deals", "name, is_activation, hs_created_at, company_hubspot_id, properties"),
     sb.from("stripe_subscriptions")
       .select("company_hubspot_id, billed_cents, monthly_cents, status, is_internal, started_at"),
@@ -151,7 +151,16 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     subscribersReport(now),
     sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount"),
     loadRevenueFacts(),
+    sb.from("meta_leads").select("email, is_test"),
   ]);
+  // The Meta lead archive names people HubSpot never stamped a source on:
+  // on 2026-10-21 six of the 23 "source not recorded" customers (Griffin,
+  // Cook Barkett, Katsarov, Olsen, Roxell Richards, Mary Ewing) were Meta
+  // form fills by email, and October read zero paid-sourced wins.
+  const metaEmails = new Set<string>();
+  for (const r of (metaRows ?? []) as { email: string | null; is_test: boolean | null }[]) {
+    if (r.email && !r.is_test) metaEmails.add(r.email.toLowerCase());
+  }
   // Live plans with their billing period and case usage, by firm. This is the
   // COMPLETE subscriber list (it includes pre-era plans and the firms billed
   // outside Stripe); the Stripe rows below only add cancelled plans for CAC.
@@ -241,11 +250,12 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
       ...firmContacts.map((c) => ({ src: c.properties?.sw_lead_source, detail: c.properties?.sw_lead_source_detail ?? null })),
     ].filter((c) => c.src);
     const pick = candidates.find((c) => SOURCE_OF[c.src!] && SOURCE_OF[c.src!] !== "other") ?? candidates[0];
-    return {
-      lead,
-      source: (pick ? SOURCE_OF[pick.src!] ?? "other" : "unknown") as LeadSource,
-      sourceDetail: pick?.detail ?? null,
-    };
+    const source = (pick ? SOURCE_OF[pick.src!] ?? "other" : "unknown") as LeadSource;
+    if ((source === "unknown" || source === "other")
+      && firmContacts.some((c) => metaEmails.has((c.properties?.email ?? "").toLowerCase()))) {
+      return { lead, source: "meta" as LeadSource, sourceDetail: "Meta form fill (lead archive)" };
+    }
+    return { lead, source, sourceDetail: pick?.detail ?? null };
   };
 
   const subscribers: Subscriber[] = [];

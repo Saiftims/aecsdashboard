@@ -79,6 +79,7 @@ const ratio = (a: number, b: number) => (Number.isFinite(a / b) && b > 0 ? `${(a
 const num = (v: string, d: number) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
 const day = (iso: string) => iso.slice(0, 10);
 type SubSort = "renews" | "left" | "lead" | "subscribed" | "firm";
+type Basis = "started" | "lead";
 
 const selectCls = "mt-1 w-full rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900";
 
@@ -130,6 +131,10 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
   const [attr, setAttr] = useState<Attribution>("likely");
   const [custom, setCustom] = useState<string[]>(["10", "5", "3", "2"]);
   const [subSort, setSubSort] = useState<SubSort>("renews");
+  // Which month a firm is charged to: the month it started using the product
+  // (how the owner reads the table - "we had more than 3 paying in October")
+  // or the month its lead came in (what the ad spend actually bought).
+  const [basis, setBasis] = useState<Basis>("started");
 
   const margin = num(marginS, snap.grossMargin * 100) / 100;
   const paidSet = PAID[attr];
@@ -182,16 +187,19 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
       default: return a.leadAt.localeCompare(b.leadAt);
     }
   });
+  // Firms that STARTED using the product since the first cohort month
+  // (signup, first case or plan), whatever month their lead came in.
+  const startedEra = snap.customers.filter((x) => x.arrivedAt >= `${snap.months[0]?.month ?? "2026-07"}-01`);
   const cohorts = snap.months.map((m) => {
-    const custs = era.filter((x) => x.leadAt.startsWith(m.month));
-    // Firms that STARTED using the product this month (signup, first case or
-    // plan), whatever month their lead came in - the "firms signed up" number.
+    const fromLeads = era.filter((x) => x.leadAt.startsWith(m.month));
     const arrived = snap.customers.filter((x) => x.arrivedAt.startsWith(m.month));
-    return { ...m, custs, arrived, ...economics(m.spend, m.teamCost, custs, active.s) };
+    const custs = basis === "started" ? arrived : fromLeads;
+    return { ...m, custs, fromLeads, arrived, ...economics(m.spend, m.teamCost, custs, active.s) };
   });
   const totalSpend = cohorts.reduce((a, c) => a + c.spend, 0);
   const totalTeam = cohorts.reduce((a, c) => a + c.teamCost, 0);
-  const total = economics(totalSpend, totalTeam, era, active.s);
+  const allCusts = basis === "started" ? startedEra : era;
+  const total = economics(totalSpend, totalTeam, allCusts, active.s);
 
   if (!Number.isFinite(total.cac)) {
     return (
@@ -203,9 +211,9 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
 
   const totalLeads = cohorts.reduce((a, c) => a + (c.adLeads ?? 0), 0);
   const cohortRows = [...cohorts.map((c) => ({ ...c, name: c.label + (c.mature ? "" : " · still converting") })),
-    { name: "All months", spend: totalSpend, teamCost: totalTeam, custs: era, spendFromLedger: true,
-      arrived: snap.customers.filter((x) => x.arrivedAt >= snap.months[0]?.month),
-      spendSource: "meta" as const, adLeads: cohorts.every((c) => c.adLeads !== null) ? totalLeads : null, ...total }];
+    { name: "All months", spend: totalSpend, teamCost: totalTeam, custs: allCusts, fromLeads: era, arrived: startedEra,
+      spendFromLedger: true, spendSource: "meta" as const,
+      adLeads: cohorts.every((c) => c.adLeads !== null) ? totalLeads : null, ...total }];
   const fromMeta = cohorts.some((c) => c.spendSource === "meta");
   const kindCount = (list: typeof snap.customers) => ({
     signup: list.filter((x) => x.kind === "signup").length,
@@ -222,18 +230,26 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           sub={`${usd(total.plan)}/mo average per paying firm · ${Math.round(margin * 100)}% margin`} />
         <Stat label="LTV : CAC" value={ratio(total.ltv, total.cac)}
           tone={total.ltv / total.cac >= 3 ? "good" : "bad"}
-          sub={`${era.length} firms since July: ${kindsText(total.kinds)}`} />
+          sub={`${allCusts.length} firms since July: ${kindsText(total.kinds)}`} />
         <Stat label="Payback" value={mo(total.payback)} tone={total.payback <= 12 ? "good" : "bad"}
           sub={`${usd(total.contribution)}/mo margin per paying firm`} />
       </div>
 
       <Card>
-        <CardHeader title="Unit economics by lead month"
-          action={<span className="text-xs text-zinc-500">{active.label} churn · {ATTR_LABEL[attr]}</span>} />
+        <CardHeader title={basis === "started" ? "Unit economics by month started" : "Unit economics by lead month"}
+          action={
+            <label className="flex items-center gap-2 text-xs text-zinc-500">
+              <span>{active.label} churn · {ATTR_LABEL[attr]}</span>
+              <select className={inputCls} value={basis} onChange={(e) => setBasis(e.target.value as Basis)}>
+                <option value="started">Count firms by month they started</option>
+                <option value="lead">Count firms by month their lead came in</option>
+              </select>
+            </label>
+          } />
         <Grid
           headers={["Month", "Firms signed up", "Ad spend", "Meta leads", "Cost / lead", "Sales team",
-            "Won from this month's leads", "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "LTV, fully loaded",
-            "LTV : CAC", "Payback"]}
+            basis === "started" ? "Of which from earlier months' leads" : "Won from this month's leads",
+            "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "LTV, fully loaded", "LTV : CAC", "Payback"]}
           left={2}
           rows={cohortRows.map((c) => [
             c.name,
@@ -245,10 +261,12 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
             c.adLeads === null ? "—" : String(c.adLeads),
             c.adLeads ? usd(c.spend / c.adLeads) : "—",
             usd(c.teamCost),
-            <span key="custs">
-              {c.custs.length}
-              <span className="block text-[11px] font-normal text-zinc-400">{kindsText(c.kinds)}</span>
-            </span>,
+            basis === "started"
+              ? String(c.arrived.filter((x) => x.leadAt.slice(0, 7) < (c.name === "All months" ? "2026-07" : x.arrivedAt.slice(0, 7))).length)
+              : <span key="custs">
+                {c.fromLeads.length}
+                <span className="block text-[11px] font-normal text-zinc-400">{kindsText(kindCount(c.fromLeads))}</span>
+              </span>,
             String(c.paying), String(c.paid),
             usd(c.cac), c.paying ? `${usd(c.plan)}/mo` : "—",
             usd(c.ltv), ratio(c.ltv, c.cac), mo(c.payback),
@@ -259,10 +277,11 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           Every firm that has used the product is here - on a plan, paying per case, or signed up and yet to send a
           case. &ldquo;Firms signed up&rdquo; is how many started in that calendar month (first app signup, first case
           or plan, whichever came first) - a firm that bought a plan through Stripe without ever signing into the app
-          counts here too. The economics run on &ldquo;won from this month&apos;s leads&rdquo;, which dates each firm
-          back to the month its lead came in: that month&apos;s ad spend over its paid-sourced paying firms plus the
-          sales team cost over all of its paying firms. The two counts differ because most firms take weeks to
-          convert. Avg $/mo is the billed plan for subscribers and the per-case cash run rate for transactional firms
+          counts here too.
+          {basis === "started"
+            ? " Paying, CAC and LTV run on those same firms, so a month's ad spend is set against firms that started that month even when their lead came in earlier - most take weeks to convert, so the latest month flatters itself and the previous one is undersold. Switch the basis to charge each firm to the month its lead came in."
+            : " Paying, CAC and LTV run on \u201cwon from this month\u2019s leads\u201d, which dates each firm back to the month its lead came in: that month\u2019s ad spend over its paid-sourced paying firms plus the sales team cost over all of its paying firms. The two counts differ because most firms take weeks to convert."}
+          {" "}Avg $/mo is the billed plan for subscribers and the per-case cash run rate for transactional firms
           (Stripe cash where Stripe knows the firm, else $250 a case).
           LTV is lifetime gross margin on that under the selected churn, capped at {HORIZON / 12} years. A month keeps
           converting for weeks after it ends, so the latest month&apos;s CAC is still falling.
