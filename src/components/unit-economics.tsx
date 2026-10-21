@@ -35,7 +35,12 @@ const ATTR_LABEL: Record<Attribution, string> = {
   generous: "Generous: + unrecorded sources",
 };
 
-const HORIZON = 240;
+/** LTV is counted over a fixed number of months. The measured retention
+ * curve levels off (owner, 2026-10-21: "lets assume it levels off at 83%"),
+ * so without a horizon the figure would be unbounded; 36 months is the usual
+ * SaaS convention and is the default. */
+const HORIZONS = [12, 24, 36, 60] as const;
+const DEFAULT_HORIZON = 36;
 
 /** Months until expected contribution covers CAC; revenue earned evenly across
  * each month. */
@@ -89,6 +94,7 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
   const defaultMargin = String(Math.round(snap.grossMargin * 100));
   const [marginS, setMargin] = useState(defaultMargin);
   const [attr, setAttr] = useState<Attribution>("likely");
+  const [horizon, setHorizon] = useState<number>(DEFAULT_HORIZON);
   const [subSort, setSubSort] = useState<SubSort>("renews");
   // Which month a firm is charged to: the month it started using the product
   // (how the owner reads the table - "we had more than 3 paying in October")
@@ -99,9 +105,10 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
   const paidSet = PAID[attr];
 
   // The retention curve is the measured average of the subscription cohorts
-  // (table below) - no presets, no scenarios. With no subscriber cohort yet
-  // there is nothing to measure, so firms are assumed to keep paying.
-  const s = observed ? observedSurvival(observed, HORIZON) : Array<number>(HORIZON).fill(1);
+  // (table below), flat at its last value after the last observed month - no
+  // presets, no scenarios. With no subscriber cohort yet there is nothing to
+  // measure, so firms are assumed to keep paying.
+  const s = observed ? observedSurvival(observed, horizon) : Array<number>(horizon).fill(1);
 
   /** Fully loaded CAC charges the ad spend to paid-sourced PAYING customers
    * (plan or per-case) and the sales team to every paying customer; a signup
@@ -117,7 +124,7 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
     const cac = adCac + teamCac;
     const plan = paying.length ? paying.reduce((a, x) => a + x.monthly, 0) / paying.length : 0;
     const contribution = plan * margin;
-    const ltv = value(contribution, s, HORIZON);
+    const ltv = value(contribution, s, horizon);
     const kinds = {
       signup: custs.filter((x) => x.kind === "signup").length,
       transactional: custs.filter((x) => x.kind === "transactional").length,
@@ -163,7 +170,7 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
     left("Cohort"), right("Firms"), ...Array.from({ length: monthCols }, (_, m) => right(`M${m}`)),
   ];
   const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v)}%`);
-  const expectedLife = s.reduce((a, x) => a + x, 0);
+  const paidMonths = s.reduce((a, x) => a + x, 0);
 
   if (!Number.isFinite(total.cac)) {
     return (
@@ -190,8 +197,8 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
       <StatGrid cols={4}>
         <Stat label="CAC, fully loaded" value={usd(total.cac)} tone="warn"
           sub={`${usd(total.adCac)} ads + ${usd(total.teamCac)} sales & CS salaries (${usd(snap.teamCost * 12)}/yr now)`} />
-        <Stat label="LTV, fully loaded" value={usd(total.ltv)}
-          sub={`${usd(total.plan)}/mo average per paying firm · ${Math.round(margin * 100)}% margin · ${expectedLife.toFixed(0)}-month average life`} />
+        <Stat label={`LTV, fully loaded · ${horizon} months`} value={usd(total.ltv)}
+          sub={`${usd(total.plan)}/mo average per paying firm · ${Math.round(margin * 100)}% margin · ${paidMonths.toFixed(1)} paid months of ${horizon}`} />
         <Stat label="LTV : CAC" value={ratio(total.ltv, total.cac)}
           tone={total.ltv / total.cac >= 3 ? "good" : "bad"}
           sub={`${allCusts.length} firms since July: ${kindsText(total.kinds)}`} />
@@ -253,7 +260,7 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
 
       <Card>
         <CardHeader title="Retention the LTV runs on"
-          action={observed ? <span>{observed.firms} subscribers · {Math.round(s[11] * 100)}% still paying at month 12</span> : null} />
+          action={observed ? <span>{observed.firms} subscribers · levels off at {Math.round(observed.plateau)}%</span> : null} />
         {observed ? (
           <Table
             dense
@@ -278,12 +285,11 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
             <>
               The subscription cohorts from the retention chart above (a month with no subscriber is skipped). The
               average is firm-weighted: at each month, the share of every subscriber whose cohort has reached it who
-              is still on a plan. After month {observed.average.length - 1}, the last observed month, the curve
-              continues at the measured cancellation rate of {observed.tailChurn}% a month ({observed.tailChurned} of{" "}
-              {observed.tailExposure} subscriber-months on a plan ended the next month), which gives an average
-              subscriber life of {expectedLife.toFixed(0)} months and a 12-month value of{" "}
-              {usd(value(total.contribution, s, 12))} per paying firm. LTV, LTV : CAC and payback above all use this
-              curve. The sample is small and the figures will move as cohorts age.
+              is still on a plan. After month {observed.average.length - 1}, the last observed month, the curve is
+              held flat at {Math.round(observed.plateau)}% - the May cohort has sat at 80% since month 1 - rather than
+              churning further. A firm therefore pays for {paidMonths.toFixed(1)} of the {horizon}-month LTV horizon,
+              worth {usd(total.ltv)} in margin; the horizon is set below. LTV, LTV : CAC and payback above all use
+              this curve. The sample is small and the figures will move as cohorts age.
             </>
           ) : "Once a cohort of subscribers exists, its measured retention drives LTV here."}
         </Note>
@@ -348,6 +354,11 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
             </Field>
             <NumberInput label="Gross margin (%)" value={marginS} onChange={setMargin}
               hint={`default ${defaultMargin}% from Settings`} />
+            <Field label="LTV horizon" hint="retention is flat after month 3, so LTV needs a cut-off">
+              <select value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} className={inputCls}>
+                {HORIZONS.map((h) => <option key={h} value={h}>{h} months</option>)}
+              </select>
+            </Field>
           </div>
         </CardBody>
       </Card>
