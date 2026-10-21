@@ -2,7 +2,9 @@
  * All values are trimmed: vars set via CLI pipes can carry trailing CR/LF
  * (Windows), which breaks strict comparisons and HTTP headers. */
 function clean(name: string): string {
-  return (process.env[name] ?? "").trim();
+  // `echo $x | vercel env add` on Windows stores the line ending as the
+  // LITERAL four characters \r\n, which trim() does not touch.
+  return (process.env[name] ?? "").replace(/(\\r)?\\n$/, "").trim();
 }
 
 function required(name: string): string {
