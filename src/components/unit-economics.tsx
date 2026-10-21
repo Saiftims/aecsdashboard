@@ -249,8 +249,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
         <Grid
           headers={["Month", "Firms signed up", "Ad spend", "Meta leads", "Cost / lead", "Sales & CS salaries",
             basis === "started" ? "Of which from earlier months' leads" : "Won from this month's leads",
-            "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "Net margin / mo", "LTV, fully loaded",
-            "LTV : CAC", "Payback"]}
+            "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "LTV, fully loaded", "LTV : CAC", "Payback"]}
           left={2}
           rows={cohortRows.map((c) => [
             c.name,
@@ -269,7 +268,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
                 <span className="block text-[11px] font-normal text-zinc-400">{kindsText(kindCount(c.fromLeads))}</span>
               </span>,
             String(c.paying), String(c.paid),
-            usd(c.cac), c.paying ? `${usd(c.plan)}/mo` : "—", c.paying ? `${usd(c.contribution)}/mo` : "—",
+            usd(c.cac), c.paying ? `${usd(c.plan)}/mo` : "—",
             usd(c.ltv), ratio(c.ltv, c.cac), mo(c.payback),
           ])}
           highlight={-1} strong={cohortRows.length - 1}
@@ -282,7 +281,7 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
           {basis === "started"
             ? " Paying, CAC and LTV run on those same firms, so a month's ad spend is set against firms that started that month even when their lead came in earlier - most take weeks to convert, so the latest month flatters itself and the previous one is undersold. Switch the basis to charge each firm to the month its lead came in."
             : " Paying, CAC and LTV run on \u201cwon from this month\u2019s leads\u201d, which dates each firm back to the month its lead came in: that month\u2019s ad spend over its paid-sourced paying firms plus the people cost over all of its paying firms. The two counts differ because most firms take weeks to convert."}
-          {" CAC, fully loaded = ad spend ÷ paid-sourced paying firms + that month's sales & CS salaries (the annual figure in force ÷ 12, prorated) ÷ all paying firms. Net margin / mo is Avg $/mo at the gross margin."}
+          {" CAC, fully loaded = ad spend ÷ paid-sourced paying firms + that month's sales & CS salaries (the annual figure in force ÷ 12, prorated) ÷ all paying firms."}
           {" "}Avg $/mo is the billed plan for subscribers and the per-case cash run rate for transactional firms
           (Stripe cash where Stripe knows the firm, else $250 a case).
           LTV is lifetime gross margin on that under the selected churn, capped at {HORIZON / 12} years. A month keeps
