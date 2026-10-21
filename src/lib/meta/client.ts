@@ -169,38 +169,85 @@ export interface MetaAdDaily {
   leads: number;
 }
 
+type ActionRow = { actions?: { action_type: string; value: string }[] };
+/** Form submissions (`onsite_conversion.lead_grouped`). Not `lead`, which
+ * also counts the pixel's MQL/SQL custom events and runs ~2x. */
+const leadsIn = (r: ActionRow) =>
+  Number(r.actions?.find((a) => a.action_type === "onsite_conversion.lead_grouped")?.value ?? 0);
+
+/** Core metrics and the action-type fields are fetched in SEPARATE requests
+ * and merged. Since about 2026-09-06 Meta answers a daily request that names
+ * `spend,impressions,clicks` together with `actions` (account level) or
+ * `inline_link_clicks` (ad level, multi-day) with spend/impressions/clicks
+ * all "0" while still returning the other fields - the sync trusted it and
+ * overwrote six weeks of real spend with zeros (found 2026-10-21; Sep read
+ * $1,141 against $7,225). Asked on their own, the metrics come back correct. */
+async function insightsSplit<K extends string>(
+  params: Record<string, string>, metricFields: string, actionFields: string,
+  key: (r: { date_start: string } & Record<string, unknown>) => K,
+) {
+  const path = `${env.metaAdAccountId()}/insights`;
+  type Row = { date_start: string } & Record<string, unknown> & ActionRow;
+  const [metrics, actions] = await Promise.all([
+    allPages<Row>(path, env.metaAdsToken(), { ...params, fields: metricFields }),
+    allPages<Row>(path, env.metaAdsToken(), { ...params, fields: actionFields }),
+  ]);
+  const extra = new Map<K, Row>();
+  for (const r of actions) extra.set(key(r), r);
+  return { metrics, extra };
+}
+
+/** Throws when the daily rows do not add up to what Meta says the account
+ * spent over the same window - a zeroed breakdown must never be written. */
+async function assertMatchesAccountTotal(since: string, until: string, sumCents: number, what: string) {
+  const total = await accountSpendTotal(since, until);
+  if (total > 0 && Math.abs(sumCents - total) > Math.max(100, total * 0.01)) {
+    throw new Error(`Meta ${what} ${since}..${until} sums to ${sumCents} cents but the account total is ${total}; not writing`);
+  }
+}
+
 /** Per-ad, per-day insights. Asked a month at a time so no single response
  * trips Meta's "reduce the amount of data" limit. */
 export async function dailyAdInsights(since: string, until: string): Promise<MetaAdDaily[]> {
-  type Row = {
-    ad_id: string; date_start: string; spend?: string; impressions?: string; reach?: string; clicks?: string;
-    inline_link_clicks?: string; actions?: { action_type: string; value: string }[];
-  };
   const out: MetaAdDaily[] = [];
   let cursor = new Date(since + "T00:00:00Z");
   const end = new Date(until + "T00:00:00Z");
   while (cursor <= end) {
     const monthEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
     const chunkEnd = monthEnd < end ? monthEnd : end;
-    const rows = await allPages<Row>(`${env.metaAdAccountId()}/insights`, env.metaAdsToken(), {
+    const from = cursor.toISOString().slice(0, 10);
+    const to = chunkEnd.toISOString().slice(0, 10);
+    const { metrics, extra } = await insightsSplit({
       level: "ad",
-      fields: "ad_id,spend,impressions,reach,clicks,inline_link_clicks,actions",
       time_increment: "1",
-      time_range: JSON.stringify({ since: cursor.toISOString().slice(0, 10), until: chunkEnd.toISOString().slice(0, 10) }),
+      time_range: JSON.stringify({ since: from, until: to }),
       limit: "500",
-    });
-    for (const r of rows) {
+    }, "ad_id,spend,impressions,reach,clicks", "ad_id,inline_link_clicks,actions", (r) => `${r.ad_id}|${r.date_start}`);
+    let sum = 0;
+    for (const r of metrics) {
+      const e = extra.get(`${r.ad_id}|${r.date_start}`);
+      const spendCents = Math.round(Number(r.spend ?? 0) * 100);
+      sum += spendCents;
       out.push({
-        adId: r.ad_id, day: r.date_start,
-        spendCents: Math.round(Number(r.spend ?? 0) * 100),
+        adId: String(r.ad_id), day: r.date_start, spendCents,
         impressions: Number(r.impressions ?? 0), reach: Number(r.reach ?? 0),
-        clicks: Number(r.clicks ?? 0), linkClicks: Number(r.inline_link_clicks ?? 0),
-        leads: Number(r.actions?.find((a) => a.action_type === "onsite_conversion.lead_grouped")?.value ?? 0),
+        clicks: Number(r.clicks ?? 0), linkClicks: Number(e?.inline_link_clicks ?? 0),
+        leads: e ? leadsIn(e) : 0,
       });
     }
+    await assertMatchesAccountTotal(from, to, sum, "per-ad daily spend");
     cursor = new Date(Date.UTC(chunkEnd.getUTCFullYear(), chunkEnd.getUTCMonth(), chunkEnd.getUTCDate() + 1));
   }
   return out;
+}
+
+/** Account spend over a whole window in ONE number, for checking that the
+ * daily rows add up to what Meta says the account spent. */
+export async function accountSpendTotal(since: string, until: string): Promise<number> {
+  const rows = await allPages<{ spend?: string }>(`${env.metaAdAccountId()}/insights`, env.metaAdsToken(), {
+    level: "account", fields: "spend", time_range: JSON.stringify({ since, until }),
+  });
+  return Math.round(rows.reduce((a, r) => a + Number(r.spend ?? 0), 0) * 100);
 }
 
 export interface MetaDailySpend {
@@ -217,22 +264,22 @@ export interface MetaDailySpend {
  * Needs only `ads_read`, so it uses `META_ADS_TOKEN` when set. Meta caps a
  * single insights request at 37 months, far beyond anything asked here. */
 export async function dailyAccountSpend(since: string, until: string): Promise<MetaDailySpend[]> {
-  type Row = {
-    date_start: string; spend?: string; impressions?: string; clicks?: string;
-    actions?: { action_type: string; value: string }[];
-  };
-  const rows = await allPages<Row>(`${env.metaAdAccountId()}/insights`, env.metaAdsToken(), {
+  const { metrics, extra } = await insightsSplit({
     level: "account",
-    fields: "spend,impressions,clicks,actions",
     time_increment: "1",
     time_range: JSON.stringify({ since, until }),
     limit: "500",
+  }, "spend,impressions,clicks", "actions", (r) => r.date_start);
+  const days = metrics.map((r) => {
+    const e = extra.get(r.date_start);
+    return {
+      day: r.date_start,
+      spendCents: Math.round(Number(r.spend ?? 0) * 100),
+      impressions: Number(r.impressions ?? 0),
+      clicks: Number(r.clicks ?? 0),
+      leads: e ? leadsIn(e) : 0,
+    };
   });
-  return rows.map((r) => ({
-    day: r.date_start,
-    spendCents: Math.round(Number(r.spend ?? 0) * 100),
-    impressions: Number(r.impressions ?? 0),
-    clicks: Number(r.clicks ?? 0),
-    leads: Number(r.actions?.find((a) => a.action_type === "onsite_conversion.lead_grouped")?.value ?? 0),
-  }));
+  await assertMatchesAccountTotal(since, until, days.reduce((a, d) => a + d.spendCents, 0), "daily spend");
+  return days;
 }

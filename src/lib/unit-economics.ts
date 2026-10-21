@@ -139,14 +139,14 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
   };
   type ContactRow = { company_hubspot_id: string | null; properties: Record<string, string> | null };
   type SpendRow = { day: string; spend_cents: number; leads: number };
-  type CompanyRow = { hubspot_id: string; name: string; signed_up_at: string | null };
+  type CompanyRow = { hubspot_id: string; name: string; domain: string | null; signed_up_at: string | null };
   type CaseRow = { company_hubspot_id: string | null; submitted_date: string | null; revenue_amount: number | null };
   const [deals, { data: subs }, contacts, companies, { data: spendDays }, current, { data: caseRows }, facts] = await Promise.all([
     selectAll<DealRow>("deals", "name, is_activation, hs_created_at, company_hubspot_id, properties"),
     sb.from("stripe_subscriptions")
       .select("company_hubspot_id, billed_cents, monthly_cents, status, is_internal, started_at"),
     selectAll<ContactRow>("contacts", "company_hubspot_id, properties"),
-    selectAll<CompanyRow>("companies", "hubspot_id, name, signed_up_at"),
+    selectAll<CompanyRow>("companies", "hubspot_id, name, domain, signed_up_at"),
     sb.from("meta_ad_spend_daily").select("day, spend_cents, leads"),
     subscribersReport(now),
     sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount"),
@@ -322,7 +322,25 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
       monthly: s.plan, revenueToDate: 0, cases: 0, preSwitch: s.preSwitch,
     });
   }
-  customers.sort((a, b) => a.leadAt.localeCompare(b.leadAt));
+  // One firm, one row. HubSpot sometimes holds two company records for the
+  // same domain (RAM Law on 2026-10-20: the app signup and case on one, the
+  // Stripe plan on another created the same day) - fold them into the earlier
+  // arrival, keeping the plan.
+  const domainOf = new Map(companies.map((c) => [c.hubspot_id, (c.domain ?? "").toLowerCase().replace(/^www\./, "")]));
+  const byDomain = new Map<string, Customer>();
+  const deduped: Customer[] = [];
+  for (const c of customers.sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt))) {
+    const dom = domainOf.get(c.company) || null;
+    const prior = dom ? byDomain.get(dom) : undefined;
+    if (!prior) { if (dom) byDomain.set(dom, c); deduped.push(c); continue; }
+    if (c.kind === "subscription" && prior.kind !== "subscription") {
+      Object.assign(prior, { kind: c.kind, monthly: c.monthly, leadAt: c.leadAt, source: c.source, preSwitch: c.preSwitch });
+    }
+    prior.cases += c.cases;
+    prior.revenueToDate += c.revenueToDate;
+  }
+  customers.length = 0;
+  customers.push(...deduped.sort((a, b) => a.leadAt.localeCompare(b.leadAt)));
 
   const mqlsByMonth = new Map<string, number>();
   for (const d of sales) mqlsByMonth.set(monthKey(d.hs_created_at), (mqlsByMonth.get(monthKey(d.hs_created_at)) ?? 0) + 1);

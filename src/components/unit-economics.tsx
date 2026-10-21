@@ -231,15 +231,20 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
         <CardHeader title="Unit economics by lead month"
           action={<span className="text-xs text-zinc-500">{active.label} churn · {ATTR_LABEL[attr]}</span>} />
         <Grid
-          headers={["Lead month", "Ad spend", "Meta leads", "Cost / lead", "Sales team", "Firms started", "Customers from leads",
-            "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "LTV, fully loaded", "LTV : CAC", "Payback"]}
+          headers={["Month", "Firms signed up", "Ad spend", "Meta leads", "Cost / lead", "Sales team",
+            "Won from this month's leads", "Paying", "Paid-sourced", "CAC, fully loaded", "Avg $/mo", "LTV, fully loaded",
+            "LTV : CAC", "Payback"]}
+          left={2}
           rows={cohortRows.map((c) => [
             c.name,
+            <span key="arrived">
+              <span className="text-base font-semibold">{c.arrived.length}</span>
+              <span className="block text-[11px] font-normal text-zinc-400">{kindsText(kindCount(c.arrived))}</span>
+            </span>,
             usd(c.spend) + (c.spendSource === "planned" ? " planned" : c.spendSource === "ledger" ? " (typed)" : ""),
             c.adLeads === null ? "—" : String(c.adLeads),
             c.adLeads ? usd(c.spend / c.adLeads) : "—",
             usd(c.teamCost),
-            <span key="arrived" title={kindsText(kindCount(c.arrived))}>{c.arrived.length}</span>,
             <span key="custs">
               {c.custs.length}
               <span className="block text-[11px] font-normal text-zinc-400">{kindsText(c.kinds)}</span>
@@ -252,11 +257,13 @@ export function UnitEconomics({ snap }: { snap: UnitEconomicsSnapshot }) {
         />
         <p className="px-4 pb-3 pt-1 text-xs text-zinc-400">
           Every firm that has used the product is here - on a plan, paying per case, or signed up and yet to send a
-          case. &ldquo;Firms started&rdquo; is how many began using it in that calendar month (first signup, first case
-          or plan, whichever came first). &ldquo;Customers from leads&rdquo; dates each of those firms back to the month
-          its lead came in, which is the view CAC needs: that month&apos;s ad spend over its paid-sourced paying firms
-          plus the sales team cost over all of its paying firms. Avg $/mo is the billed plan for subscribers and the
-          per-case cash run rate for transactional firms (Stripe cash where Stripe knows the firm, else $250 a case).
+          case. &ldquo;Firms signed up&rdquo; is how many started in that calendar month (first app signup, first case
+          or plan, whichever came first) - a firm that bought a plan through Stripe without ever signing into the app
+          counts here too. The economics run on &ldquo;won from this month&apos;s leads&rdquo;, which dates each firm
+          back to the month its lead came in: that month&apos;s ad spend over its paid-sourced paying firms plus the
+          sales team cost over all of its paying firms. The two counts differ because most firms take weeks to
+          convert. Avg $/mo is the billed plan for subscribers and the per-case cash run rate for transactional firms
+          (Stripe cash where Stripe knows the firm, else $250 a case).
           LTV is lifetime gross margin on that under the selected churn, capped at {HORIZON / 12} years. A month keeps
           converting for weeks after it ends, so the latest month&apos;s CAC is still falling.
           {fromMeta
