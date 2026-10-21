@@ -513,15 +513,30 @@ export async function syncCases() {
     stats.intakeEvents += 1;
   }
 
+  // Every row already in the table, by firm, so an intake deal is also deduped
+  // against the hand-entered / intake-form row for the same matter. The intake
+  // form's HubSpot app creates the deal the minute a case is submitted, so the
+  // same case usually exists as an `intake_<submission>` or manual row dated
+  // the same day; without this, associating such a deal to its firm (which the
+  // health page asks for) created a second case (Nazarian 14 Jul, Cavin Le
+  // 21 Jul, Bermudez 16 Sep, Catalan 6 Oct would all have doubled on
+  // 2026-10-21).
+  const rowsByCompany = new Map<string, number[]>();
+  for (const c of existingCases ?? []) {
+    if (!c.company_hubspot_id || !c.submitted_date) continue;
+    const t = new Date(c.submitted_date).getTime();
+    if (!Number.isNaN(t)) rowsByCompany.set(c.company_hubspot_id, [...(rowsByCompany.get(c.company_hubspot_id) ?? []), t]);
+  }
   for (const d of deals ?? []) {
     const name = (d.name ?? "").toLowerCase();
     if (!name.includes("intake") || !d.company_hubspot_id || !d.hs_created_at) continue;
     const created = new Date(d.hs_created_at).getTime();
-    // dedupe vs a PostHog case for the same firm within 3 days
-    const near = (phByCompany.get(d.company_hubspot_id) ?? [])
-      .some((t) => Math.abs(t - created) <= 3 * DAY);
     const caseId = `intake_${d.hubspot_id}`;
-    if (near || existingById.has(caseId)) continue;
+    if (existingById.has(caseId)) continue;
+    // dedupe vs a PostHog case, or any existing row, for the same firm within 3 days
+    const near = [...(phByCompany.get(d.company_hubspot_id) ?? []), ...(rowsByCompany.get(d.company_hubspot_id) ?? [])]
+      .some((t) => Math.abs(t - created) <= 3 * DAY);
+    if (near) continue;
     // A closed-won intake deal is a finished, invoiced case -> mark completed so
     // the firm counts as an activated customer (not stuck pre-first-case).
     const done = d.stage === SALES_STAGES.closedWon;

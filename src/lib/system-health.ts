@@ -267,11 +267,27 @@ export async function systemHealth(): Promise<SystemHealth> {
     "Merge the companies in HubSpot (keep the one with the cases), then Refresh. The unit-economics table already folds them by domain.",
     dupes.map(([d, v]) => ({ id: d, label: v[0].name ?? d, detail: `${v.length} records: ${v.map((c) => c.hubspot_id).join(", ")}`, href: `/firms/${v[0].hubspot_id}` })), 1, 3);
 
-  // Intake deals with no company never become cases.
-  const intakeNoCo = ((deals ?? []) as { hubspot_id: string; name: string; company_hubspot_id: string | null; is_activation: boolean; stage_label: string | null; hs_created_at: string }[])
-    .filter((d) => /intake/i.test(d.name) && !d.company_hubspot_id && !/unknown/i.test(d.name));
-  mk("intake_no_company", "Intake deals with no company", "The cases sync turns an 'intake' deal into a case only when it has a company; without one the case never exists and the month under-counts. Two deals for the same person (Nazarian, Cavin Le, Bermudez) also double the $250 'revenue won'.",
-    "Associate the deal to the firm in HubSpot (and delete the duplicate of a pair), then Refresh.",
+  // A HubSpot app ("groiwth", id 42251876) runs at ~00:20 UTC on the 1st of
+  // every month and re-creates one closed-won "Case intake — Name" deal for
+  // every intake submitted the month before (found 2026-10-21: 1 Aug x3,
+  // 1 Sep x2, 1 Oct x2). The real deal is the "case-intake — Name — Firm" one
+  // the intake form made on the day; these are pure duplicates and each adds
+  // $250 of "revenue won" that was never a second case.
+  type DealRow = { hubspot_id: string; name: string; company_hubspot_id: string | null; is_activation: boolean; stage_label: string | null; hs_created_at: string };
+  const isMonthlyDupe = (d: DealRow) => {
+    const t = new Date(d.hs_created_at);
+    return /^Case intake — /.test(d.name) && t.getUTCDate() === 1 && t.getUTCHours() < 2;
+  };
+  const intakeDeals = ((deals ?? []) as DealRow[]).filter((d) => /intake/i.test(d.name));
+  const monthlyDupes = intakeDeals.filter(isMonthlyDupe);
+  mk("intake_monthly_dupes", "Monthly duplicate intake deals", "Created by HubSpot app 42251876 at 00:20 UTC on the 1st, one per intake from the previous month. Each is a second closed-won $250 for a case that already has its own deal, and one with a company becomes a second CASE too.",
+    "Delete these deals in HubSpot and switch off (or re-point) the monthly workflow in that app; the agent's tombstones keep them deleted.",
+    monthlyDupes.map((d) => ({ id: d.hubspot_id, label: d.name, detail: `${d.company_hubspot_id ? "HAS COMPANY - counts as a case" : "no company"} · created ${d.hs_created_at.slice(0, 16).replace("T", " ")}`, href: `https://app.hubspot.com/contacts/148349267/record/0-3/${d.hubspot_id}` })), 1);
+
+  // Real intake deals with no company never become cases.
+  const intakeNoCo = intakeDeals.filter((d) => !d.company_hubspot_id && !/unknown/i.test(d.name) && !isMonthlyDupe(d));
+  mk("intake_no_company", "Intake deals with no company", "The cases sync turns an 'intake' deal into a case only when it has a company; without one the case never exists and the month under-counts.",
+    "Associate the deal to the firm in HubSpot (the contact on the deal usually names it), then Refresh. The sync dedupes it against a same-day row for the firm, so a matter already in the table is not doubled.",
     intakeNoCo.map((d) => ({ id: d.hubspot_id, label: d.name, detail: `${d.stage_label ?? ""} · created ${d.hs_created_at.slice(0, 10)}`, href: `https://app.hubspot.com/contacts/148349267/record/0-3/${d.hubspot_id}` })), 1);
 
   // Signups the dashboard could not match to any HubSpot company do not exist in companies; surface via a rough proxy:
