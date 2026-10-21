@@ -2,16 +2,16 @@ import { redirect } from "next/navigation";
 import {
   DailyActivityChart, FunnelChart, LeadSourceChart, MonthlyBarChart, MonthlyMqlChart,
   MonthlyNewFirmsChart,
-  MonthlyRevenueChart, RevenueRetentionChart,
+  MonthlyRevenueChart,
 } from "@/components/charts";
 import {
-  Badge, Card, CardBody, CardHeader, Note, PageHeader, Section, Stat, StatGrid, Table, TextLink,
+  Card, CardBody, CardHeader, Note, PageHeader, Section, Stat, StatGrid, Table, TextLink,
 } from "@/components/ui";
 import { LogoRetention } from "@/components/logo-retention";
 import { UnitEconomics } from "@/components/unit-economics";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
 import {
-  activityReport, billingRetentionReport, demoCreditReport, retentionReport,
+  activityReport, billingRetentionReport, retentionReport,
 } from "@/lib/queries";
 import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
 import { loadSettings } from "@/lib/settings";
@@ -35,15 +35,13 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention, billing, demoCredit, unitEcon, leads] = await Promise.all([
+  const [report, retention, billing, unitEcon, leads] = await Promise.all([
     activityReport(user.role === "ae" ? user.hubspot_owner_id : null),
     retentionReport(),
     billingRetentionReport(),
-    demoCreditReport(),
     user.role === "executive" ? unitEconomicsSnapshot() : null,
     loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
   ]);
-  const revRetention = billing.revenue;
   const {
     settings, activityTotals, roleDaily, funnel, revenue, revenueCollected,
     revenueModelled, revenueFromStripe, cohortSize, casesThisWeek, newCustomers,
@@ -172,33 +170,6 @@ export default async function ActivityPage() {
           </Card>
         ))}
       </div>
-
-      <Card>
-        <CardHeader
-          title={`Demos booked by rep \u2014 ${demoCredit.monthLabel}`}
-          action={<span>{demoCredit.total} demos, {demoCredit.totalFirstCases} first cases</span>}
-        />
-        <Table
-          headers={["Booked by", "Demos booked", "First case this month", "Cases this month"]}
-          rows={demoCredit.rows.map((r) => [
-            r.ownerId ? r.name : <span key={r.name} className="text-zinc-500">{r.name}</span>,
-            String(r.demos),
-            r.firstCases ? String(r.firstCases) : "\u2014",
-            r.cases ? String(r.cases) : "\u2014",
-          ])}
-        />
-        <Note>
-          Credit is the rep who owned the deal in the minute BEFORE it entered
-          Demo Scheduled, not the current deal owner {"\u2014"} the owner sweep hands
-          every booked deal to Chris within hours, so the owner field cannot
-          answer this. Self-serve means nobody was working the lead when it
-          booked; those belong to marketing, not to whoever inherited the deal.
-          &ldquo;First case this month&rdquo; counts firms whose FIRST EVER case
-          landed this month, so it is genuinely new revenue rather than a repeat
-          submission. Stamping began {demoCredit.creditFrom}, so demos booked
-          earlier in a month that starts before then read as self-serve.
-        </Note>
-      </Card>
 
       <Section title={<>Full funnel — {cohortSize} deals created this week</>}>
         <StatGrid cols={4}>
@@ -395,68 +366,6 @@ export default async function ActivityPage() {
           monthCols={retention.monthCols}
           partialMonthLabel={billing.partialMonth ? billing.partialMonthLabel : null}
         />
-      </Section>
-
-      <Section title="Revenue retention — dollars kept, by first-revenue month">
-        <div className="mb-3">
-          <StatGrid cols={4}>
-            <Stat label="Revenue firms" value={billing.subscriptionFirms + billing.transactionalFirms} sub="have billed at least once" />
-            <Stat label="On subscription" value={billing.subscriptionFirms} sub={`${money(billing.mrr)} / month`} tone="good" />
-            <Stat label="Transactional" value={billing.transactionalFirms} sub={`$${settings.defaultCasePrice} per case`} />
-            <Stat label="Cohorts tracked" value={revRetention.cohorts.length} sub="months with a first sale" />
-          </StatGrid>
-        </div>
-        <Card>
-          <CardHeader
-            title="Revenue retention curve (% of each cohort's month-0 dollars)"
-            action={billing.partialMonth ? (
-              <Badge tone="yellow">
-                {billing.partialMonthLabel} is still running — its dollars are incomplete
-              </Badge>
-            ) : null}
-          />
-          <CardBody>
-            <RevenueRetentionChart cohorts={revRetention.cohorts} monthCols={billing.monthCols} />
-          </CardBody>
-        </Card>
-        <Card className="mt-3">
-          <Table
-            headers={["First-revenue cohort", "Firms", "Month 0", "Month 1", "Month 2", "Month 3"]}
-            rows={revRetention.cohorts.map((c) => [
-              <TextLink key="c" href={`/drill/revcohort_${c.key}`} className="font-medium">
-                {c.label}
-              </TextLink>,
-              String(c.firms),
-              ...c.retention.map((r, i) =>
-                r === null || c.values[i] === null
-                  ? "—"
-                  : `${money(c.values[i]!)} · ${r}%`),
-            ])}
-          />
-        </Card>
-        <Card className="mt-3">
-          <Table
-            headers={["Cohort", "Still billing", "Stopped after month 0"]}
-            rows={revRetention.cohorts.map((c) => [
-              <TextLink key="c" href={`/drill/revcohort_${c.key}`}>
-                {c.label}
-              </TextLink>,
-              c.members.filter((m) => !m.lapsed)
-                .map((m) => `${m.name} (${money(m.latest || m.base)})`).join(", ") || "—",
-              <span key="lapsed" className={c.members.some((m) => m.lapsed) ? "text-amber-600 dark:text-amber-400" : ""}>
-                {c.members.filter((m) => m.lapsed)
-                  .map((m) => `${m.name} (was ${money(m.base)})`).join(", ") || "—"}
-              </span>,
-            ])}
-          />
-        </Card>
-        <Note className="px-0 pb-0">
-          A cohort is the firms that first billed in that month. Month N = the dollars that cohort
-          billed N months later, as a share of what it billed in month 0 — above 100% means the
-          cohort grew. Subscription firms count their flat monthly fee; everyone else counts
-          cases × ${settings.defaultCasePrice}. A curve that falls is a named firm that stopped,
-          listed above, not a data problem.
-        </Note>
       </Section>
 
       <Section title="Usage frequency">
