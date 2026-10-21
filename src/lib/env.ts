@@ -24,6 +24,8 @@ export const env = {
   posthogHost: () => clean("POSTHOG_HOST") || "https://us.posthog.com",
   slackWebhookUrl: () => clean("SLACK_WEBHOOK_URL"),
   cronSecret: () => clean("CRON_SECRET"),
+  /** Bearer token the investor data room presents to GET /api/investor. */
+  investorFeedToken: () => clean("INVESTOR_FEED_TOKEN"),
   /** Meta Graph token with leads_retrieval + pages_show_list + pages_read_engagement. */
   metaAccessToken: () => required("META_ACCESS_TOKEN"),
   metaPageId: () => clean("META_PAGE_ID") || "852956741232072",
