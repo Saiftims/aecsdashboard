@@ -1283,8 +1283,24 @@ export async function monthlyRevenueBreakdown(): Promise<{
   ]);
   const now = new Date();
   const nowIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();
-  const knows = (id: string | null | undefined) =>
-    !!(facts.ready && id && facts.inStripe.has(id));
+  // HubSpot can hold two company records for one firm (RAM Law, 2026-10-20:
+  // Stripe plan on one, the case on the other). Stripe speaks for the FIRM, so
+  // a company whose domain-sibling is in Stripe is in Stripe too - otherwise
+  // the sibling's cases get priced per case on top of the plan it already
+  // pays for (RAM Law read $300 subscription + $250 transactional).
+  const siblings = new Map<string, string[]>();
+  for (const co of (companies ?? []) as CompanyRow[]) {
+    const d = (co.domain ?? "").trim().toLowerCase();
+    if (!d) continue;
+    siblings.set(d, [...(siblings.get(d) ?? []), co.hubspot_id]);
+  }
+  const domainOf = new Map(((companies ?? []) as CompanyRow[]).map((co) => [co.hubspot_id, (co.domain ?? "").trim().toLowerCase()]));
+  const knows = (id: string | null | undefined) => {
+    if (!facts.ready || !id) return false;
+    if (facts.inStripe.has(id)) return true;
+    const d = domainOf.get(id);
+    return !!d && (siblings.get(d) ?? []).some((s) => facts.inStripe.has(s));
+  };
 
   const collected = new Map<number, number>(facts.byMonth);
   const modelled = new Map<number, number>();

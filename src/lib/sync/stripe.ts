@@ -67,10 +67,16 @@ function normName(s: string | null | undefined): string {
     .trim();
 }
 
-/** A subscription line reads "1 × Boutique (at $700.00 / month)"; anything else
- * on an invoice is usage - a case, a report, an add-on. */
+/** A subscription line reads "1 × Boutique (at $700.00 / month)", or is just
+ * the plan's name (Ghozland's first Solo payment on 2026-09-08 was invoiced
+ * as "Solo" and read as a $300 case until 2026-10-22), or is a proration
+ * ("Unused time on Solo after ..."); anything else on an invoice is usage -
+ * a case, a report, an add-on. */
 function lineIsSubscription(desc: string | null | undefined): boolean {
-  return /\(at \$[\d,.]+ \/ (month|year)\)/i.test(desc ?? "");
+  const d = (desc ?? "").trim();
+  return /\(at \$[\d,.]+ \/ (month|year)\)/i.test(d)
+    || /^(solo|boutique|growth|powerhouse)( plan)?$/i.test(d)
+    || /^(unused time|remaining time) on (solo|boutique|growth|powerhouse)/i.test(d);
 }
 
 function chargeKind(
