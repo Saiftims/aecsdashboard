@@ -322,14 +322,15 @@ export default async function ActivityPage() {
               drillBase="/drill/month_revenue_" />
           </CardBody>
           <Note>
-            The solid bar is cash Stripe actually collected that month, net of
-            refunds {"\u2014"} a refunded payment is not revenue, so a firm that was
-            billed and refunded in full reads as zero. The pale bar is the firms
-            Stripe has never billed, still priced by the old rules: a flat plan
-            where one is recorded, otherwise {money(settings.defaultCasePrice)} a
-            case. That part is an estimate, not money in the bank. Revenue counts
-            in the month it was TAKEN, which is not always the month the case was
-            submitted, so this will not track the case chart above exactly.
+            Subscription is plan payments (Solo, Boutique, Growth and the flat-fee
+            firms); transactional is per-case charges, reports and other one-off
+            usage. Both are cash Stripe actually collected, net of refunds {"\u2014"}
+            a firm billed and refunded in full reads as zero {"\u2014"} except for the
+            few firms Stripe has never billed, which are still priced by the old
+            rules (a recorded flat plan, otherwise {money(settings.defaultCasePrice)}{" "}
+            a case); hover a bar to see how much of it is that estimate. Revenue
+            counts in the month it was TAKEN, which is not always the month the
+            case was submitted, so this will not track the case chart above exactly.
           </Note>
         </Card>
       </Section>

@@ -549,8 +549,9 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
       rows: (firms.get(key) ?? []).map((f) => ({
         title: firmName(f.companyId) ?? (f.companyId ? f.companyId : "No firm matched"),
         subtitle: [
-          f.collected ? `${money(f.collected)} collected (Stripe)` : null,
-          f.modelled ? `${money(f.modelled)} estimated` : null,
+          f.subscription ? `${money(f.subscription)} subscription` : null,
+          f.transactional ? `${money(f.transactional)} transactional` : null,
+          f.modelled ? `${money(f.modelled)} of it estimated (not in Stripe)` : null,
         ].filter(Boolean).join(" · "),
         companyId: f.companyId,
         when: `${key}-01T00:00:00Z`,

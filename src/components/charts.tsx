@@ -248,22 +248,25 @@ export function BillingRetentionChart({
   );
 }
 
-/** Revenue per month, stacked so the measured part is visibly separate from the
- * estimated part. They are not equally trustworthy and a single bar would hide
- * that: the solid block is cash Stripe collected, the pale block is firms Stripe
- * has never billed, still priced by the old per-case/flat-fee rules. */
+/** Revenue per month, stacked by billing model (owner, 2026-10-22: "segment it
+ * by subscription and transactional" rather than Stripe vs estimated). Same
+ * colours as the retention charts: green = subscription, blue = transactional.
+ * The tooltip still says how much of the month is Stripe cash, because the
+ * two cuts are of the same total. */
 export function MonthlyRevenueChart({
   data,
   target,
   drillBase,
 }: {
-  data: { month: string; key?: string; collected: number; modelled: number; total: number }[];
+  data: {
+    month: string; key?: string; collected: number; modelled: number; total: number;
+    subscription: number; transactional: number;
+  }[];
   target?: number;
   drillBase?: string;
 }) {
   const drillProps = useMonthDrill(data, drillBase);
   const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
-  const hasModelled = data.some((d) => d.modelled > 0);
   const maxVal = Math.max(target ?? 0, ...data.map((d) => d.total), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
@@ -273,12 +276,17 @@ export function MonthlyRevenueChart({
         <YAxis width={58} tick={{ fontSize: 11 }} domain={[0, Math.ceil(maxVal * 1.15)]}
                tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
         {target ? targetLine(target, `Target ${money(target)}`) : null}
-        <Tooltip formatter={(v, name) => [money(Number(v)), name]} />
-        {hasModelled && <Legend wrapperStyle={{ fontSize: 11 }} />}
-        <Bar dataKey="collected" stackId="rev" name="Collected (Stripe)"
-             fill={C.green} radius={hasModelled ? undefined : [4, 4, 0, 0]} />
-        <Bar dataKey="modelled" stackId="rev" name="Estimated (not in Stripe)"
-             fill={C.greenSoft} radius={[4, 4, 0, 0]} />
+        <Tooltip
+          formatter={(v, name) => [money(Number(v)), name]}
+          labelFormatter={(label, payload) => {
+            const d = payload?.[0]?.payload as { total: number; collected: number; modelled: number } | undefined;
+            if (!d) return label;
+            return `${label} · ${money(d.total)}${d.modelled > 0 ? ` (${money(d.collected)} in Stripe, ${money(d.modelled)} estimated)` : ""}`;
+          }}
+        />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="subscription" stackId="rev" name="Subscription" fill={C.green} />
+        <Bar dataKey="transactional" stackId="rev" name="Transactional" fill={C.blue} radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );

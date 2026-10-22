@@ -1173,6 +1173,11 @@ export interface MonthlyRevenueRow {
   collected: number;
   modelled: number;
   total: number;
+  /** The same total cut by billing model instead (owner, 2026-10-22: "segment
+   * it by subscription and transactional"): plan payments and flat fees vs
+   * per-case charges, reports and other one-off usage. */
+  subscription: number;
+  transactional: number;
 }
 
 export interface RetentionReport {
@@ -1231,7 +1236,16 @@ export interface MonthRevenueFirm {
   companyId: string | null;
   collected: number;
   modelled: number;
+  subscription: number;
+  transactional: number;
 }
+
+type RevenuePart = "collected" | "modelled" | "subscription" | "transactional";
+
+/** Stripe's `kind` on a charge -> billing model. `per_case` and `other` (a
+ * report, an add-on, a charge with no invoice) are both usage. */
+const stripeKindPart = (kind: string | null): "subscription" | "transactional" =>
+  kind === "subscription" ? "subscription" : "transactional";
 
 const DAY_MS = 86400000;
 
@@ -1274,17 +1288,23 @@ export async function monthlyRevenueBreakdown(): Promise<{
 
   const collected = new Map<number, number>(facts.byMonth);
   const modelled = new Map<number, number>();
+  const byModel = { subscription: new Map<number, number>(), transactional: new Map<number, number>() };
   const perFirm = new Map<number, Map<string, MonthRevenueFirm>>();
-  const credit = (m: number, id: string | null, part: "collected" | "modelled", v: number) => {
+  const credit = (m: number, id: string | null, part: RevenuePart, v: number) => {
     const month = perFirm.get(m) ?? new Map<string, MonthRevenueFirm>();
     perFirm.set(m, month);
-    const f = month.get(id ?? "") ?? { companyId: id, collected: 0, modelled: 0 };
+    const f = month.get(id ?? "") ?? { companyId: id, collected: 0, modelled: 0, subscription: 0, transactional: 0 };
     f[part] += v;
     month.set(id ?? "", f);
   };
-  const add = (m: number, v: number, id: string | null) => {
+  const model = (m: number, id: string | null, part: "subscription" | "transactional", v: number) => {
+    byModel[part].set(m, (byModel[part].get(m) ?? 0) + v);
+    credit(m, id, part, v);
+  };
+  const add = (m: number, v: number, id: string | null, part: "subscription" | "transactional") => {
     modelled.set(m, (modelled.get(m) ?? 0) + v);
     credit(m, id, "modelled", v);
+    model(m, id, part, v);
   };
   for (const [id, months] of facts.byCompanyMonth) {
     for (const [m, v] of months) credit(m, id, "collected", v);
@@ -1292,6 +1312,13 @@ export async function monthlyRevenueBreakdown(): Promise<{
   for (const [m, total] of collected) {
     const matched = [...(perFirm.get(m)?.values() ?? [])].reduce((s, f) => s + f.collected, 0);
     if (total - matched >= 0.5) credit(m, null, "collected", total - matched);
+  }
+  // The billing-model cut of the same cash, charge by charge (unmatched payers
+  // included, as "no firm"), so the two cuts of a month always sum alike.
+  for (const p of facts.payments) {
+    const m = monthIndexOf(p.at);
+    if (!p.net || m === null) continue;
+    model(m, p.companyId, stripeKindPart(p.kind), p.net);
   }
 
   const planFirms = new Set<string>();
@@ -1314,7 +1341,7 @@ export async function monthlyRevenueBreakdown(): Promise<{
     const end = firmPlanEnd(co);
     const last = Math.min(
       end ? end.getUTCFullYear() * 12 + end.getUTCMonth() : nowIdx, nowIdx);
-    for (let m = start; m <= last; m += 1) add(m, amount, co.hubspot_id);
+    for (let m = start; m <= last; m += 1) add(m, amount, co.hubspot_id, "subscription");
   }
 
   for (const c of caseRows ?? []) {
@@ -1324,7 +1351,7 @@ export async function monthlyRevenueBreakdown(): Promise<{
     // A plan firm's cases bill nothing extra, and a Stripe firm's cases are
     // already counted as the cash they produced.
     if (knows(id) || (id && planFirms.has(id))) continue;
-    add(m, caseRevenue(c, settings.defaultCasePrice), id ?? null);
+    add(m, caseRevenue(c, settings.defaultCasePrice), id ?? null, "transactional");
   }
 
   const months = [...new Set([...collected.keys(), ...modelled.keys()])]
@@ -1334,7 +1361,10 @@ export async function monthlyRevenueBreakdown(): Promise<{
     const c = Math.round(collected.get(m) ?? 0);
     const e = Math.round(modelled.get(m) ?? 0);
     const key = monthKeyOfIndex(m);
-    return { month: shortMonthLabel(key), key, collected: c, modelled: e, total: c + e };
+    const subscription = Math.round(byModel.subscription.get(m) ?? 0);
+    // Derived so the two stacks are the same height to the dollar.
+    const transactional = c + e - subscription;
+    return { month: shortMonthLabel(key), key, collected: c, modelled: e, total: c + e, subscription, transactional };
   });
   const firms = new Map<string, MonthRevenueFirm[]>();
   for (const [m, month] of perFirm) {
