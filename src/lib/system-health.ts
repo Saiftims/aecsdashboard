@@ -145,11 +145,11 @@ export async function systemHealth(): Promise<SystemHealth> {
   const [
     { data: runs }, companies, { data: cases }, { data: stripeCustomers }, { data: subs }, { data: metaLeads },
     { data: deals }, { data: lastQuo }, { data: lastPay }, { data: lastSpend }, { data: lastDeal }, { data: lastActivity },
-    { data: lastSignup }, { data: uiRows }, token,
+    { data: lastSignup }, { data: uiRows }, token, { data: caseInvoices },
   ] = await Promise.all([
     sb.from("sync_runs").select("kind, status, started_at, finished_at, stats, error").order("started_at", { ascending: false }).limit(400),
     selectAll<Co>("companies", "hubspot_id, name, domain, signed_up_at, first_case_at", "hubspot_id"),
-    sb.from("cases").select("case_id, company_hubspot_id, submitted_date, source, creator_email").order("submitted_date", { ascending: false }).limit(2000),
+    sb.from("cases").select("case_id, sw_id, company_hubspot_id, submitted_date, source, creator_email").order("submitted_date", { ascending: false }).limit(2000),
     sb.from("stripe_customers").select("customer_id, email, name, company_hubspot_id, is_internal"),
     sb.from("stripe_subscriptions").select("subscription_id, company_hubspot_id, status, is_internal, customer_id"),
     sb.from("meta_leads").select("leadgen_id, created_time, full_name, email, company, is_test, hubspot_pushed_at, hubspot_deal_id").order("created_time", { ascending: false }).limit(1000),
@@ -163,6 +163,7 @@ export async function systemHealth(): Promise<SystemHealth> {
     sb.from("companies").select("signed_up_at").not("signed_up_at", "is", null).order("signed_up_at", { ascending: false }).limit(1),
     sb.from("case_ui_usage").select("case_id").limit(1),
     metaTokenStatus(),
+    sb.from("stripe_case_invoices").select("invoice_id, case_id, case_name, company_hubspot_id, created_at, status, is_internal").order("created_at", { ascending: false }).limit(1000),
   ]);
 
   // ---- feeds ----
@@ -248,6 +249,19 @@ export async function systemHealth(): Promise<SystemHealth> {
   mk("case_no_firm", "Cases with no firm (30 d)", "Counts in monthly totals but invisible to the firm, its cohort and its plan allowance. Usually a firm on personal email or with no domain on its company record.",
     "Set the company domain in HubSpot, or add a firm_mapping row (PostHog account id -> company id). The next cases sync attributes them in place.",
     noFirmCases.map((c) => ({ id: c.case_id, label: c.case_id.slice(0, 22), detail: `${c.submitted_date?.slice(0, 10)} · ${c.creator_email ?? "no actor email"}` })), 1, 4);
+
+  // Cases the platform invoiced that the table does not hold. Stripe stamps the
+  // real case id on every case invoice, so this is the complete ledger; a gap
+  // here is a case nobody counted (2026-10-23: four October cases staff
+  // entered for The Injury Firm and Kass & Moses). The cases sync now inserts
+  // these itself, so anything left is an invoice whose customer matched no
+  // firm, or a stand-in row absorbing the wrong matter.
+  const caseIds = new Set(((cases ?? []) as { case_id: string; sw_id: string | null }[]).flatMap((c) => [c.case_id, ...(c.sw_id ? [c.sw_id] : [])]));
+  const invoicedMissing = ((caseInvoices ?? []) as { invoice_id: string; case_id: string; case_name: string | null; company_hubspot_id: string | null; created_at: string | null; status: string | null; is_internal: boolean }[])
+    .filter((i) => !i.is_internal && !["void", "draft"].includes(i.status ?? "") && !caseIds.has(i.case_id) && i.created_at && now - Date.parse(i.created_at) < 60 * 24 * HOUR);
+  mk("invoiced_not_counted", "Invoiced cases not in the table (60 d)", "Stripe raised a case invoice for a matter the cases table does not hold, so the month total, the firm and the plan allowance all under-count.",
+    "If the payer has no firm, match the Stripe customer first (see above); otherwise the next cases sync inserts it as source 'stripe_invoice'. Check no hand-entered stand-in row is absorbing it.",
+    invoicedMissing.map((i) => ({ id: i.invoice_id, label: i.case_name ?? i.case_id, detail: `${i.created_at?.slice(0, 10)} · ${i.company_hubspot_id ? `firm ${i.company_hubspot_id}` : "no firm"} · ${i.case_id.slice(0, 18)}` })), 1, 3);
 
   // Firms with a case or signup but no domain - their next case will drop.
   const noDomain = companies.filter((c) => !c.domain && (c.first_case_at || c.signed_up_at));

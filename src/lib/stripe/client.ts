@@ -32,9 +32,23 @@ export interface StripeCharge {
   billing_details?: { email?: string | null; name?: string | null } | null;
 }
 
+/** The platform stamps every case it bills onto the invoice (and its line)
+ * as metadata: `type=case_processing`, the real `case_id`, the PostHog
+ * `account_id`, the matter's `case_name`, `plan_type` and `is_overage`. That
+ * makes Stripe the one place a staff-entered case is tied to its firm. */
+export interface StripeCaseMetadata {
+  type?: string | null;
+  case_id?: string | null;
+  account_id?: string | null;
+  case_name?: string | null;
+  plan_type?: string | null;
+  is_overage?: string | null;
+}
+
 export interface StripeInvoiceLine {
   description?: string | null;
   amount?: number | null;
+  metadata?: StripeCaseMetadata | null;
 }
 
 export interface StripeInvoice {
@@ -47,6 +61,7 @@ export interface StripeInvoice {
   subscription?: string | null;
   status_transitions?: { paid_at?: number | null } | null;
   lines?: { data?: StripeInvoiceLine[] } | null;
+  metadata?: StripeCaseMetadata | null;
 }
 
 export interface StripeSubscription {

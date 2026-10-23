@@ -267,9 +267,41 @@ export async function syncStripe() {
     return rows.length;
   };
 
+  // ---- the case ledger -------------------------------------------------------
+  // The platform raises one invoice per case it processes - billed or not
+  // (allowance cases are $0 / allocation lines) - and stamps the real case id,
+  // the PostHog account and the matter name on it. That names the firm behind
+  // every analyst-entered case, which PostHog cannot (it reports the staff
+  // member's own org while impersonating). Found 2026-10-23 when the team
+  // counted more October cases than the dashboard: four of them were staff
+  // work for The Injury Firm and Kass & Moses, each with a paid invoice.
+  const caseInvoiceRows = invoices.flatMap((inv) => {
+    const meta = inv.metadata?.case_id ? inv.metadata : inv.lines?.data?.find((l) => l.metadata?.case_id)?.metadata;
+    const caseId = (meta?.case_id ?? "").trim();
+    if (!/^case_[0-9a-fA-F]{8,}$/.test(caseId)) return [];
+    const cust = byCustomer.get(inv.customer ?? "");
+    return [{
+      invoice_id: inv.id,
+      customer_id: inv.customer ?? null,
+      company_hubspot_id: cust?.company_hubspot_id ?? null,
+      case_id: caseId,
+      account_id: meta?.account_id ?? null,
+      case_name: meta?.case_name ?? null,
+      plan_type: meta?.plan_type ?? null,
+      is_overage: meta?.is_overage == null ? null : String(meta.is_overage) === "true",
+      status: inv.status ?? null,
+      amount_paid_cents: inv.amount_paid ?? 0,
+      amount_due_cents: inv.amount_due ?? 0,
+      is_internal: cust?.is_internal ?? true,
+      created_at: iso(inv.created),
+      synced_at: now,
+    }];
+  });
+
   await upsert("stripe_customers", "customer_id", customerRows);
   await upsert("stripe_payments", "charge_id", paymentRows);
   await upsert("stripe_subscriptions", "subscription_id", subscriptionRows);
+  await upsert("stripe_case_invoices", "invoice_id", caseInvoiceRows);
 
   const real = paymentRows.filter((p) => !p.is_internal);
   const unmatchedCash = real
@@ -282,6 +314,7 @@ export async function syncStripe() {
     customersInternal: customerRows.filter((c) => c.is_internal).length,
     payments: paymentRows.length,
     subscriptions: subscriptionRows.length,
+    caseInvoices: caseInvoiceRows.length,
     netCollectedCents: real.reduce((t, p) => t + p.net_cents, 0),
     internalCents: paymentRows.filter((p) => p.is_internal)
       .reduce((t, p) => t + p.net_cents, 0),

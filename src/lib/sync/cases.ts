@@ -119,7 +119,7 @@ async function syncCaseUiUsage(provider: PostHogProvider): Promise<number> {
 export async function syncCases() {
   const sb = supabaseService();
   const stats = {
-    posthog: 0, fromUrls: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, dedupedStandIn: 0,
+    posthog: 0, fromUrls: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, stripeInvoiced: 0, dedupedStandIn: 0,
     bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0, uiCases: 0,
   };
 
@@ -150,8 +150,8 @@ export async function syncCases() {
   const { data: mappings } = await must("firm_mapping read", sb.from("firm_mapping").select("*"));
   const deals = await selectAll<{ hubspot_id: string; name: string | null; company_hubspot_id: string | null; stage: string | null; hs_created_at: string | null; properties: Record<string, unknown> | null }>(
     "deals", "hubspot_id, name, company_hubspot_id, stage, hs_created_at, properties");
-  const existingCases = await selectAll<{ case_id: string; case_status: string | null; company_hubspot_id: string | null; submitted_date: string | null; source: string | null }>(
-    "cases", "case_id, case_status, company_hubspot_id, submitted_date, source", "case_id");
+  const existingCases = await selectAll<{ case_id: string; sw_id: string | null; case_status: string | null; company_hubspot_id: string | null; submitted_date: string | null; source: string | null; case_name: string | null }>(
+    "cases", "case_id, sw_id, case_status, company_hubspot_id, submitted_date, source, case_name", "case_id");
 
   const byDomain = new Map<string, CompanyLite>();
   const byAccount = new Map<string, string>(); // acc -> hubspot_company_id
@@ -188,6 +188,12 @@ export async function syncCases() {
     if (m.sw_account_id && m.hubspot_company_id) byAccount.set(m.sw_account_id, m.hubspot_company_id);
   }
   const existingById = new Map((existingCases ?? []).map((c) => [c.case_id, c]));
+  // `sw_id` is the table's PRIMARY KEY and is where a hand-entered row records
+  // the platform id of the matter it stands for (Morrin's "Cordova v. Stacy":
+  // case_id intake_6a29..., sw_id case_932665...). A discovered case whose id
+  // sits in that column is that row, not a new case - inserting it fails on
+  // the key, and would double the matter if it did not.
+  const existingBySwId = new Map((existingCases ?? []).flatMap((c) => (c.sw_id && c.sw_id !== c.case_id ? [[c.sw_id, c] as const] : [])));
 
   // Stand-in dedupe: the same physical matter can already be in the table as a
   // hand-entered row - an intake-form submission that was also re-created in-app,
@@ -368,6 +374,12 @@ export async function syncCases() {
     // Skip discovered cases that a hand-entered row already stands in for. Only
     // skip NEW ones; never delete a case a human/CS already curated.
     if (!existingById.has(pc.caseId) && absorbedByStandIn(companyId, submittedAt)) {
+      stats.dedupedStandIn += 1;
+      continue;
+    }
+    // A hand-entered row already carries this platform id as its sw_id (the
+    // matter was billed under another id first) - that row is the case.
+    if (!existingById.has(pc.caseId) && existingBySwId.has(pc.caseId)) {
       stats.dedupedStandIn += 1;
       continue;
     }
@@ -554,6 +566,75 @@ export async function syncCases() {
       updated_at: new Date().toISOString(),
     });
     stats.intake += 1;
+  }
+
+  // ---- Stripe-invoiced cases ----
+  // The platform raises an invoice for every case it processes and stamps the
+  // real case id, the PostHog account and the matter name on it
+  // (`stripe_case_invoices`, filled by the Stripe sync). That is the ONE feed
+  // that names the firm behind a case staff entered on a customer's behalf:
+  // every actor on such a case is an analyst, PostHog reports the analyst's
+  // own org even while impersonating, so the ingestion loop above has to drop
+  // it. On 2026-10-23 that was four October cases - three for The Injury Firm
+  // and one for Kass & Moses, every one with a paid invoice - which is why the
+  // team counted more cases than the dashboard. A row is inserted only when no
+  // row holds the id, no stand-in absorbs it and nothing else sits on the same
+  // firm within 2 days; creator/account stay NULL (a staff email here would be
+  // purged next run) and the Stripe cash prices it, as for any Stripe firm.
+  const stripeCaseRows = await selectAll<{
+    invoice_id: string; case_id: string; company_hubspot_id: string | null; case_name: string | null;
+    status: string | null; is_internal: boolean; created_at: string | null;
+  }>("stripe_case_invoices", "invoice_id, case_id, company_hubspot_id, case_name, status, is_internal, created_at", "invoice_id");
+  const phById = new Map(phCases.map((c) => [c.caseId, c]));
+  const insertedIds = new Set(inserts.map((r) => String(r.case_id)));
+  const seenStripeCase = new Set<string>();
+  for (const inv of [...stripeCaseRows].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))) {
+    if (inv.is_internal || !inv.company_hubspot_id || !inv.created_at) continue;
+    if (inv.status === "void" || inv.status === "draft") continue;
+    if (EXCLUDED_CASE_IDS.includes(inv.case_id) || seenStripeCase.has(inv.case_id)) continue;
+    seenStripeCase.add(inv.case_id);
+    const existing = existingById.get(inv.case_id) ?? existingBySwId.get(inv.case_id);
+    if (existing) {
+      // Already counted; just give it its real name if it only has a stub.
+      const stub = !existing.case_name || /^Case [0-9a-f]{8}$/i.test(existing.case_name) || existing.case_name === "Intake submission";
+      if (stub && inv.case_name) {
+        const u = updates.find((x) => x.case_id === existing.case_id);
+        if (u) u.row.case_name = inv.case_name;
+        else updates.push({ case_id: existing.case_id, row: { case_name: inv.case_name, updated_at: new Date().toISOString() } });
+      }
+      continue;
+    }
+    if (insertedIds.has(inv.case_id)) {
+      const r = inserts.find((x) => x.case_id === inv.case_id);
+      if (r && inv.case_name) r.case_name = inv.case_name;
+      continue;
+    }
+    // Dated by the EARLIER of PostHog's first sight of the case and the
+    // invoice: a case cannot be invoiced before it exists, and PostHog's date
+    // on a staff-only case can be an analyst reopening it weeks later (Breyon
+    // Maasch: invoiced 22 Jul, PostHog 4 Sep).
+    const phAt = phById.get(inv.case_id)?.submittedAt;
+    const submittedAt = phAt && Date.parse(phAt) < Date.parse(inv.created_at) ? phAt : inv.created_at;
+    const t = new Date(submittedAt).getTime();
+    // The id IS the identity, so the only duplicate possible is a hand-entered
+    // stand-in for this same matter. No "same firm within N days" test here:
+    // The Injury Firm had two distinct invoiced cases 31 minutes apart on
+    // 19 Oct, and a date test would have swallowed the second.
+    if (absorbedByStandIn(inv.company_hubspot_id, submittedAt)) { stats.dedupedStandIn += 1; continue; }
+    inserts.push({
+      case_id: inv.case_id,
+      sw_id: inv.case_id,
+      company_hubspot_id: inv.company_hubspot_id,
+      case_name: inv.case_name ?? `Case ${inv.case_id.replace(/^case_/, "").slice(0, 8)}`,
+      case_status: "submitted",
+      submitted_date: submittedAt,
+      submitted_at: submittedAt,
+      source: "stripe_invoice",
+      revenue_amount: 250,
+      updated_at: new Date().toISOString(),
+    });
+    rowsByCompany.set(inv.company_hubspot_id, [...(rowsByCompany.get(inv.company_hubspot_id) ?? []), t]);
+    stats.stripeInvoiced += 1;
   }
 
   if (bootstrapMappings.length) {

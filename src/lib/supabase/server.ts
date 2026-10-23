@@ -50,12 +50,17 @@ export function supabaseService(): SupabaseClient {
  *
  * Best-effort writes opt out explicitly: `await must(label, q).catch(console.error)`.
  */
-export async function must<T extends { error: { message: string } | null }>(
+export async function must<T extends { error: { message: string; details?: string | null } | null }>(
   label: string,
   q: PromiseLike<T>,
 ): Promise<T> {
   const res = await q;
-  if (res.error) throw new Error(`${label}: ${res.error.message}`);
+  if (res.error) {
+    // PostgREST puts the useful part - e.g. `Key (case_id)=(...) already
+    // exists.` - in `details`, not `message`.
+    const details = res.error.details ? ` (${res.error.details})` : "";
+    throw new Error(`${label}: ${res.error.message}${details}`);
+  }
   return res;
 }
 
