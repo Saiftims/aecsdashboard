@@ -1277,7 +1277,9 @@ export async function monthlyRevenueBreakdown(): Promise<{
   const sb = supabaseService();
   const settings = await loadSettings();
   const [{ data: companies }, { data: caseRows }, facts] = await Promise.all([
-    sb.from("companies").select("*"),
+    // paged: companies passed 1,000 rows on 2026-10-22; a plain select
+    // silently drops the newest firms (and their domain siblings).
+    selectAll<CompanyRow>("companies").then((data) => ({ data })),
     sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount"),
     loadRevenueFacts(),
   ]);
@@ -1408,8 +1410,9 @@ export async function retentionReport(): Promise<RetentionReport> {
     // skip them because they have no firm to retain.
     sb.from("cases").select("case_id, company_hubspot_id, submitted_date"),
     sb.from("deals").select("hubspot_id, name, is_activation, hs_created_at, primary_contact_id, properties"),
-    // select(*) so subscription_ended_at is present after migration 0006.
-    sb.from("companies").select("*"),
+    // select(*) so subscription_ended_at is present after migration 0006;
+    // paged because companies is past PostgREST's 1,000-row cap.
+    selectAll<CompanyRow>("companies").then((data) => ({ data })),
     sb.from("stripe_subscriptions")
       .select("company_hubspot_id, status, monthly_cents, started_at, cancelled_at, is_internal"),
   ]);
@@ -1903,8 +1906,9 @@ export async function billingRetentionReport(): Promise<BillingRetentionReport> 
 
   const [{ data: companies }, { data: caseRows }, facts] = await Promise.all([
     // select(*) on purpose: subscription_ended_at only exists after migration
-    // 0006 and naming a missing column would 400 the whole page.
-    sb.from("companies").select("*"),
+    // 0006 and naming a missing column would 400 the whole page. Paged
+    // because companies is past PostgREST's 1,000-row cap.
+    selectAll<CompanyRow>("companies").then((data) => ({ data })),
     sb.from("cases").select("company_hubspot_id, submitted_date, revenue_amount")
       .not("company_hubspot_id", "is", null),
     loadRevenueFacts(),

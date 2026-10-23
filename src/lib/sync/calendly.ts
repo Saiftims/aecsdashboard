@@ -8,7 +8,7 @@
  */
 import { hsUpdateProperties } from "@/lib/hubspot/client";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
-import { must, supabaseService } from "@/lib/supabase/server";
+import { must, selectAll, supabaseService } from "@/lib/supabase/server";
 
 const BASE = "https://api.calendly.com";
 
@@ -85,12 +85,15 @@ export async function syncCalendly() {
   }
 
   // 3. map email -> contact -> deal (from cache), stamp date when changed
-  const [{ data: contacts }, { data: deals }] = await Promise.all([
-    sb.from("contacts").select("hubspot_id, email"),
-    sb.from("deals").select("hubspot_id, primary_contact_id, properties, stage"),
+  // selectAll: `contacts` is ~2,000 rows and a plain select stops at 1,000,
+  // so half the invitees silently matched no contact.
+  const [contacts, deals] = await Promise.all([
+    selectAll<{ hubspot_id: string; email: string | null }>("contacts", "hubspot_id, email"),
+    selectAll<{ hubspot_id: string; primary_contact_id: string | null; properties: Record<string, unknown> | null; stage: string | null }>(
+      "deals", "hubspot_id, primary_contact_id, properties, stage"),
   ]);
   const contactByEmail = new Map(
-    (contacts ?? []).filter((c) => c.email).map((c) => [c.email.toLowerCase(), c.hubspot_id]),
+    contacts.filter((c) => c.email).map((c) => [c.email!.toLowerCase(), c.hubspot_id]),
   );
   const dealsByContact = new Map<string, typeof deals>();
   for (const d of deals ?? []) {

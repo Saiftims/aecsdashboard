@@ -9,7 +9,7 @@
  * never presents an invented 0%.
  */
 import { env } from "@/lib/env";
-import { supabaseService } from "@/lib/supabase/server";
+import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 type RawEvent = [
   event: string,
@@ -268,9 +268,8 @@ export async function productDashboard(): Promise<ProductDashboardData> {
           )
         order by timestamp asc limit 10000
       `),
-      sb.from("companies").select(
-        "hubspot_id,name,domain,sw_account_id,signup_account_id",
-      ),
+      // paged: companies is past PostgREST's 1,000-row cap
+      selectAll<CompanyProductRow>("companies", "hubspot_id,name,domain,sw_account_id,signup_account_id"),
       sb.from("firm_mapping").select(
         "sw_account_id,sw_organization_id,hubspot_company_id",
       ),
@@ -279,7 +278,7 @@ export async function productDashboard(): Promise<ProductDashboardData> {
       ),
     ]);
 
-  const companies = (companiesResult.data ?? []) as CompanyProductRow[];
+  const companies = companiesResult;
   const companyById = new Map(companies.map((c) => [c.hubspot_id, c]));
   const companyByDomain = new Map(
     companies.filter((c) => c.domain).map((c) => [c.domain!.toLowerCase(), c]),

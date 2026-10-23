@@ -24,7 +24,7 @@ import {
   listCharges, listCustomers, listInvoices, listPrices, listSubscriptions,
   StripeCharge, StripeInvoice,
 } from "@/lib/stripe/client";
-import { supabaseService } from "@/lib/supabase/server";
+import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 /** Consumer mail providers: a billing address here says nothing about which firm
  * is paying, so it must never be used to match one. */
@@ -40,6 +40,9 @@ const GENERIC_DOMAINS = new Set([
 const EMAIL_TO_COMPANY_NAME: Record<string, string> = {
   "jacksilvestre@yahoo.com": "Jack Silvestre",
   "freshwater@prodigy.net": "Wheatley",
+  // Solo plan 2026-10-22; company 456229656799 created by hand 2026-10-23,
+  // app signup is on the same gmail (firm_mapping carries the PostHog account).
+  "ellielev5@gmail.com": "Law Office of Ellen Levin",
 };
 
 /** Internal payers that `isTestCaseActor` does not know about, because they are
@@ -110,11 +113,14 @@ export async function syncStripe() {
   const priceById = new Map(prices.map((p) => [p.id, p]));
 
   // ---- company lookup ------------------------------------------------------
-  const { data: companyRows } = await sb.from("companies")
-    .select("hubspot_id, name, domain");
+  // selectAll, not a plain select: `companies` passed 1,000 rows on
+  // 2026-10-22 and the unpaged read dropped the newest firms, so NSJ Law
+  // Group's Solo plan matched no company despite a cached nsjlawgroup.com.
+  const companyRows = await selectAll<{ hubspot_id: string; name: string | null; domain: string | null }>(
+    "companies", "hubspot_id, name, domain");
   const byDomain = new Map<string, string>();
   const byName = new Map<string, string>();
-  for (const c of companyRows ?? []) {
+  for (const c of companyRows) {
     const dom = (c.domain ?? "").toLowerCase().trim().replace(/^www\./, "");
     if (dom && !GENERIC_DOMAINS.has(dom) && !byDomain.has(dom)) {
       byDomain.set(dom, c.hubspot_id);
