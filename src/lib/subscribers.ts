@@ -3,6 +3,7 @@
  * CSM can call the accounts with unused cases before they renew, without
  * logging into each firm's account. */
 import { firmMrr } from "@/lib/queries";
+import { REAL_DESPITE_STAFF_EMAIL as REAL } from "@/lib/cases/provider";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
 /** Cases included per month by plan family, from silentwitness.ai/pricing
@@ -19,10 +20,10 @@ export function includedCases(planName: string | null | undefined): number | nul
 }
 
 /** Stripe customers the sync flags internal (staff email on the account) that
- * the owner says are real paying firms. CF Injury bills from
- * diego+10@silentwitness.ai (owner, 2026-10-14). Listed by Stripe customer id
+ * the owner says are real paying firms - CF Injury, defined once in
+ * `cases/provider.ts` alongside the actor test. Listed by Stripe customer id
  * so the page shows them while the revenue code keeps its own view. */
-const REAL_DESPITE_STAFF_EMAIL = new Set(["cus_USJrd91b84An63"]);
+const REAL_DESPITE_STAFF_EMAIL = REAL.stripeCustomers;
 
 /** Billing arrangements Stripe's subscription object cannot express, shown
  * under the plan so the CSM is not misled by the list price. */

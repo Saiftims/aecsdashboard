@@ -5,6 +5,7 @@
  *
  * Read-only. `/health` renders it; `/api/cron/health` posts the red items to
  * Slack on a change. */
+import { REAL_DESPITE_STAFF_EMAIL } from "@/lib/cases/provider";
 import { env } from "@/lib/env";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
@@ -163,7 +164,7 @@ export async function systemHealth(): Promise<SystemHealth> {
     sb.from("companies").select("signed_up_at").not("signed_up_at", "is", null).order("signed_up_at", { ascending: false }).limit(1),
     sb.from("case_ui_usage").select("case_id").limit(1),
     metaTokenStatus(),
-    sb.from("stripe_case_invoices").select("invoice_id, case_id, case_name, company_hubspot_id, created_at, status, is_internal").order("created_at", { ascending: false }).limit(1000),
+    sb.from("stripe_case_invoices").select("invoice_id, case_id, customer_id, case_name, company_hubspot_id, created_at, status, is_internal").order("created_at", { ascending: false }).limit(1000),
   ]);
 
   // ---- feeds ----
@@ -257,8 +258,8 @@ export async function systemHealth(): Promise<SystemHealth> {
   // these itself, so anything left is an invoice whose customer matched no
   // firm, or a stand-in row absorbing the wrong matter.
   const caseIds = new Set(((cases ?? []) as { case_id: string; sw_id: string | null }[]).flatMap((c) => [c.case_id, ...(c.sw_id ? [c.sw_id] : [])]));
-  const invoicedMissing = ((caseInvoices ?? []) as { invoice_id: string; case_id: string; case_name: string | null; company_hubspot_id: string | null; created_at: string | null; status: string | null; is_internal: boolean }[])
-    .filter((i) => !i.is_internal && !["void", "draft"].includes(i.status ?? "") && !caseIds.has(i.case_id) && i.created_at && now - Date.parse(i.created_at) < 60 * 24 * HOUR);
+  const invoicedMissing = ((caseInvoices ?? []) as { invoice_id: string; case_id: string; customer_id: string | null; case_name: string | null; company_hubspot_id: string | null; created_at: string | null; status: string | null; is_internal: boolean }[])
+    .filter((i) => (!i.is_internal || REAL_DESPITE_STAFF_EMAIL.stripeCustomers.has(i.customer_id ?? "")) && !["void", "draft"].includes(i.status ?? "") && !caseIds.has(i.case_id) && i.created_at && now - Date.parse(i.created_at) < 60 * 24 * HOUR);
   mk("invoiced_not_counted", "Invoiced cases not in the table (60 d)", "Stripe raised a case invoice for a matter the cases table does not hold, so the month total, the firm and the plan allowance all under-count.",
     "If the payer has no firm, match the Stripe customer first (see above); otherwise the next cases sync inserts it as source 'stripe_invoice'. Check no hand-entered stand-in row is absorbing it.",
     invoicedMissing.map((i) => ({ id: i.invoice_id, label: i.case_name ?? i.case_id, detail: `${i.created_at?.slice(0, 10)} · ${i.company_hubspot_id ? `firm ${i.company_hubspot_id}` : "no firm"} · ${i.case_id.slice(0, 18)}` })), 1, 3);

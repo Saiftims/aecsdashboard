@@ -7,7 +7,7 @@
  * mirrored to HubSpot.
  */
 import {
-  PostHogProvider, EXCLUDED_CASE_IDS, TEST_ACCOUNT_IDS, TEST_EMAILS, isTestCaseActor,
+  PostHogProvider, EXCLUDED_CASE_IDS, TEST_ACCOUNT_IDS, TEST_EMAILS, REAL_DESPITE_STAFF_EMAIL, isTestCaseActor,
   FREE_EMAIL_DOMAINS, type PostHogCase, type PostHogIntake, type PostHogSignup,
 } from "@/lib/cases/provider";
 import { env } from "@/lib/env";
@@ -136,9 +136,14 @@ export async function syncCases() {
     sb.from("cases").delete({ count: "exact" }).or(purgeOr.join(",")),
   );
   stats.purgedTest = purge.count ?? 0;
-  // Also drop cases whose creator is an internal silentwitness.ai / saif+ user.
-  await must("cases purge (silentwitness.ai)", sb.from("cases").delete().like("creator_email", "%@silentwitness.ai"));
-  await must("cases purge (saif+)", sb.from("cases").delete().like("creator_email", "saif+%"));
+  // Also drop cases whose creator is an internal silentwitness.ai / saif+ user -
+  // except inside an account the owner has declared a real customer (CF
+  // Injury runs on diego+10@silentwitness.ai), whose rows must survive.
+  const realAccounts = `(${[...REAL_DESPITE_STAFF_EMAIL.accounts].join(",")})`;
+  await must("cases purge (silentwitness.ai)", sb.from("cases").delete().like("creator_email", "%@silentwitness.ai")
+    .or(`posthog_account_id.is.null,posthog_account_id.not.in.${realAccounts}`));
+  await must("cases purge (saif+)", sb.from("cases").delete().like("creator_email", "saif+%")
+    .or(`posthog_account_id.is.null,posthog_account_id.not.in.${realAccounts}`));
 
   // Paginated reads (`selectAll`): PostgREST caps a plain select at 1000 rows
   // and returns the first page WITHOUT an error, so once companies passed
@@ -333,6 +338,9 @@ export async function syncCases() {
   // Oldest first: stand-in slots are single-use, so the pairing (and therefore
   // which cases get skipped) must not depend on PostHog's row order.
   phCases.sort((a, b) => (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""));
+  // Ids this loop settled as "already in the table under another row", so the
+  // Stripe branch below does not re-discover them and insert a second copy.
+  const absorbedIds = new Set<string>();
 
   for (const pc of phCases) {
     // A portal case has a known customer behind it, so the analysts working it
@@ -375,12 +383,14 @@ export async function syncCases() {
     // skip NEW ones; never delete a case a human/CS already curated.
     if (!existingById.has(pc.caseId) && absorbedByStandIn(companyId, submittedAt)) {
       stats.dedupedStandIn += 1;
+      absorbedIds.add(pc.caseId);
       continue;
     }
     // A hand-entered row already carries this platform id as its sw_id (the
     // matter was billed under another id first) - that row is the case.
     if (!existingById.has(pc.caseId) && existingBySwId.has(pc.caseId)) {
       stats.dedupedStandIn += 1;
+      absorbedIds.add(pc.caseId);
       continue;
     }
 
@@ -582,16 +592,24 @@ export async function syncCases() {
   // firm within 2 days; creator/account stay NULL (a staff email here would be
   // purged next run) and the Stripe cash prices it, as for any Stripe firm.
   const stripeCaseRows = await selectAll<{
-    invoice_id: string; case_id: string; company_hubspot_id: string | null; case_name: string | null;
+    invoice_id: string; case_id: string; customer_id: string | null; account_id: string | null;
+    company_hubspot_id: string | null; case_name: string | null;
     status: string | null; is_internal: boolean; created_at: string | null;
-  }>("stripe_case_invoices", "invoice_id, case_id, company_hubspot_id, case_name, status, is_internal, created_at", "invoice_id");
+  }>("stripe_case_invoices", "invoice_id, case_id, customer_id, account_id, company_hubspot_id, case_name, status, is_internal, created_at", "invoice_id");
   const phById = new Map(phCases.map((c) => [c.caseId, c]));
   const insertedIds = new Set(inserts.map((r) => String(r.case_id)));
   const seenStripeCase = new Set<string>();
   for (const inv of [...stripeCaseRows].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))) {
-    if (inv.is_internal || !inv.company_hubspot_id || !inv.created_at) continue;
+    // A Stripe customer on a staff address reads internal, unless the owner
+    // has said that customer is real (CF Injury); the invoice's account then
+    // names the firm through firm_mapping, since the customer matched none.
+    const real = !inv.is_internal ||
+      (!!inv.customer_id && REAL_DESPITE_STAFF_EMAIL.stripeCustomers.has(inv.customer_id)) ||
+      (!!inv.account_id && REAL_DESPITE_STAFF_EMAIL.accounts.has(inv.account_id));
+    const companyId = inv.company_hubspot_id ?? (inv.account_id ? byAccount.get(inv.account_id) ?? null : null);
+    if (!real || !companyId || !inv.created_at) continue;
     if (inv.status === "void" || inv.status === "draft") continue;
-    if (EXCLUDED_CASE_IDS.includes(inv.case_id) || seenStripeCase.has(inv.case_id)) continue;
+    if (EXCLUDED_CASE_IDS.includes(inv.case_id) || seenStripeCase.has(inv.case_id) || absorbedIds.has(inv.case_id)) continue;
     seenStripeCase.add(inv.case_id);
     const existing = existingById.get(inv.case_id) ?? existingBySwId.get(inv.case_id);
     if (existing) {
@@ -620,11 +638,11 @@ export async function syncCases() {
     // stand-in for this same matter. No "same firm within N days" test here:
     // The Injury Firm had two distinct invoiced cases 31 minutes apart on
     // 19 Oct, and a date test would have swallowed the second.
-    if (absorbedByStandIn(inv.company_hubspot_id, submittedAt)) { stats.dedupedStandIn += 1; continue; }
+    if (absorbedByStandIn(companyId, submittedAt)) { stats.dedupedStandIn += 1; continue; }
     inserts.push({
       case_id: inv.case_id,
       sw_id: inv.case_id,
-      company_hubspot_id: inv.company_hubspot_id,
+      company_hubspot_id: companyId,
       case_name: inv.case_name ?? `Case ${inv.case_id.replace(/^case_/, "").slice(0, 8)}`,
       case_status: "submitted",
       submitted_date: submittedAt,
@@ -633,7 +651,7 @@ export async function syncCases() {
       revenue_amount: 250,
       updated_at: new Date().toISOString(),
     });
-    rowsByCompany.set(inv.company_hubspot_id, [...(rowsByCompany.get(inv.company_hubspot_id) ?? []), t]);
+    rowsByCompany.set(companyId, [...(rowsByCompany.get(companyId) ?? []), t]);
     stats.stripeInvoiced += 1;
   }
 

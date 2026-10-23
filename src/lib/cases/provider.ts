@@ -122,7 +122,21 @@ export const TEST_ACCOUNT_IDS = [
  * sachi*@. Prefix (not substring) so real firms like sandiegolaw@ never match. */
 const TEST_LOCAL_PREFIXES = ["sachi", "diego", "saif"];
 
+/** Real customers that read as internal because their account was set up on a
+ * staff address. CF Injury = Chudacoff Friedman Simon Graff & Cherin LLP
+ * (cfinjurylaw.com, HubSpot 428093705407): its app account and Stripe
+ * customer both run on diego+10@silentwitness.ai. Owner, 2026-10-14 "they are
+ * a real customer"; 2026-10-23 "do not exclude any of cf injurys cases". An
+ * actor INSIDE one of these accounts is the customer, whatever the email; the
+ * email on its own (no account) still reads internal, so Diego's other
+ * plus-addresses are untouched. */
+export const REAL_DESPITE_STAFF_EMAIL = {
+  accounts: new Set(["acc_58715619ff50400c8330ceeba77c220d"]),
+  stripeCustomers: new Set(["cus_USJrd91b84An63"]),
+};
+
 export function isTestCaseActor(email: string | null, accountId: string | null): boolean {
+  if (accountId && REAL_DESPITE_STAFF_EMAIL.accounts.has(accountId)) return false;
   const e = (email ?? "").trim().toLowerCase();
   if (e) {
     if (TEST_EMAILS.includes(e)) return true;
