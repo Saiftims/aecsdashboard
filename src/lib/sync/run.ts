@@ -25,12 +25,13 @@ export type RecordedKind = SyncKind | "cases_probe";
 
 type Sb = ReturnType<typeof supabaseService>;
 
-/** Status of the most recent FINISHED run of this kind, excluding `runId`. */
-async function previousStatus(sb: Sb, kind: RecordedKind, runId: number | null): Promise<"ok" | "error" | null> {
+/** Statuses of the two most recent FINISHED runs of this kind, newest first,
+ * excluding `runId`. */
+async function previousStatuses(sb: Sb, kind: RecordedKind, runId: number | null): Promise<("ok" | "error")[]> {
   let q = sb.from("sync_runs").select("status").eq("kind", kind).in("status", ["ok", "error"]);
   if (runId !== null) q = q.neq("id", runId);
-  const { data } = await q.order("started_at", { ascending: false }).limit(1).maybeSingle();
-  return (data?.status as "ok" | "error" | undefined) ?? null;
+  const { data } = await q.order("started_at", { ascending: false }).limit(2);
+  return ((data ?? []) as { status: "ok" | "error" }[]).map((r) => r.status);
 }
 
 /** Post one line to the #sales webhook. Never throws - an alert must not turn
@@ -49,14 +50,22 @@ async function slack(text: string) {
   }
 }
 
-/** Alert on the ok/error EDGE only: a cron that fails every minute posts once
- * when it starts failing and once when it comes back, not 1,440 times a day. */
+/** Alert on the ok/error EDGE only, and only once a feed has failed TWICE IN
+ * A ROW: a cron that fails every minute posts once when it starts failing and
+ * once when it comes back, not 1,440 times a day - and a single failed cycle
+ * posts nothing at all, because the next cycle re-reads from the same
+ * watermark and nothing is lost. Every one of the 17 HubSpot failures in the
+ * fortnight to 2026-10-25 was a vendor 502/504 that recovered on the next
+ * run, and each one woke the owner (owner, 2026-10-25: "i see this error in
+ * slack why?"). */
 async function alertOnEdge(sb: Sb, kind: RecordedKind, runId: number | null, status: "ok" | "error", error?: string) {
   if (!env.slackWebhookUrl()) return;
-  const prev = await previousStatus(sb, kind, runId).catch(() => null);
-  if (status === "error" && prev !== "error") {
-    await slack(`:rotating_light: Sync failed: ${kind} - ${(error ?? "").slice(0, 300)}`);
-  } else if (status === "ok" && prev === "error") {
+  const [p1, p2] = await previousStatuses(sb, kind, runId).catch(() => [] as ("ok" | "error")[]);
+  if (status === "error" && p1 === "error" && p2 !== "error") {
+    // Second consecutive failure: the streak starts here.
+    await slack(`:rotating_light: Sync failed twice in a row: ${kind} - ${(error ?? "").slice(0, 300)}`);
+  } else if (status === "ok" && p1 === "error" && p2 === "error") {
+    // Only a streak of two or more was ever announced, so only that recovers.
     await slack(`:white_check_mark: Sync recovered: ${kind}`);
   }
 }

@@ -23,25 +23,43 @@ export async function hsRequest<T = unknown>(
   const url = new URL(path.startsWith("http") ? path : `${BASE}${path}`);
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, v);
 
+  // HubSpot's gateway answers a small share of requests with a 502/504 HTML
+  // page or drops the connection (17 of ~4,000 five-minute syncs in the
+  // fortnight to 2026-10-25), and the very next request succeeds. One retry
+  // after a short pause absorbs that; a real outage still fails on the second.
+  const GATEWAY_RETRIES = 2;
+  let gatewayAttempt = 0;
   for (let attempt = 0; attempt < 5; attempt++) {
-    const res = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${env.hubspotToken()}`,
-        "Content-Type": "application/json",
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      cache: "no-store",
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${env.hubspotToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        cache: "no-store",
+      });
+    } catch (e) {
+      if (gatewayAttempt++ < GATEWAY_RETRIES) { await sleep(3000 * gatewayAttempt); continue; }
+      throw new HubSpotError(`${method} ${url.pathname} -> ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (res.status === 429) {
       await sleep(1000 * (attempt + 1));
       continue;
     }
+    if (res.status >= 500 && gatewayAttempt++ < GATEWAY_RETRIES) {
+      await res.text().catch(() => undefined);
+      await sleep(3000 * gatewayAttempt);
+      continue;
+    }
     if (!res.ok) {
-      throw new HubSpotError(
-        `${method} ${url.pathname} -> ${res.status}: ${await res.text()}`,
-        res.status,
-      );
+      // HubSpot's gateway errors are whole HTML pages; keep the first line so
+      // the Slack alert says "504" rather than quoting a doctype.
+      const text = (await res.text()).replace(/\s+/g, " ").trim();
+      const detail = text.startsWith("<") ? text.slice(0, 80) + "…" : text;
+      throw new HubSpotError(`${method} ${url.pathname} -> ${res.status}: ${detail}`, res.status);
     }
     const text = await res.text();
     return (text ? JSON.parse(text) : {}) as T;
