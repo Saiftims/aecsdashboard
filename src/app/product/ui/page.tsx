@@ -13,9 +13,17 @@ const when = (iso: string | null) => (iso
   ? new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" })
   : "—");
 const dayOf = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "—");
+/** Calendar day in Pacific time, as a UTC-midnight epoch, so "today" and
+ * "yesterday" follow the CS rep's calendar rather than 24-hour blocks - a
+ * review at 4 pm PT yesterday read "today" at 8 am the next morning. */
+const ptDay = (d: Date) => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "numeric", day: "numeric" })
+    .formatToParts(d).filter((x) => x.type !== "literal").map((x) => [x.type, Number(x.value)]));
+  return Date.UTC(p.year, p.month - 1, p.day);
+};
 const ago = (iso: string | null, now: Date) => {
   if (!iso) return "never";
-  const d = Math.floor((now.getTime() - new Date(iso).getTime()) / 86_400_000);
+  const d = Math.round((ptDay(now) - ptDay(new Date(iso))) / 86_400_000);
   return d <= 0 ? "today" : d === 1 ? "yesterday" : d < 30 ? `${d}d ago` : d < 365 ? `${Math.floor(d / 30)}mo ago` : `${Math.floor(d / 365)}y ago`;
 };
 const firstName = (email: string | null) => {
