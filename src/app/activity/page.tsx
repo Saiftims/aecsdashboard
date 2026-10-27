@@ -37,10 +37,11 @@ export default async function ActivityPage() {
   if (!user) redirect("/login");
 
   const [report, retention, billing, unitEcon, leads] = await Promise.all([
-    activityReport(user.role === "ae" ? user.hubspot_owner_id : null),
+    // Everyone sees the whole team (owner, 2026-10-27: "let everyone see everything").
+    activityReport(null),
     retentionReport(),
     billingRetentionReport(),
-    user.role === "executive" ? unitEconomicsSnapshot() : null,
+    unitEconomicsSnapshot(),
     loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
   ]);
   const {
@@ -49,7 +50,6 @@ export default async function ActivityPage() {
     dealsWon,
   } = report;
   const freq = retention.frequency;
-  const scope = user.role === "ae" ? "your" : "team";
   const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
   // Same label format the monthly series use, so the current month can be found.
   const thisMonthLabel = new Date().toLocaleString("en-US", {
@@ -70,7 +70,7 @@ export default async function ActivityPage() {
       <PageHeader
         title="Activity & funnel — last 7 days"
         description={<>
-          {scope === "your" ? "Your" : "Team"} activity and this week&apos;s new-business
+          Team activity and this week&apos;s new-business
           funnel. Days are in the dashboard timezone.
         </>}
       />

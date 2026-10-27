@@ -19,7 +19,6 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-GB"
 export default async function HealthPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role !== "executive") redirect("/");
 
   const h = await systemHealth();
   const red = h.problems.filter((p) => p.level === "bad");

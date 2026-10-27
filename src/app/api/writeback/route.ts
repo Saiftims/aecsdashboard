@@ -267,9 +267,6 @@ export async function POST(req: Request) {
       break;
     }
     case "handoff_accept": {
-      if (user.role === "ae") {
-        return NextResponse.json({ error: "CS/executive only" }, { status: 403 });
-      }
       objectId = input.dealId;
       result = await hsUpdateProperties("deals", input.dealId, {
         sw_handoff_accepted_by_cs: "true",

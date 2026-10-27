@@ -12,12 +12,10 @@ const schema = z.object({
   confirmed: z.boolean().default(true),
 });
 
-/** Create/update a firm <-> HubSpot company mapping (executive only). */
+/** Create/update a firm <-> HubSpot company mapping (any signed-in user). */
 export async function POST(req: Request) {
   const user = await currentAppUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  if (user.role !== "executive")
-    return NextResponse.json({ error: "executives only" }, { status: 403 });
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success)
@@ -52,8 +50,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   const user = await currentAppUser();
-  if (!user || user.role !== "executive")
-    return NextResponse.json({ error: "executives only" }, { status: 403 });
+  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   const { hubspotCompanyId } = await req.json().catch(() => ({}));
   if (!hubspotCompanyId)
     return NextResponse.json({ error: "hubspotCompanyId required" }, { status: 400 });

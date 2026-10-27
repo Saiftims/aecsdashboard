@@ -9,7 +9,6 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role !== "executive") redirect("/");
 
   const sb = supabaseService();
   const settings = await loadSettings();

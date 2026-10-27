@@ -104,7 +104,6 @@ function pillItems<T extends string>(value: T, options: { id: T; label: string }
 export default async function CaseUiPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role === "ae") redirect("/ae");
   const sp = await searchParams;
   const show = (UI_SHOWS.some((s) => s.id === sp.show) ? sp.show : "reviewed") as UiShow;
   const window = (UI_WINDOWS.some((w) => w.id === sp.active) ? sp.active : "all") as UiWindow;

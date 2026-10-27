@@ -11,8 +11,6 @@ export const dynamic = "force-dynamic";
 export default async function ExecutivePage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role === "ae") redirect("/ae");
-  if (user.role === "cs") redirect("/cs");
 
   const [{ kpis, funnel, postSaleFunnel }, leads] = await Promise.all([
     execOverview(),

@@ -105,7 +105,7 @@ export default async function FirmPage({
                 {ACTIVATION_STAGE_LABELS[activationDeal.activation_stage as ActivationStage]}
               </Badge>
             ) : salesDeal ? <Badge>{salesDeal.stage_label}</Badge> : null}
-            {activationDeal?.activation_stage === "handoff_pending" && user.role !== "ae" ? (
+            {activationDeal?.activation_stage === "handoff_pending" ? (
               <AcceptHandoffButton dealId={activationDeal.hubspot_id} />
             ) : null}
             <a
@@ -207,7 +207,7 @@ export default async function FirmPage({
             segment={segment}
             monthlyTarget={company.monthly_case_target ?? null}
             cases={caseItems}
-            canEdit={user.role !== "ae"}
+            canEdit
           />
 
           <Card>

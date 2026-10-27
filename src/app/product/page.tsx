@@ -31,7 +31,6 @@ const HEALTH_TONE = {
 export default async function ProductPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role === "ae") redirect("/ae");
 
   const [data, ui] = await Promise.all([productDashboard(), caseUiReport()]);
 

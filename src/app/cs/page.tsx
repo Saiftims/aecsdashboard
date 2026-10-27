@@ -33,7 +33,6 @@ export default async function CsPage({
 }) {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role === "ae") redirect("/ae");
 
   const params = await searchParams;
   const segment = (SEGMENTS.some((s) => s.id === params.segment)

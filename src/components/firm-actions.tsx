@@ -208,30 +208,28 @@ export function FirmActions(p: Props) {
                 </div>
               </Field>
             </form>
-            {p.role !== "ae" ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  submit({
-                    action: "activation_move", dealId: p.dealId,
-                    stage: new FormData(e.currentTarget).get("stage"),
-                  });
-                }}
-              >
-                <Field label="Activation stage">
-                  <div className="flex gap-2">
-                    <select name="stage" defaultValue={p.currentActivationStage} className={inputCls}>
-                      {ACTIVATION_STAGES.map((s) => (
-                        <option key={s} value={s}>{ACTIVATION_STAGE_LABELS[s]}</option>
-                      ))}
-                    </select>
-                    <Button type="submit" disabled={busy} variant="secondary" className="whitespace-nowrap">
-                      Move activation stage
-                    </Button>
-                  </div>
-                </Field>
-              </form>
-            ) : null}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submit({
+                  action: "activation_move", dealId: p.dealId,
+                  stage: new FormData(e.currentTarget).get("stage"),
+                });
+              }}
+            >
+              <Field label="Activation stage">
+                <div className="flex gap-2">
+                  <select name="stage" defaultValue={p.currentActivationStage} className={inputCls}>
+                    {ACTIVATION_STAGES.map((s) => (
+                      <option key={s} value={s}>{ACTIVATION_STAGE_LABELS[s]}</option>
+                    ))}
+                  </select>
+                  <Button type="submit" disabled={busy} variant="secondary" className="whitespace-nowrap">
+                    Move activation stage
+                  </Button>
+                </div>
+              </Field>
+            </form>
           </div>
         ) : null}
 

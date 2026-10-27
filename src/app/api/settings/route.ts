@@ -24,8 +24,6 @@ const schema = z.object({ key: z.string(), value: z.unknown() });
 export async function POST(req: Request) {
   const user = await currentAppUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  if (user.role !== "executive")
-    return NextResponse.json({ error: "executives only" }, { status: 403 });
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success || !ALLOWED_KEYS.has(parsed.data.key)) {

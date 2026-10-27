@@ -11,17 +11,19 @@ export const metadata: Metadata = {
   description: "Sales & Customer Success operating system",
 };
 
-const NAV: (NavItem & { roles: string[] })[] = [
-  { href: "/", label: "Executive", icon: "executive", group: "Overview", roles: ["executive"] },
-  { href: "/activity", label: "Activity & funnel", icon: "activity", group: "Overview", roles: ["executive", "ae", "cs"] },
-  { href: "/ae", label: "Sales (AE)", icon: "ae", group: "Teams", roles: ["executive", "ae"] },
-  { href: "/cs", label: "Customer success", icon: "cs", group: "Teams", roles: ["executive", "cs"] },
-  { href: "/marketing", label: "Marketing", icon: "marketing", group: "Teams", roles: ["executive"] },
-  { href: "/product", label: "Product", icon: "product", group: "Teams", roles: ["executive", "cs"] },
-  { href: "/firms", label: "Firms", icon: "firms", group: "Records", roles: ["executive", "ae", "cs"] },
-  { href: "/data-quality", label: "Data quality", icon: "quality", group: "Records", roles: ["executive", "ae", "cs"] },
-  { href: "/health", label: "System health", icon: "health", group: "Admin", roles: ["executive"] },
-  { href: "/settings", label: "Settings", icon: "settings", group: "Admin", roles: ["executive"] },
+// Every signed-in user sees every page (owner, 2026-10-27: "remove all
+// permissions, let everyone see everything"). Role only labels the sidebar.
+const NAV: NavItem[] = [
+  { href: "/", label: "Executive", icon: "executive", group: "Overview" },
+  { href: "/activity", label: "Activity & funnel", icon: "activity", group: "Overview" },
+  { href: "/ae", label: "Sales (AE)", icon: "ae", group: "Teams" },
+  { href: "/cs", label: "Customer success", icon: "cs", group: "Teams" },
+  { href: "/marketing", label: "Marketing", icon: "marketing", group: "Teams" },
+  { href: "/product", label: "Product", icon: "product", group: "Teams" },
+  { href: "/firms", label: "Firms", icon: "firms", group: "Records" },
+  { href: "/data-quality", label: "Data quality", icon: "quality", group: "Records" },
+  { href: "/health", label: "System health", icon: "health", group: "Admin" },
+  { href: "/settings", label: "Settings", icon: "settings", group: "Admin" },
 ];
 
 /** Applies the saved theme before first paint so dark mode does not flash. */
@@ -29,7 +31,7 @@ const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('theme');var d=
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await currentAppUser().catch(() => null);
-  const nav = user ? NAV.filter((n) => n.roles.includes(user.role)).map((n) => ({ href: n.href, label: n.label, icon: n.icon, group: n.group })) : [];
+  const nav = user ? NAV : [];
 
   return (
     <html lang="en" suppressHydrationWarning>

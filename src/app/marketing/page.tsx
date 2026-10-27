@@ -23,7 +23,6 @@ function monthOptions(now: Date): { key: MarketingRange; label: string }[] {
 export default async function MarketingPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role !== "executive") redirect("/");
   const sp = await searchParams;
   const range = (sp.range && /^(\d+d|all|\d{4}-\d{2})$/.test(sp.range) ? sp.range : "30d") as MarketingRange;
   const now = new Date();

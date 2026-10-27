@@ -9,12 +9,9 @@ export const dynamic = "force-dynamic";
 export default async function AePage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
-  if (user.role === "cs") redirect("/cs");
 
-  // AEs see their own book; executives see everything.
-  const { metrics, queue, stageCounts, today } = await aeDashboard(
-    user.role === "ae" ? user.hubspot_owner_id : null,
-  );
+  // Everyone sees the whole team's book (owner, 2026-10-27).
+  const { metrics, queue, stageCounts, today } = await aeDashboard(null);
 
   return (
     <div className="space-y-6">

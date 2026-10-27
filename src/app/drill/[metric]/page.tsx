@@ -17,8 +17,8 @@ export default async function DrillPage({
   if (!user) redirect("/login");
   const { metric } = await params;
 
-  // AEs see their own records, same scoping as their dashboard.
-  const result = await drill(metric, user.role === "ae" ? user.hubspot_owner_id : null);
+  // Everyone sees the whole team's records (owner, 2026-10-27).
+  const result = await drill(metric, null);
   if (!result) notFound();
   const settings = await loadSettings();
 

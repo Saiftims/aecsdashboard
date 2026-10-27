@@ -1,6 +1,6 @@
 /** Case + account CS workflow write-back. Cases live in Supabase (source of
  * truth for workflow); segment/target/next-action also mirror to the HubSpot
- * company. Every action is audited. CS + executive only. */
+ * company. Every action is audited. Any signed-in user (owner, 2026-10-27). */
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logAudit } from "@/lib/audit";
@@ -46,7 +46,6 @@ const schema = z.discriminatedUnion("action", [
 export async function POST(req: Request) {
   const user = await currentAppUser();
   if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  if (user.role === "ae") return NextResponse.json({ error: "CS/executive only" }, { status: 403 });
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
