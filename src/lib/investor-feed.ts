@@ -24,6 +24,10 @@ export interface InvestorMonth {
   /** Cash collected (Stripe) + modelled for firms Stripe never billed. */
   revenue: number;
   collected: number;
+  /** The same `revenue` cut by billing model: plan payments + flat fees vs
+   * per-case charges (same split as the GTM dashboard's revenue chart). */
+  subscription: number;
+  transactional: number;
   adSpend: number;
   adLeads: number;
   impressions: number;
@@ -143,6 +147,8 @@ export async function investorFeed(): Promise<InvestorFeed> {
       cases: cases.get(k)?.count ?? 0,
       revenue: Math.round(rev.get(k)?.total ?? 0),
       collected: Math.round(rev.get(k)?.collected ?? 0),
+      subscription: Math.round(rev.get(k)?.subscription ?? 0),
+      transactional: Math.round(rev.get(k)?.transactional ?? 0),
       adSpend: Math.round(s?.spend ?? 0), adLeads: s?.leads ?? 0, impressions: s?.impressions ?? 0, clicks: s?.clicks ?? 0,
     };
   });
