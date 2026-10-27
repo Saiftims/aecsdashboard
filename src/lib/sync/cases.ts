@@ -115,12 +115,43 @@ async function syncCaseUiUsage(provider: PostHogProvider): Promise<number> {
   return out.length;
 }
 
+/** One `case_port_reviews` row per case reviewed after the bulk port to the
+ * new UI (`ui_port_reviewed`; owner, 2026-10-27: "flag the ones where the
+ * manual review was done" so CS can call the firm with the re-processed
+ * case). The LATEST review of a case wins; `reviews` counts how many times
+ * it was marked. Returns the number of cases written. */
+async function syncPortReviews(provider: PostHogProvider): Promise<number> {
+  const events = await provider.listPortReviews();
+  const byCase = new Map<string, { latest: typeof events[number]; reviews: number }>();
+  for (const e of events) {
+    const cur = byCase.get(e.caseId);
+    if (!cur) byCase.set(e.caseId, { latest: e, reviews: 1 });
+    else { cur.reviews += 1; if (e.at > cur.latest.at) cur.latest = e; }
+  }
+  const now = new Date().toISOString();
+  const out = [...byCase.entries()].map(([case_id, { latest: e, reviews }]) => ({
+    case_id, reviewed_at: e.at, reviewed_by: e.by, port_status: e.portStatus, days_since_port: e.daysSincePort,
+    overall_before: e.overallBefore, overall_after: e.overallAfter, overall_delta: e.overallDelta,
+    liability_delta: e.liabilityDelta, crash_severity_delta: e.crashSeverityDelta,
+    injury_causation_delta: e.injuryCausationDelta, evidence_integrity_delta: e.evidenceIntegrityDelta,
+    injury_synopses: e.injurySynopses, reconstruction_texts: e.reconstructionTexts,
+    assessment_refreshed: e.assessmentRefreshed, warnings: e.warnings, backfilled: e.backfilled,
+    reviews, synced_at: now,
+  }));
+  const sb = supabaseService();
+  for (let i = 0; i < out.length; i += 500) {
+    await must(`case_port_reviews upsert batch ${i / 500 + 1}`,
+      sb.from("case_port_reviews").upsert(out.slice(i, i + 500), { onConflict: "case_id" }));
+  }
+  return out.length;
+}
+
 // ---------------------------------------------------------------------------
 export async function syncCases() {
   const sb = supabaseService();
   const stats = {
     posthog: 0, fromUrls: 0, mapped: 0, unmapped: 0, intake: 0, intakeEvents: 0, stripeInvoiced: 0, dedupedStandIn: 0,
-    bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0, uiCases: 0,
+    bootstrapped: 0, purgedTest: 0, signups: 0, signupsMapped: 0, signupsCreated: 0, uiCases: 0, portReviews: 0,
   };
 
   // Purge any previously-ingested test/internal cases (idempotent cleanup).
@@ -281,6 +312,11 @@ export async function syncCases() {
         stats.uiCases = await syncCaseUiUsage(provider);
       } catch (e) {
         console.error("case_ui sync failed:", e instanceof Error ? e.message : e);
+      }
+      try {
+        stats.portReviews = await syncPortReviews(provider);
+      } catch (e) {
+        console.error("port review sync failed:", e instanceof Error ? e.message : e);
       }
     } catch (e) {
       console.error("PostHog fetch failed:", e instanceof Error ? e.message : e);

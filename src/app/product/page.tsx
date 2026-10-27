@@ -52,14 +52,14 @@ export default async function ProductPage() {
       <Link href="/product/ui" className="block">
         <Card className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 transition hover:border-zinc-300 hover:shadow-md dark:hover:border-zinc-700">
           <div>
-            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Old UI vs new UI</div>
-            <div className="text-xs text-zinc-500">Which firms and cases are still on the old case UI · click for the list by firm</div>
+            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">New UI port review</div>
+            <div className="text-xs text-zinc-500">Cases checked after the bulk move to the new UI · reviewed = call the firm and send the re-processed case</div>
           </div>
           <div className="flex flex-wrap items-center gap-6 text-sm tabular-nums">
-            <span><span className="font-semibold text-emerald-600 dark:text-emerald-400">{ui.totals.firmsOnNew}</span> <span className="text-zinc-500">firms on new</span></span>
-            <span><span className={ui.totals.firmsOnOld ? "font-semibold text-red-600 dark:text-red-400" : "font-semibold"}>{ui.totals.firmsOnOld}</span> <span className="text-zinc-500">still on old</span></span>
-            <span><span className="font-semibold">{ui.totals.firmsUnseen}</span> <span className="text-zinc-500">not seen yet</span></span>
-            <span><span className="font-semibold">{ui.totals.new}</span><span className="text-zinc-500"> / </span><span className={ui.totals.old ? "font-semibold text-red-600 dark:text-red-400" : "font-semibold"}>{ui.totals.old}</span> <span className="text-zinc-500">cases new / old</span></span>
+            <span><span className="font-semibold text-emerald-600 dark:text-emerald-400">{ui.totals.firmsToCall}</span> <span className="text-zinc-500">firms to call</span></span>
+            <span><span className="font-semibold text-emerald-600 dark:text-emerald-400">{ui.totals.reviewed}</span> <span className="text-zinc-500">cases reviewed</span></span>
+            <span><span className={ui.totals.awaiting ? "font-semibold text-amber-600 dark:text-amber-400" : "font-semibold"}>{ui.totals.awaiting}</span> <span className="text-zinc-500">awaiting review</span></span>
+            <span><span className={ui.totals.firmsOnOld ? "font-semibold text-red-600 dark:text-red-400" : "font-semibold"}>{ui.totals.firmsOnOld}</span> <span className="text-zinc-500">firms still on old UI</span></span>
             <span className="text-zinc-400">›</span>
           </div>
         </Card>

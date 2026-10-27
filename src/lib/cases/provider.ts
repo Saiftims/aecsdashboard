@@ -176,6 +176,27 @@ export const CASE_EVENTS = [
   ...CASE_DELIVER_EVENTS,
 ];
 
+/** One `ui_port_reviewed` event - see `listPortReviews`. */
+export interface PortReview {
+  caseId: string;
+  at: string;
+  by: string | null;
+  portStatus: string | null;
+  daysSincePort: number | null;
+  overallBefore: number | null;
+  overallAfter: number | null;
+  overallDelta: number | null;
+  liabilityDelta: number | null;
+  crashSeverityDelta: number | null;
+  injuryCausationDelta: number | null;
+  evidenceIntegrityDelta: number | null;
+  injurySynopses: number | null;
+  reconstructionTexts: boolean | null;
+  assessmentRefreshed: boolean | null;
+  warnings: number | null;
+  backfilled: boolean;
+}
+
 export interface PostHogCase {
   caseId: string;
   accountId: string | null;
@@ -495,6 +516,51 @@ export class PostHogProvider {
       email: r[3] ? String(r[3]).toLowerCase() : null,
       first: safeIso(r[4] as string | null), last: safeIso(r[5] as string | null),
       events: Number(r[6] ?? 0),
+    }));
+  }
+
+  /** Every `ui_port_reviewed` event: the "Mark reviewed" button on the
+   * port-review modal, fired once an analyst has checked a case moved to the
+   * new UI in bulk on 2026-10-18. Carries the case id and the assessment
+   * scores before/after the port, but NO firm (the reviewer is staff
+   * impersonating, so `$group_0` is the staff org) - the caller resolves the
+   * firm from the case id. Backfilled rows (`backfilled=true`) carry the
+   * original review time. Staging is excluded. */
+  async listPortReviews(): Promise<PortReview[]> {
+    // Properties come back as strings (or null); parsed here, since HogQL's
+    // typed casts (toInt64OrNull) are not available on this project.
+    const s = (k: string) => `toString(properties.${k})`;
+    const hogql = `
+      select ${s("caseId")} as case_id, timestamp, person.properties.email,
+        ${s("portStatus")}, ${s("daysSincePort")},
+        ${s("overallBefore")}, ${s("overallAfter")}, ${s("overallDelta")},
+        ${s("liabilityDelta")}, ${s("crashSeverityDelta")}, ${s("injuryCausationDelta")}, ${s("evidenceIntegrityDelta")},
+        ${s("injurySynopses")}, ${s("reconstructionTexts")}, ${s("assessmentRefreshed")}, ${s("warnings")},
+        ${s("backfilled")}
+      from events
+      where event = 'ui_port_reviewed'
+        and timestamp > toDateTime('2026-10-01 00:00:00')
+        and coalesce(toString(properties.$current_url), '') not like '%staging%'
+        and case_id != ''
+      order by timestamp
+      limit 20000`;
+    const rows = await this.query<(string | number | null)[]>(hogql);
+    const n = (v: string | number | null) => {
+      if (v === null || v === undefined || v === "" || v === "null") return null;
+      const x = Number(v);
+      return Number.isFinite(x) ? Math.round(x) : null;
+    };
+    const b = (v: string | number | null) => {
+      const t = String(v ?? "").toLowerCase();
+      return t === "true" || t === "1" ? true : t === "false" || t === "0" ? false : null;
+    };
+    return rows.map((r) => ({
+      caseId: String(r[0]), at: safeIso(r[1] as string | null) ?? String(r[1]),
+      by: r[2] ? String(r[2]).toLowerCase() : null, portStatus: r[3] ? String(r[3]) : null,
+      daysSincePort: n(r[4]), overallBefore: n(r[5]), overallAfter: n(r[6]), overallDelta: n(r[7]),
+      liabilityDelta: n(r[8]), crashSeverityDelta: n(r[9]), injuryCausationDelta: n(r[10]), evidenceIntegrityDelta: n(r[11]),
+      injurySynopses: n(r[12]), reconstructionTexts: b(r[13]), assessmentRefreshed: b(r[14]), warnings: n(r[15]),
+      backfilled: b(r[16]) ?? false,
     }));
   }
 
