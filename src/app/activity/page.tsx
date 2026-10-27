@@ -324,8 +324,8 @@ export default async function ActivityPage() {
           <Note>
             Subscription is plan payments (Solo, Boutique, Growth and the flat-fee
             firms); transactional is per-case charges, reports and other one-off
-            usage. Both are cash Stripe actually collected, net of refunds {"\u2014"}
-            a firm billed and refunded in full reads as zero {"\u2014"} except for the
+            usage. Both are gross Stripe charges {"\u2014"} refunds are not deducted,
+            so a free first month billed and refunded still counts {"\u2014"} except for the
             few firms Stripe has never billed, which are still priced by the old
             rules (a recorded flat plan, otherwise {money(settings.defaultCasePrice)}{" "}
             a case); hover a bar to see how much of it is that estimate. Revenue

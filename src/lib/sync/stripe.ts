@@ -15,9 +15,11 @@
  *    thing that says whether a payment was a plan or a case, and are paired to a
  *    charge on (customer, amount, day) since no id links them.
  *
- * 2. REFUNDS COME OFF. `net_cents` is amount minus refunds, because refunded
- *    money is not revenue: Mardirosian's $2,800 came back in full, so their four
- *    May cases are worth $0 rather than the $1,000 the old model gave them.
+ * 2. REFUNDS ARE RECORDED, NOT DEDUCTED. `net_cents` is amount minus refunds and
+ *    `refunded_cents` the refund, but the dashboard REPORTS GROSS (owner,
+ *    2026-10-27): the free first month is a full charge immediately refunded,
+ *    so netting it read every new subscriber's first month as $0. See
+ *    `loadRevenueFacts` in lib/revenue.ts, the one place the figure is built.
  */
 import { isTestCaseActor } from "@/lib/cases/provider";
 import {

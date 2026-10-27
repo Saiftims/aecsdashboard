@@ -184,7 +184,7 @@ export async function investorFeed(): Promise<InvestorFeed> {
   const monthIdx = (iso: string) => { const d = new Date(iso); return d.getUTCFullYear() * 12 + d.getUTCMonth(); };
   const cur = monthIdx(now.toISOString());
   const perCase = facts.payments.filter((p) => p.at && p.kind !== "subscription" && monthIdx(p.at) >= cur - 3 && monthIdx(p.at) < cur);
-  const transactionalMonthly = Math.round(perCase.reduce((a, p) => a + p.net, 0) / 3);
+  const transactionalMonthly = Math.round(perCase.reduce((a, p) => a + p.gross, 0) / 3);
   const mrr = Math.round(ue.liveMrr);
   const lastKey = keys[keys.length - 2] ?? keys[keys.length - 1];
   const lastMeta = months.find((m) => m.key === lastKey);
@@ -225,7 +225,7 @@ export async function investorFeed(): Promise<InvestorFeed> {
       demosBooked: "First entry into Demo Scheduled; before Aug 2026 the demos that ran stand in, so no-shows read 0 there.",
       demosCompleted: "Attended Calendly demos plus demos the CSM marked completed in HubSpot; no-shows never count.",
       newFirms: "A firm counts once, in the month it first signed up for the app or submitted its first case.",
-      revenue: "Stripe cash net of refunds in the month collected; firms Stripe has never billed are modelled at $250 a case or their flat fee.",
+      revenue: "Gross Stripe charges in the month charged (refunds not deducted); firms Stripe has never billed are modelled at $250 a case or their flat fee.",
       mrr: "Live Stripe plans at what they actually bill (discounts applied), plus flat-fee firms invoiced outside Stripe.",
       transactionalMonthly: "Per-case Stripe cash over the last three full months, divided by three.",
       customers: "Every firm that has paid or submitted a case; 'Free tier' is firms that signed up for the app and have not sent a case yet.",

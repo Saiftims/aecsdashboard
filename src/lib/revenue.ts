@@ -7,14 +7,18 @@
  * paid $1,900 for reports the model had no concept of.
  *
  * The rule now: A FIRM THAT EXISTS IN STRIPE IS DESCRIBED BY STRIPE. Its revenue
- * is the cash Stripe collected, net of refunds, in the month it was collected.
- * A firm with NO Stripe customer keeps the old modelled pricing, because
- * something has to price its cases - but those firms are listed by
- * `unbilledFirms` so they can be reconciled rather than quietly guessed at.
+ * is the GROSS cash Stripe charged, in the month it was charged. A firm with NO
+ * Stripe customer keeps the old modelled pricing, because something has to
+ * price its cases - but those firms are listed by `unbilledFirms` so they can
+ * be reconciled rather than quietly guessed at.
  *
- * Cash, not billings: an unpaid invoice is not revenue, and a refunded charge is
- * not revenue either. Both matter here - Mardirosian's $2,800 was refunded in
- * full, so their four cases are worth nothing.
+ * Cash, not billings: an unpaid or failed charge is not revenue. REFUNDS DO NOT
+ * COME OFF (owner, 2026-10-27: "i want gross revenue amounts, because we often
+ * do first month free, but credit card is on file and its billed month over
+ * month"). The free first month is implemented as a full charge immediately
+ * refunded - 11 Solo plans in October 2026 alone - so netting refunds read every
+ * new subscriber's first month as $0. Until then the figure was net, which is
+ * why Mardirosian's four fully refunded May cases used to read as nothing.
  *
  * Amounts are converted to DOLLARS at this boundary; Stripe's cents never escape
  * this module, because every caller and every existing revenue figure is dollars.
@@ -31,8 +35,8 @@ export function monthIndexOf(iso: string | null | undefined): number | null {
 export interface StripePayment {
   companyId: string | null;
   customerId: string | null;
-  /** Dollars, net of refunds. Zero for a failed charge. */
-  net: number;
+  /** Dollars charged, GROSS of any refund. Zero for a failed charge. */
+  gross: number;
   refunded: number;
   kind: string | null;
   description: string | null;
@@ -44,8 +48,8 @@ export interface RevenueFacts {
    * wholesale rather than reporting every firm as $0. */
   ready: boolean;
   /** Firms Stripe knows about. Their revenue is Stripe's to state, INCLUDING
-   * when the answer is zero - a firm that was billed and refunded earned us
-   * nothing, and modelling $250 a case over the top would invent it back. */
+   * when the answer is zero - modelling $250 a case over the top of a firm
+   * Stripe bills would invent money. */
   inStripe: Set<string>;
   /** company id -> month index -> dollars collected. */
   byCompanyMonth: Map<string, Map<number, number>>;
@@ -97,24 +101,28 @@ export async function loadRevenueFacts(): Promise<RevenueFacts> {
   let totalCollected = 0;
   for (const p of paymentsRes.data) {
     if (p.is_internal) continue;
-    const net = (p.net_cents ?? 0) / 100;
+    // `net_cents` is amount-minus-refund for a successful charge and 0 for a
+    // failed one (which has nothing to refund), so adding the refund back is
+    // the gross charge in both cases.
+    const refunded = (p.refunded_cents ?? 0) / 100;
+    const gross = (p.net_cents ?? 0) / 100 + refunded;
     payments.push({
       companyId: p.company_hubspot_id ?? null,
       customerId: p.customer_id ?? null,
-      net,
-      refunded: (p.refunded_cents ?? 0) / 100,
+      gross,
+      refunded,
       kind: p.kind ?? null,
       description: p.description ?? null,
       at: p.created_at ?? null,
     });
-    if (!net) continue;
-    totalCollected += net;
+    if (!gross) continue;
+    totalCollected += gross;
     const m = monthIndexOf(p.created_at);
-    if (m !== null) byMonth.set(m, (byMonth.get(m) ?? 0) + net);
-    if (!p.company_hubspot_id) { unmatched += net; continue; }
+    if (m !== null) byMonth.set(m, (byMonth.get(m) ?? 0) + gross);
+    if (!p.company_hubspot_id) { unmatched += gross; continue; }
     if (m === null) continue;
     const firm = byCompanyMonth.get(p.company_hubspot_id) ?? new Map<number, number>();
-    firm.set(m, (firm.get(m) ?? 0) + net);
+    firm.set(m, (firm.get(m) ?? 0) + gross);
     byCompanyMonth.set(p.company_hubspot_id, firm);
   }
 
@@ -147,10 +155,10 @@ export function stripeRevenueBetween(
   if (!facts.ready) return 0;
   let total = 0;
   for (const p of facts.payments) {
-    if (!p.net || !p.at) continue;
+    if (!p.gross || !p.at) continue;
     const t = new Date(p.at).getTime();
     if (Number.isNaN(t) || t < fromMs || t > toMs) continue;
-    total += p.net;
+    total += p.gross;
   }
   return total;
 }

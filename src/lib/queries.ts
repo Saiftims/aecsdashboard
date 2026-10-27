@@ -177,7 +177,7 @@ export function caseRevenue(c: { revenue_amount: number | null }, price: number)
 /** Monthly revenue split.
  *
  * Where Stripe knows the firm, its figure IS the firm's revenue: the cash
- * collected this month, net of refunds. Firms Stripe has never billed keep the
+ * charged this month, gross of refunds. Firms Stripe has never billed keep the
  * old model - flat MRR if they are on a plan, otherwise $250 a case - because
  * something still has to price their cases. See src/lib/revenue.ts.
  *
@@ -1335,8 +1335,8 @@ export async function monthlyRevenueBreakdown(): Promise<{
   // included, as "no firm"), so the two cuts of a month always sum alike.
   for (const p of facts.payments) {
     const m = monthIndexOf(p.at);
-    if (!p.net || m === null) continue;
-    model(m, p.companyId, stripeKindPart(p.kind), p.net);
+    if (!p.gross || m === null) continue;
+    model(m, p.companyId, stripeKindPart(p.kind), p.gross);
   }
 
   const planFirms = new Set<string>();

@@ -313,8 +313,8 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
     const arrivedAt = [co.signed_up_at, first, sub?.subscribedAt].filter((x): x is string => !!x).sort()[0];
     if (!arrivedAt) continue;
     const kind: CustomerKind = sub ? "subscription" : first ? "transactional" : "signup";
-    // Stripe states a transactional firm's cash, including $0 for a refunded
-    // one; only a firm Stripe has never billed is priced per case.
+    // Stripe states a transactional firm's cash (gross of refunds); only a
+    // firm Stripe has never billed is priced per case.
     const cash = facts.ready && facts.inStripe.has(id)
       ? [...(facts.byCompanyMonth.get(id)?.values() ?? [])].reduce((a, b) => a + b, 0)
       : modelled.get(id) ?? 0;
