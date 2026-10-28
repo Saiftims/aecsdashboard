@@ -98,6 +98,7 @@ export default async function SettingsPage() {
             <SettingField settingKey="monthly_ad_spend" label="Planned ad spend for a month not listed above ($)" defaultValue={settings.monthlyAdSpend} />
             <SettingField settingKey="people_cost_by_month" type="text" label='Sales + CS salaries per YEAR, from the month each applies (JSON, e.g. {"2026-07": 60000, "2026-08": 85000})' defaultValue={JSON.stringify(settings.peopleCostByMonth)} />
             <SettingField settingKey="monthly_team_cost" label="People cost per month for a month before that ledger starts ($)" defaultValue={settings.monthlyTeamCost} />
+            <SettingField settingKey="agency_cost_by_month" type="text" label='Marketing agency retainer (FlyTech) per MONTH, from the month each applies (JSON, e.g. {"2026-05": 3000})' defaultValue={JSON.stringify(settings.agencyCostByMonth)} />
             <SettingField settingKey="gross_margin_pct" label="Gross margin (%)" defaultValue={settings.grossMarginPct} />
           </CardBody>
         </Card>

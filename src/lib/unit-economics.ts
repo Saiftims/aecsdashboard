@@ -1,6 +1,6 @@
 import { caseRevenue } from "@/lib/queries";
 import { loadRevenueFacts } from "@/lib/revenue";
-import { loadSettings, peopleCostForMonth } from "@/lib/settings";
+import { agencyCostForMonth, loadSettings, peopleCostForMonth } from "@/lib/settings";
 import { subscribersReport, type SubscriberRow } from "@/lib/subscribers";
 import { selectAll, supabaseService } from "@/lib/supabase/server";
 
@@ -101,21 +101,31 @@ export interface CohortMonth {
   teamCost: number;
   /** The annual figure in force that month, for display. */
   peopleAnnual: number;
+  /** Marketing agency retainer (FlyTech) for the month, prorated. Part of the
+   * paid-acquisition cost alongside `spend`. */
+  agencyCost: number;
+  /** The monthly retainer in force that month, for display. */
+  agencyMonthly: number;
   mature: boolean;
 }
 
 /** Inputs for the paid-acquisition payback model on the Activity page.
  *
- * CAC is measured by LEAD cohort: each subscription is dated back to the lead
- * that converted (the latest sales deal created before it started, else the
- * firm's first contact, else the subscription itself) and charged to that
- * month's ad spend, counting only the firms whose source was paid. Dividing a
- * month's spend by that month's sign-ups instead credits the ads with
- * conference, outbound and pre-switch firms and reads CAC far too low. */
+ * CAC is BLENDED (owner, 2026-10-28): every acquisition cost - Meta's spend,
+ * the FlyTech retainer, sales + CS salaries - over every paying firm whatever
+ * its source, so a referral or conference win dilutes the cost per customer.
+ * Conferences and sales tooling are minimal and referrals are unpaid, so those
+ * three are the whole numerator. The lead-month basis dates each firm back to
+ * the lead that converted (the latest sales deal created before it started,
+ * else the firm's first contact, else the event itself) so a month's spend is
+ * set against the firms it actually produced; the default month-started
+ * basis counts firms by when they began paying. */
 export interface UnitEconomicsSnapshot {
   monthLabel: string;
   /** Monthly people cost counted in CAC this month (sales + CS). */
   teamCost: number;
+  /** Monthly agency retainer counted in CAC this month (FlyTech). */
+  agencyCost: number;
   grossMargin: number;
   months: CohortMonth[];
   subscribers: Subscriber[];
@@ -381,6 +391,8 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
       fraction,
       teamCost: peopleCostForMonth(settings, key) * fraction,
       peopleAnnual: peopleCostForMonth(settings, key) * 12,
+      agencyCost: agencyCostForMonth(settings, key) * fraction,
+      agencyMonthly: agencyCostForMonth(settings, key),
       mature: now.getTime() - end.getTime() >= MATURE_AFTER_DAYS * DAY,
     });
   }
@@ -388,6 +400,7 @@ export async function unitEconomicsSnapshot(): Promise<UnitEconomicsSnapshot> {
   return {
     monthLabel: now.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
     teamCost: peopleCostForMonth(settings, now.toISOString().slice(0, 7)),
+    agencyCost: agencyCostForMonth(settings, now.toISOString().slice(0, 7)),
     grossMargin: settings.grossMarginPct / 100,
     months,
     subscribers,

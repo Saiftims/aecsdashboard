@@ -70,7 +70,7 @@ const right = (label: string, width?: string): Column => ({ label, align: "right
 const left = (label: string, width?: string): Column => ({ label, align: "left", width });
 
 const COHORT_HEADERS: Column[] = [
-  left("Month", "14%"), left("Firms signed up", "15%"), right("Ad spend", "10%"), right("Cost / lead", "9%"),
+  left("Month", "14%"), left("Firms signed up", "15%"), right("Meta + FlyTech", "10%"), right("Cost / lead", "9%"),
   right("Paying", "11%"), right("CAC", "10%"), right("Avg $/mo", "8%"), right("LTV", "9%"),
   right("LTV : CAC", "7%"), right("Payback", "7%"),
 ];
@@ -110,18 +110,25 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
   // measure, so firms are assumed to keep paying.
   const s = observed ? observedSurvival(observed, horizon) : Array<number>(horizon).fill(1);
 
-  /** Fully loaded CAC charges the ad spend to paid-sourced PAYING customers
-   * (plan or per-case) and the sales team to every paying customer; a signup
-   * that has never sent a case is counted but costs nothing to acquire yet.
-   * LTV and payback run on what the cohort actually bills a month - the
-   * billed plan for subscribers, the per-case run rate for transactional
-   * firms - not a list price. */
-  const economics = (spend: number, team: number, custs: typeof snap.customers) => {
+  /** Fully loaded CAC is BLENDED: Meta spend + the FlyTech retainer + the sales
+   * team, over every PAYING customer (plan or per-case) whatever its source
+   * (owner, 2026-10-28: a referral or conference win "should dilute the ad cost
+   * per customer"; conferences and tooling are minimal, referrals unpaid, so
+   * those three ARE the acquisition bill). `channelCac` is the secondary
+   * figure - Meta spend + agency over the firms the ads produced - which says
+   * whether the ads themselves work. A signup that has never sent a case is
+   * counted but costs nothing to acquire yet. LTV and payback run on what the
+   * cohort actually bills a month - the billed plan for subscribers, the
+   * per-case run rate for transactional firms - not a list price. */
+  const economics = (spend: number, agency: number, team: number, custs: typeof snap.customers) => {
     const paying = custs.filter((x) => x.kind !== "signup");
     const paid = paying.filter((x) => paidSet.includes(x.source)).length;
-    const adCac = paid > 0 ? spend / paid : Infinity;
-    const teamCac = paying.length > 0 ? team / paying.length : Infinity;
-    const cac = adCac + teamCac;
+    const n = paying.length;
+    const adCac = n > 0 ? spend / n : Infinity;
+    const agencyCac = n > 0 ? agency / n : Infinity;
+    const teamCac = n > 0 ? team / n : Infinity;
+    const cac = adCac + agencyCac + teamCac;
+    const channelCac = paid > 0 ? (spend + agency) / paid : Infinity;
     const plan = paying.length ? paying.reduce((a, x) => a + x.monthly, 0) / paying.length : 0;
     const contribution = plan * margin;
     const ltv = value(contribution, s, horizon);
@@ -130,7 +137,7 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
       transactional: custs.filter((x) => x.kind === "transactional").length,
       subscription: custs.filter((x) => x.kind === "subscription").length,
     };
-    return { paid, paying: paying.length, kinds, adCac, teamCac, cac, plan, contribution, ltv, payback: payback(cac, contribution, s) };
+    return { paid, paying: n, kinds, adCac, agencyCac, teamCac, cac, channelCac, plan, contribution, ltv, payback: payback(cac, contribution, s) };
   };
   const kindsText = (k: { signup: number; transactional: number; subscription: number }) =>
     [k.subscription ? `${k.subscription} plan` : "", k.transactional ? `${k.transactional} per-case` : "",
@@ -159,12 +166,13 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
     const fromLeads = era.filter((x) => x.leadAt.startsWith(m.month));
     const arrived = snap.customers.filter((x) => x.arrivedAt.startsWith(m.month));
     const custs = basis === "started" ? arrived : fromLeads;
-    return { ...m, custs, fromLeads, arrived, ...economics(m.spend, m.teamCost, custs) };
+    return { ...m, custs, fromLeads, arrived, ...economics(m.spend, m.agencyCost, m.teamCost, custs) };
   });
   const totalSpend = cohorts.reduce((a, c) => a + c.spend, 0);
+  const totalAgency = cohorts.reduce((a, c) => a + c.agencyCost, 0);
   const totalTeam = cohorts.reduce((a, c) => a + c.teamCost, 0);
   const allCusts = basis === "started" ? startedEra : era;
-  const total = economics(totalSpend, totalTeam, allCusts);
+  const total = economics(totalSpend, totalAgency, totalTeam, allCusts);
   const monthCols = observed?.average.length ?? 0;
   const retentionHeaders: Column[] = [
     left("Cohort"), right("Firms"), ...Array.from({ length: monthCols }, (_, m) => right(`M${m}`)),
@@ -175,14 +183,14 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
   if (!Number.isFinite(total.cac)) {
     return (
       <Card>
-        <Empty>No paid-sourced lead has become a paying customer yet, so there is no CAC to pay back.</Empty>
+        <Empty>No firm is paying yet, so there is no CAC to pay back.</Empty>
       </Card>
     );
   }
 
   const totalLeads = cohorts.reduce((a, c) => a + (c.adLeads ?? 0), 0);
   const cohortRows = [...cohorts.map((c) => ({ ...c, name: c.label + (c.mature ? "" : " · still converting") })),
-    { name: "All months", spend: totalSpend, teamCost: totalTeam, custs: allCusts, fromLeads: era, arrived: startedEra,
+    { name: "All months", spend: totalSpend, agencyCost: totalAgency, teamCost: totalTeam, custs: allCusts, fromLeads: era, arrived: startedEra,
       spendFromLedger: true, spendSource: "meta" as const,
       adLeads: cohorts.every((c) => c.adLeads !== null) ? totalLeads : null, ...total }];
   const fromMeta = cohorts.some((c) => c.spendSource === "meta");
@@ -196,7 +204,8 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
     <div className="space-y-4">
       <StatGrid cols={4}>
         <Stat label="CAC, fully loaded" value={usd(total.cac)} tone="warn"
-          sub={`${usd(total.adCac)} ads + ${usd(total.teamCac)} sales & CS salaries (${usd(snap.teamCost * 12)}/yr now)`} />
+          sub={`${usd(total.adCac)} Meta ads + ${usd(total.agencyCac)} FlyTech + ${usd(total.teamCac)} sales & CS salaries, over every paying firm`
+            + (Number.isFinite(total.channelCac) ? ` · Meta channel CAC ${usd(total.channelCac)} (${total.paid} firms from ads)` : "")} />
         <Stat label={`LTV, fully loaded · ${horizon} months`} value={usd(total.ltv)}
           sub={`${usd(total.plan)}/mo average per paying firm · ${Math.round(margin * 100)}% margin · ${paidMonths.toFixed(1)} paid months of ${horizon}`} />
         <Stat label="LTV : CAC" value={ratio(total.ltv, total.cac)}
@@ -228,11 +237,14 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
             <Cell key="f" sub={kindsText(kindCount(c.arrived))}>
               <span className="text-base font-semibold">{c.arrived.length}</span>
             </Cell>,
-            <Cell key="s" sub={c.spendSource !== "meta" ? (c.spendSource === "planned" ? "planned" : "typed") : undefined}>
-              {usd(c.spend)}
+            <Cell key="s" sub={[
+              `${usd(c.spend)} ads${c.spendSource !== "meta" ? (c.spendSource === "planned" ? " (planned)" : " (typed)") : ""}`,
+              c.agencyCost ? `+ ${usd(c.agencyCost)} FlyTech` : null,
+            ].filter(Boolean).join(" ")}>
+              {usd(c.spend + c.agencyCost)}
             </Cell>,
             <Cell key="cpl" sub={c.adLeads ? `${c.adLeads} leads` : undefined}>
-              {c.adLeads ? usd(c.spend / c.adLeads) : "—"}
+              {c.adLeads ? usd((c.spend + c.agencyCost) / c.adLeads) : "—"}
             </Cell>,
             <Cell key="p" sub={`${c.paid} from ads`}>{c.paying}</Cell>,
             usd(c.cac),
@@ -251,7 +263,10 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
           {basis === "started"
             ? " CAC and LTV run on those firms; a month's ad spend is set against firms that started that month even when their lead came in earlier, so the latest month reads high until its leads convert."
             : " CAC and LTV charge each firm to the month its lead came in, so a month's ad spend is set against the firms it actually produced."}
-          {" "}CAC, fully loaded = ad spend ÷ paying firms from ads + sales &amp; CS salaries ÷ all paying firms.
+          {" "}CAC, fully loaded = (Meta spend + FlyTech retainer + sales &amp; CS salaries) ÷ all paying firms,
+          whatever their source — a referral or conference win dilutes the cost per customer. Conferences and
+          tooling are minimal and referrals are unpaid, so that is the whole acquisition bill. &ldquo;From ads&rdquo;
+          is reference only, and feeds the Meta channel CAC shown under the headline figure.
           Avg $/mo is what a paying firm bills (plan, or per-case cash run rate); LTV is gross margin on that over
           the measured retention curve below.
           {fromMeta ? " Ad spend is actual from the Meta Ads account." : " Ad spend is the Settings ledger; the Meta spend sync has not run yet."}
@@ -338,8 +353,9 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
         <Note>
           Plan and renewal date from Stripe (synced every 3 hours); cases this period are the firm&apos;s submitted
           cases dated inside the current billing period, against the plan&apos;s allowance (Solo 2, Boutique 5,
-          Growth 10). Firms renewing within 7 days with cases left are amber. Blue sources count as paid under the
-          selected attribution; a plan from before August is listed but belongs to no cohort. Sources come from
+          Growth 10). Firms renewing within 7 days with cases left are amber. Blue sources are the ones the
+          selected attribution counts as &ldquo;from ads&rdquo; (reference only; CAC spreads spend over every paying firm);
+          a plan from before August is listed but belongs to no cohort. Sources come from
           Lead Source on the firm&apos;s converting deal or contacts in HubSpot; correct a firm there.
         </Note>
       </Card>
@@ -366,8 +382,8 @@ export function UnitEconomics({ snap, observed }: { snap: UnitEconomicsSnapshot;
       <Note className="px-0 pb-0">
         Per-case charges and expert sign-offs on top of plans would shorten payback. The people cost in CAC is the
         sales & CS salary bill in force each month ({usd(snap.teamCost * 12)}/yr now), customer success included
-        because the CSM runs demos and owns the book. Ad spend comes from Meta; the salary ledger and the margin
-        are set in Settings. Live billed MRR is {usd(snap.liveMrr)} across{" "}
+        because the CSM runs demos and owns the book. Ad spend comes from Meta; FlyTech&apos;s retainer
+        ({usd(snap.agencyCost)}/mo now), the salary ledger and the margin are set in Settings. Live billed MRR is {usd(snap.liveMrr)} across{" "}
         {snap.activeSubscribers} paying subscribers.
       </Note>
     </div>

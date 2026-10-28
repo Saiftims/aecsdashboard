@@ -36,6 +36,11 @@ export interface GtmSettings {
    * applies and carried forward until the next entry. Owner, 2026-10-21:
    * "in july it was only 60k/year, in aug until today it was 85k/year". */
   peopleCostByMonth: Record<string, number>;
+  /** Marketing agency retainer (FlyTech runs the Meta ads and screens the
+   * leads) as MONTHLY dollars keyed by the first month each figure applies,
+   * carried forward. Counted in CAC on top of Meta's own spend. Owner,
+   * 2026-10-28: "flytech we pay $3k/month total fixed every month". */
+  agencyCostByMonth: Record<string, number>;
   grossMarginPct: number;
   /** Per-channel daily targets. Reference only since the activity target above
    * replaced them - nothing is measured against these. */
@@ -79,6 +84,8 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   adLeadSharePct: 95,
   monthlyTeamCost: 5000,
   peopleCostByMonth: { "2026-07": 60000, "2026-08": 85000 },
+  // Keyed from the first month Meta spend ran (May 2026); cohorts start July.
+  agencyCostByMonth: { "2026-05": 3000 },
   grossMarginPct: 93,
   dailyCallsTarget: 25,
   dailyEmailsTarget: 20,
@@ -128,6 +135,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   ad_lead_share_pct: "adLeadSharePct",
   monthly_team_cost: "monthlyTeamCost",
   people_cost_by_month: "peopleCostByMonth",
+  agency_cost_by_month: "agencyCostByMonth",
   gross_margin_pct: "grossMarginPct",
   daily_calls_target: "dailyCallsTarget",
   daily_emails_target: "dailyEmailsTarget",
@@ -181,6 +189,10 @@ export async function loadSettings(): Promise<GtmSettings> {
     try { out.peopleCostByMonth = JSON.parse(out.peopleCostByMonth); } catch { out.peopleCostByMonth = DEFAULT_SETTINGS.peopleCostByMonth; }
   }
   if (!out.peopleCostByMonth || typeof out.peopleCostByMonth !== "object") out.peopleCostByMonth = DEFAULT_SETTINGS.peopleCostByMonth;
+  if (typeof out.agencyCostByMonth === "string") {
+    try { out.agencyCostByMonth = JSON.parse(out.agencyCostByMonth); } catch { out.agencyCostByMonth = DEFAULT_SETTINGS.agencyCostByMonth; }
+  }
+  if (!out.agencyCostByMonth || typeof out.agencyCostByMonth !== "object") out.agencyCostByMonth = DEFAULT_SETTINGS.agencyCostByMonth;
 
   out.dailyCallsTarget = Number(out.dailyCallsTarget) || 25;
   out.dailyEmailsTarget = Number(out.dailyEmailsTarget) || 20;
@@ -202,6 +214,16 @@ export function peopleCostForMonth(settings: GtmSettings, month: string): number
   if (!key) return settings.monthlyTeamCost;
   const annual = Number(settings.peopleCostByMonth[key]);
   return Number.isFinite(annual) ? annual / 12 : settings.monthlyTeamCost;
+}
+
+/** Agency retainer for a YYYY-MM month: the ledger entry in force (latest key
+ * at or before the month), already monthly; 0 before the ledger starts. */
+export function agencyCostForMonth(settings: GtmSettings, month: string): number {
+  const keys = Object.keys(settings.agencyCostByMonth).filter((k) => k <= month).sort();
+  const key = keys.at(-1);
+  if (!key) return 0;
+  const monthly = Number(settings.agencyCostByMonth[key]);
+  return Number.isFinite(monthly) ? monthly : 0;
 }
 
 export async function saveSetting(key: string, value: unknown, updatedBy?: string) {
