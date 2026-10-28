@@ -4,6 +4,7 @@ import { differenceInDays, subDays } from "date-fns";
 import { bucketOf, isOutreach, isSms } from "@/lib/activity-channels";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
 import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
+import { CHANNEL_WORD, fmtHours, speedToLeadReport } from "@/lib/speed-to-lead";
 import { loadSettings } from "@/lib/settings";
 import {
   FOLLOWUP_GRACE_DAYS, buildLastTouchLookup, buildTouchMaps, fetchCore,
@@ -657,10 +658,29 @@ async function leadsDrill(): Promise<DrillResult | null> {
   };
 }
 
+async function speedToLeadDrill(): Promise<DrillResult | null> {
+  const r = await speedToLeadReport();
+  if (!r.ok) return null;
+  const label = new Map(LEAD_SOURCES.map((s) => [s.key, s.label]));
+  return {
+    label: `Speed to lead — last ${r.days} days · ${r.total} inbound leads, ${r.touched} touched, median ${fmtHours(r.medianHours)}`,
+    rows: r.leads.map((l) => ({
+      title: l.name,
+      subtitle: `${label.get(l.source)} · ${l.detail}`,
+      dealId: l.dealId,
+      when: l.arrivedAt,
+      lastTouch: l.hours === null
+        ? `Not yet touched · waiting ${fmtHours(l.waitingHours)}`
+        : `${CHANNEL_WORD[l.channel!]} · ${l.by} · ${fmtHours(l.hours)} after the form`,
+    })),
+  };
+}
+
 export async function drill(metric: string, ownerId?: string | null): Promise<DrillResult | null> {
   if (/^(rev|use)(cohort|billing)_/.test(metric)) return revenueDrill(metric);
   if (metric.startsWith("month_")) return monthDrill(metric);
   if (metric === "leads_7d") return leadsDrill();
+  if (metric === "speed_to_lead") return speedToLeadDrill();
 
   if (metric.startsWith("cohort_")) return cohortDrill(metric.slice("cohort_".length));
 

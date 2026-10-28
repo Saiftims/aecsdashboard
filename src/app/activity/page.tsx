@@ -8,6 +8,7 @@ import {
   Card, CardBody, CardHeader, Note, PageHeader, Section, Stat, StatGrid, Table, TextLink,
 } from "@/components/ui";
 import { LogoRetention } from "@/components/logo-retention";
+import { SpeedToLead } from "@/components/speed-to-lead";
 import { UnitEconomics } from "@/components/unit-economics";
 import { observedRetention } from "@/lib/observed-churn";
 import { CHANNEL_LABELS, OTHER_CHANNELS } from "@/lib/activity-channels";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/queries";
 import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
 import { loadSettings } from "@/lib/settings";
+import { speedToLeadReport } from "@/lib/speed-to-lead";
 import { currentAppUser } from "@/lib/supabase/server";
 import { unitEconomicsSnapshot } from "@/lib/unit-economics";
 
@@ -36,13 +38,14 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention, billing, unitEcon, leads] = await Promise.all([
+  const [report, retention, billing, unitEcon, leads, speed] = await Promise.all([
     // Everyone sees the whole team (owner, 2026-10-27: "let everyone see everything").
     activityReport(null),
     retentionReport(),
     billingRetentionReport(),
     unitEconomicsSnapshot(),
     loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
+    speedToLeadReport(),
   ]);
   const {
     settings, activityTotals, roleDaily, funnel, revenue, revenueCollected,
@@ -148,7 +151,7 @@ export default async function ActivityPage() {
       </Section>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {roleDaily.map((r) => (
+        {roleDaily.flatMap((r) => [(
           <Card key={r.role}>
             <CardHeader
               title={`${r.label} — daily activity vs target`}
@@ -169,7 +172,11 @@ export default async function ActivityPage() {
                 : "No activity logged in this role over the last 7 days."}
             </Note>
           </Card>
-        ))}
+        ),
+        // Speed to lead sits beside the AE chart (owner, 2026-10-28: "next to
+        // the AE activity") - it is the AE's responsiveness being measured.
+        ...(r.role === "ae" ? [<SpeedToLead key="speed" report={speed} />] : []),
+        ])}
       </div>
 
       <Section title={<>Full funnel — {cohortSize} deals created this week</>}>
