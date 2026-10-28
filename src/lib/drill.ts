@@ -2,7 +2,8 @@
  * underlying records with links to the related firm/deal. */
 import { differenceInDays, subDays } from "date-fns";
 import { bucketOf, isOutreach, isSms } from "@/lib/activity-channels";
-import { SALES_STAGES } from "@/lib/hubspot/stages";
+import { demosPerLeadReport, pctOf } from "@/lib/demos-per-lead";
+import { SALES_STAGE_LABELS, SALES_STAGES } from "@/lib/hubspot/stages";
 import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
 import { CHANNEL_WORD, fmtHours, speedToLeadReport } from "@/lib/speed-to-lead";
 import { loadSettings } from "@/lib/settings";
@@ -676,11 +677,35 @@ async function speedToLeadDrill(): Promise<DrillResult | null> {
   };
 }
 
+async function demosPerLeadDrill(): Promise<DrillResult | null> {
+  const r = await demosPerLeadReport();
+  if (!r.ok) return null;
+  const label = new Map(LEAD_SOURCES.map((s) => [s.key, s.label]));
+  const booked = r.leads.filter((l) => l.booked).length;
+  const who: Record<string, string> = {
+    ae: "booked by the AE", self: "self-serve booking", other: "booked by another rep",
+    pending: "demo on the deal, credit not yet stamped",
+  };
+  return {
+    label: `Demos per qualified lead — last ${r.weeks.length} weeks · ${r.leads.length} qualified leads, ${booked} with a demo (${pctOf(r.leads.length ? booked / r.leads.length : null)})`,
+    rows: r.leads.map((l) => ({
+      title: l.name,
+      subtitle: `${label.get(l.source)} · ${l.detail}`,
+      dealId: l.dealId,
+      when: l.arrivedAt,
+      lastTouch: l.booked
+        ? `Demo · ${who[l.bookedBy ?? "pending"]}${l.bookedAt ? ` · ${l.bookedAt.slice(0, 10)}` : ""}`
+        : `No demo · ${l.stage ? SALES_STAGE_LABELS[l.stage] ?? l.stage : "no deal"}`,
+    })),
+  };
+}
+
 export async function drill(metric: string, ownerId?: string | null): Promise<DrillResult | null> {
   if (/^(rev|use)(cohort|billing)_/.test(metric)) return revenueDrill(metric);
   if (metric.startsWith("month_")) return monthDrill(metric);
   if (metric === "leads_7d") return leadsDrill();
   if (metric === "speed_to_lead") return speedToLeadDrill();
+  if (metric === "demos_per_lead") return demosPerLeadDrill();
 
   if (metric.startsWith("cohort_")) return cohortDrill(metric.slice("cohort_".length));
 

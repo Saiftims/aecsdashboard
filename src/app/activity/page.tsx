@@ -8,6 +8,7 @@ import {
   Card, CardBody, CardHeader, Note, PageHeader, Section, Stat, StatGrid, Table, TextLink,
 } from "@/components/ui";
 import { LogoRetention } from "@/components/logo-retention";
+import { DemosPerLead } from "@/components/demos-per-lead";
 import { SpeedToLead } from "@/components/speed-to-lead";
 import { UnitEconomics } from "@/components/unit-economics";
 import { observedRetention } from "@/lib/observed-churn";
@@ -17,6 +18,7 @@ import {
 } from "@/lib/queries";
 import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
 import { loadSettings } from "@/lib/settings";
+import { demosPerLeadReport } from "@/lib/demos-per-lead";
 import { speedToLeadReport } from "@/lib/speed-to-lead";
 import { currentAppUser } from "@/lib/supabase/server";
 import { unitEconomicsSnapshot } from "@/lib/unit-economics";
@@ -38,7 +40,7 @@ export default async function ActivityPage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [report, retention, billing, unitEcon, leads, speed] = await Promise.all([
+  const [report, retention, billing, unitEcon, leads, speed, perLead] = await Promise.all([
     // Everyone sees the whole team (owner, 2026-10-27: "let everyone see everything").
     activityReport(null),
     retentionReport(),
@@ -46,6 +48,7 @@ export default async function ActivityPage() {
     unitEconomicsSnapshot(),
     loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
     speedToLeadReport(),
+    demosPerLeadReport(),
   ]);
   const {
     settings, activityTotals, roleDaily, funnel, revenue, revenueCollected,
@@ -66,12 +69,12 @@ export default async function ActivityPage() {
   const dmSplit = OTHER_CHANNELS
     .filter((c) => activityTotals.byChannel[c] > 0)
     .map((c) => `${CHANNEL_LABELS[c]} ${activityTotals.byChannel[c]}`)
-    .join(" · ");
+    .join(" Â· ");
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Activity & funnel — last 7 days"
+        title="Activity & funnel â€” last 7 days"
         description={<>
           Team activity and this week&apos;s new-business
           funnel. Days are in the dashboard timezone.
@@ -106,10 +109,10 @@ export default async function ActivityPage() {
       {leads.ok ? (
         <Card>
           <CardHeader
-            title="New leads by source — last 7 days"
+            title="New leads by source â€” last 7 days"
             action={
               <TextLink href="/drill/leads_7d">
-                {leads.leads.length} leads · see the list
+                {leads.leads.length} leads Â· see the list
               </TextLink>
             }
           />
@@ -145,7 +148,7 @@ export default async function ActivityPage() {
         <Note className="px-0 pb-0">
           Texts come from Quo, the same source as dials. &ldquo;Other
           channels&rdquo; is every touch that is not a dial, an email or a text
-          — the DMs a rep logged plus meetings, demos and visits.
+          â€” the DMs a rep logged plus meetings, demos and visits.
           {dmSplit ? <> DMs this week: {dmSplit}.</> : null}
         </Note>
       </Section>
@@ -154,7 +157,7 @@ export default async function ActivityPage() {
         {roleDaily.flatMap((r) => [(
           <Card key={r.role}>
             <CardHeader
-              title={`${r.label} — daily activity vs target`}
+              title={`${r.label} â€” daily activity vs target`}
               action={<span>{r.dailyAverage} of {r.activityTarget} a day</span>}
             />
             <CardBody>
@@ -162,8 +165,8 @@ export default async function ActivityPage() {
             </CardBody>
             <Note>
               {r.people.length
-                ? <>{r.people.join(", ")} · every channel stacked to one
-                    total against the {r.activityTarget}/day target · calls from{" "}
+                ? <>{r.people.join(", ")} Â· every channel stacked to one
+                    total against the {r.activityTarget}/day target Â· calls from{" "}
                     {r.callSource === "quo"
                       ? "Quo (every dial)"
                       : "HubSpot logged calls"}
@@ -175,18 +178,20 @@ export default async function ActivityPage() {
         ),
         // Speed to lead sits beside the AE chart (owner, 2026-10-28: "next to
         // the AE activity") - it is the AE's responsiveness being measured.
-        ...(r.role === "ae" ? [<SpeedToLead key="speed" report={speed} />] : []),
+        ...(r.role === "ae"
+          ? [<SpeedToLead key="speed" report={speed} />, <DemosPerLead key="perlead" report={perLead} />]
+          : []),
         ])}
       </div>
 
-      <Section title={<>Full funnel — {cohortSize} deals created this week</>}>
+      <Section title={<>Full funnel â€” {cohortSize} deals created this week</>}>
         <StatGrid cols={4}>
           {funnel.map((f) => (
             <Stat
               key={f.label}
               label={f.label}
               value={f.count}
-              sub={f.convFromPrev === null ? "top of funnel" : `${f.convFromPrev}% from prev · ${f.convFromTop}% of leads`}
+              sub={f.convFromPrev === null ? "top of funnel" : `${f.convFromPrev}% from prev Â· ${f.convFromTop}% of leads`}
               tone={f.label === "Closed Won" ? "good" : undefined}
               href={FUNNEL_HREF[f.label]}
             />
@@ -201,8 +206,8 @@ export default async function ActivityPage() {
           rows={funnel.map((f) => [
             f.label,
             String(f.count),
-            f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
-            f.convFromTop === null ? "—" : `${f.convFromTop}%`,
+            f.convFromPrev === null ? "â€”" : `${f.convFromPrev}%`,
+            f.convFromTop === null ? "â€”" : `${f.convFromTop}%`,
           ])}
         />
       </Card>
@@ -342,10 +347,10 @@ export default async function ActivityPage() {
         </Card>
       </Section>
 
-      <Section title={<>Retention funnel — {freq.activatedFirms} activated firms</>}>
+      <Section title={<>Retention funnel â€” {freq.activatedFirms} activated firms</>}>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader title="Activation → repeat → retained" />
+            <CardHeader title="Activation â†’ repeat â†’ retained" />
             <CardBody>
               <FunnelChart data={retention.funnel.map((f) => ({ label: f.label, count: f.count }))} />
             </CardBody>
@@ -357,19 +362,19 @@ export default async function ActivityPage() {
               rows={retention.funnel.map((f) => [
                 f.label,
                 String(f.count),
-                f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
-                f.convFromTop === null ? "—" : `${f.convFromTop}%`,
+                f.convFromPrev === null ? "â€”" : `${f.convFromPrev}%`,
+                f.convFromTop === null ? "â€”" : `${f.convFromTop}%`,
               ])}
             />
           </Card>
         </div>
         <Note className="px-0 pb-0">
-          Activation = firm submitted ≥1 case. 2nd/3rd = firms with ≥2/≥3 lifetime cases.
+          Activation = firm submitted â‰¥1 case. 2nd/3rd = firms with â‰¥2/â‰¥3 lifetime cases.
           &ldquo;Active in N-day window&rdquo; = submitted an additional case in that window after the first case.
         </Note>
       </Section>
 
-      <Section title="Cohort retention — still a customer">
+      <Section title="Cohort retention â€” still a customer">
         <LogoRetention
           cohorts={retention.cohorts}
           monthCols={retention.monthCols}
@@ -393,7 +398,7 @@ export default async function ActivityPage() {
       </Section>
 
       {unitEcon ? (
-        <Section title={<>Unit economics — paid acquisition payback, {unitEcon.monthLabel}</>}>
+        <Section title={<>Unit economics â€” paid acquisition payback, {unitEcon.monthLabel}</>}>
           <UnitEconomics snap={unitEcon} observed={observedRetention(retention.cohorts)} />
         </Section>
       ) : null}
@@ -402,7 +407,7 @@ export default async function ActivityPage() {
         Funnel cohort = deals created in the last 7 days, shown at the furthest stage
         each has reached (Closed Won counts as passing every prior stage). Activity
         counts every logged call/email/meeting in the window.
-        <span className="mx-1">·</span>
+        <span className="mx-1">Â·</span>
         <TextLink href={user.role === "cs" ? "/cs" : "/ae"}>
           Back to dashboard
         </TextLink>

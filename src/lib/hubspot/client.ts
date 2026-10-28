@@ -261,6 +261,20 @@ async function guardedWrite(fn: () => Promise<{ id?: string }>): Promise<WriteRe
   }
 }
 
+/** Delete (archive) one CRM record. A 404 means it is already gone, which is
+ * the state we wanted, so that reads as ok. Guarded like every other write. */
+export async function hsDelete(object: string, id: string): Promise<WriteResult> {
+  return guardedWrite(async () => {
+    try {
+      await hsRequest("DELETE", `/crm/v3/objects/${object}/${id}`);
+    } catch (e) {
+      if (e instanceof HubSpotError && e.status === 404) return { id };
+      throw e;
+    }
+    return { id };
+  });
+}
+
 /** Patch properties, dropping empty values so we never blank manual data. */
 export async function hsUpdateProperties(
   object: string,
