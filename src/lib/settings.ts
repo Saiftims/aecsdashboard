@@ -1,4 +1,12 @@
-import { supabaseService } from "@/lib/supabase/server";
+import { must, supabaseService } from "@/lib/supabase/server";
+
+export interface MonthlyTargets {
+  mqls: number;
+  demos: number;
+  newFirms: number;
+  cases: number;
+  revenue: number;
+}
 
 export interface GtmSettings {
   defaultCasePrice: number;
@@ -21,6 +29,11 @@ export interface GtmSettings {
   monthlyNewFirmsTarget: number;
   monthlyCasesTarget: number;
   monthlyRevenueTarget: number;
+  /** Per-month overrides of the five targets above, keyed "YYYY-MM" (owner,
+   * 2026-11-02: the $500k-ARR-by-January plan sets different numbers for Nov,
+   * Dec and Jan). A month with no entry falls back to the flat targets; a
+   * partial entry overrides only the fields it names. */
+  monthlyTargetsByMonth: Record<string, Partial<MonthlyTargets>>;
   /** Paid-ads spend for the current month and the share of MQLs (and so of new
    * subscribers) those ads get credit for. Drives CAC in the unit economics. */
   monthlyAdSpend: number;
@@ -74,11 +87,22 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   slaFirstContactHours: 2,
   aeDailyActivityTarget: 100,
   csDailyActivityTarget: 40,
-  monthlyMqlsTarget: 120,
-  monthlyDemosTarget: 60,
-  monthlyNewFirmsTarget: 30,
-  monthlyCasesTarget: 80,
-  monthlyRevenueTarget: 18000,
+  // Flat fallbacks = the plan's January run-rate, so a month after the ledger
+  // ends holds the end state rather than dropping back to the pre-plan
+  // 120 / 60 / 30 / 80 / $18,000 that stood through October 2026.
+  monthlyMqlsTarget: 250,
+  monthlyDemosTarget: 80,
+  monthlyNewFirmsTarget: 26,
+  monthlyCasesTarget: 165,
+  monthlyRevenueTarget: 44500,
+  // Option B of the $500k-ARR plan (owner, 2026-11-02): hold October's pace -
+  // 32% MQL->demo, 30% demo->plan at ~$385/mo, 3% monthly churn cushion -
+  // and the $41.7k MRR line is crossed on 31 January 2027.
+  monthlyTargetsByMonth: {
+    "2026-11": { mqls: 240, demos: 75, newFirms: 24, cases: 110, revenue: 27500 },
+    "2026-12": { mqls: 240, demos: 77, newFirms: 25, cases: 140, revenue: 36000 },
+    "2027-01": { mqls: 250, demos: 80, newFirms: 26, cases: 165, revenue: 44500 },
+  },
   monthlyAdSpend: 7500,
   adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4810 },
   adLeadSharePct: 95,
@@ -130,6 +154,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   monthly_new_firms_target: "monthlyNewFirmsTarget",
   monthly_cases_target: "monthlyCasesTarget",
   monthly_revenue_target: "monthlyRevenueTarget",
+  monthly_targets_by_month: "monthlyTargetsByMonth",
   monthly_ad_spend: "monthlyAdSpend",
   ad_spend_by_month: "adSpendByMonth",
   ad_lead_share_pct: "adLeadSharePct",
@@ -181,6 +206,14 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.adLeadSharePct = Number.isFinite(Number(out.adLeadSharePct)) ? Number(out.adLeadSharePct) : 95;
   out.monthlyTeamCost = Number.isFinite(Number(out.monthlyTeamCost)) ? Number(out.monthlyTeamCost) : 5000;
   out.grossMarginPct = Number(out.grossMarginPct) > 0 ? Number(out.grossMarginPct) : 93;
+  if (typeof out.monthlyTargetsByMonth === "string") {
+    try { out.monthlyTargetsByMonth = JSON.parse(out.monthlyTargetsByMonth); } catch { out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth; }
+  }
+  if (!out.monthlyTargetsByMonth || typeof out.monthlyTargetsByMonth !== "object") out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth;
+  if (typeof out.monthlyTargetsByMonth === "string") {
+    try { out.monthlyTargetsByMonth = JSON.parse(out.monthlyTargetsByMonth); } catch { out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth; }
+  }
+  if (!out.monthlyTargetsByMonth || typeof out.monthlyTargetsByMonth !== "object") out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth;
   if (typeof out.adSpendByMonth === "string") {
     try { out.adSpendByMonth = JSON.parse(out.adSpendByMonth); } catch { out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth; }
   }
@@ -206,6 +239,20 @@ export async function loadSettings(): Promise<GtmSettings> {
   return out;
 }
 
+/** The five monthly targets in force for a YYYY-MM month: the ledger entry
+ * for that exact month (only the fields it names) over the flat settings. */
+export function monthlyTargetsFor(settings: GtmSettings, month: string): MonthlyTargets {
+  const o = settings.monthlyTargetsByMonth[month] ?? {};
+  const n = (v: unknown, fallback: number) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : fallback);
+  return {
+    mqls: n(o.mqls, settings.monthlyMqlsTarget),
+    demos: n(o.demos, settings.monthlyDemosTarget),
+    newFirms: n(o.newFirms, settings.monthlyNewFirmsTarget),
+    cases: n(o.cases, settings.monthlyCasesTarget),
+    revenue: n(o.revenue, settings.monthlyRevenueTarget),
+  };
+}
+
 /** Monthly people cost for a YYYY-MM month: the ledger entry in force (latest
  * key at or before the month) divided by 12, else the flat fallback. */
 export function peopleCostForMonth(settings: GtmSettings, month: string): number {
@@ -228,10 +275,13 @@ export function agencyCostForMonth(settings: GtmSettings, month: string): number
 
 export async function saveSetting(key: string, value: unknown, updatedBy?: string) {
   const sb = supabaseService();
-  await sb.from("settings").upsert({
+  // Checked, not fire-and-forget: an unchecked upsert here swallowed a failed
+  // write on 2026-11-02 (a non-uuid `updated_by`) and the setting silently
+  // kept its old value while the caller reported success.
+  await must(`settings.upsert(${key})`, sb.from("settings").upsert({
     key,
     value,
     updated_at: new Date().toISOString(),
     ...(updatedBy ? { updated_by: updatedBy } : {}),
-  });
+  }, { onConflict: "key" }));
 }

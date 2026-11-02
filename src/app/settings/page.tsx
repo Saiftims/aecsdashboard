@@ -90,6 +90,7 @@ export default async function SettingsPage() {
             <SettingField settingKey="monthly_new_firms_target" label="New firms (first case) per month" defaultValue={settings.monthlyNewFirmsTarget} />
             <SettingField settingKey="monthly_cases_target" label="Cases submitted per month" defaultValue={settings.monthlyCasesTarget} />
             <SettingField settingKey="monthly_revenue_target" label="Revenue per month ($)" defaultValue={settings.monthlyRevenueTarget} />
+            <SettingField settingKey="monthly_targets_by_month" type="text" label='Targets for specific months, overriding the five above (JSON, e.g. {"2026-11": {"mqls": 240, "demos": 75, "newFirms": 24, "cases": 110, "revenue": 27500}})' defaultValue={JSON.stringify(settings.monthlyTargetsByMonth)} />
             <p className="pt-2 text-xs text-zinc-500">
               Paid acquisition, for the unit economics at the bottom of the
               Activity page. Update the spend each month.

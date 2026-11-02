@@ -17,7 +17,7 @@ import {
   activityReport, billingRetentionReport, retentionReport,
 } from "@/lib/queries";
 import { LEAD_SOURCES, leadsReport } from "@/lib/leads";
-import { loadSettings } from "@/lib/settings";
+import { loadSettings, monthlyTargetsFor } from "@/lib/settings";
 import { demosPerLeadReport } from "@/lib/demos-per-lead";
 import { speedToLeadReport } from "@/lib/speed-to-lead";
 import { currentAppUser } from "@/lib/supabase/server";
@@ -63,18 +63,21 @@ export default async function ActivityPage() {
   });
   const thisMonth = <T extends { month: string }>(rows: T[]) =>
     rows.find((r) => r.month === thisMonthLabel);
+  // This month's targets: the per-month ledger if it names the month, else
+  // the flat settings (owner, 2026-11-02: Nov/Dec/Jan carry the $500k-ARR plan).
+  const targets = monthlyTargetsFor(settings, new Date().toISOString().slice(0, 7));
   const progress = (value: number, target: number, fmt = (n: number) => String(n)) =>
     `${fmt(value)} of ${fmt(target)} this month (${Math.round((value / target) * 100)}%)`;
   // Only the networks actually used, so a quiet week isn't a row of zeroes.
   const dmSplit = OTHER_CHANNELS
     .filter((c) => activityTotals.byChannel[c] > 0)
     .map((c) => `${CHANNEL_LABELS[c]} ${activityTotals.byChannel[c]}`)
-    .join(" Â· ");
+    .join(" Ã‚Â· ");
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Activity & funnel â€” last 7 days"
+        title="Activity & funnel Ã¢â‚¬â€ last 7 days"
         description={<>
           Team activity and this week&apos;s new-business
           funnel. Days are in the dashboard timezone.
@@ -109,10 +112,10 @@ export default async function ActivityPage() {
       {leads.ok ? (
         <Card>
           <CardHeader
-            title="New leads by source â€” last 7 days"
+            title="New leads by source Ã¢â‚¬â€ last 7 days"
             action={
               <TextLink href="/drill/leads_7d">
-                {leads.leads.length} leads Â· see the list
+                {leads.leads.length} leads Ã‚Â· see the list
               </TextLink>
             }
           />
@@ -148,7 +151,7 @@ export default async function ActivityPage() {
         <Note className="px-0 pb-0">
           Texts come from Quo, the same source as dials. &ldquo;Other
           channels&rdquo; is every touch that is not a dial, an email or a text
-          â€” the DMs a rep logged plus meetings, demos and visits.
+          Ã¢â‚¬â€ the DMs a rep logged plus meetings, demos and visits.
           {dmSplit ? <> DMs this week: {dmSplit}.</> : null}
         </Note>
       </Section>
@@ -157,7 +160,7 @@ export default async function ActivityPage() {
         {roleDaily.flatMap((r) => [(
           <Card key={r.role}>
             <CardHeader
-              title={`${r.label} â€” daily activity vs target`}
+              title={`${r.label} Ã¢â‚¬â€ daily activity vs target`}
               action={<span>{r.dailyAverage} of {r.activityTarget} a day</span>}
             />
             <CardBody>
@@ -165,8 +168,8 @@ export default async function ActivityPage() {
             </CardBody>
             <Note>
               {r.people.length
-                ? <>{r.people.join(", ")} Â· every channel stacked to one
-                    total against the {r.activityTarget}/day target Â· calls from{" "}
+                ? <>{r.people.join(", ")} Ã‚Â· every channel stacked to one
+                    total against the {r.activityTarget}/day target Ã‚Â· calls from{" "}
                     {r.callSource === "quo"
                       ? "Quo (every dial)"
                       : "HubSpot logged calls"}
@@ -184,14 +187,14 @@ export default async function ActivityPage() {
         ])}
       </div>
 
-      <Section title={<>Full funnel â€” {cohortSize} deals created this week</>}>
+      <Section title={<>Full funnel Ã¢â‚¬â€ {cohortSize} deals created this week</>}>
         <StatGrid cols={4}>
           {funnel.map((f) => (
             <Stat
               key={f.label}
               label={f.label}
               value={f.count}
-              sub={f.convFromPrev === null ? "top of funnel" : `${f.convFromPrev}% from prev Â· ${f.convFromTop}% of leads`}
+              sub={f.convFromPrev === null ? "top of funnel" : `${f.convFromPrev}% from prev Ã‚Â· ${f.convFromTop}% of leads`}
               tone={f.label === "Closed Won" ? "good" : undefined}
               href={FUNNEL_HREF[f.label]}
             />
@@ -206,8 +209,8 @@ export default async function ActivityPage() {
           rows={funnel.map((f) => [
             f.label,
             String(f.count),
-            f.convFromPrev === null ? "â€”" : `${f.convFromPrev}%`,
-            f.convFromTop === null ? "â€”" : `${f.convFromTop}%`,
+            f.convFromPrev === null ? "Ã¢â‚¬â€" : `${f.convFromPrev}%`,
+            f.convFromTop === null ? "Ã¢â‚¬â€" : `${f.convFromTop}%`,
           ])}
         />
       </Card>
@@ -218,7 +221,7 @@ export default async function ActivityPage() {
             title="MQLs per month"
             action={
               <span>
-                {progress(thisMonth(retention.monthlyMqls)?.count ?? 0, settings.monthlyMqlsTarget)}
+                {progress(thisMonth(retention.monthlyMqls)?.count ?? 0, targets.mqls)}
                 {" \u00b7 "}
                 {retention.monthlyMqls.reduce((s, m) => s + m.count, 0)} MQLs all-time
               </span>
@@ -227,10 +230,10 @@ export default async function ActivityPage() {
           <CardBody>
             {retention.mqlSourcesKnown ? (
               <MonthlyMqlChart data={retention.monthlyMqls} series={LEAD_SOURCES}
-                target={settings.monthlyMqlsTarget} drillBase="/drill/month_mqls_" />
+                target={targets.mqls} drillBase="/drill/month_mqls_" />
             ) : (
               <MonthlyBarChart data={retention.monthlyMqls} color="hsl(210 70% 50%)"
-                target={settings.monthlyMqlsTarget} drillBase="/drill/month_mqls_" />
+                target={targets.mqls} drillBase="/drill/month_mqls_" />
             )}
           </CardBody>
           <Note>
@@ -253,7 +256,7 @@ export default async function ActivityPage() {
             title="Demos run per month"
             action={
               <span>
-                {progress(thisMonth(retention.monthlyDemos)?.count ?? 0, settings.monthlyDemosTarget)}
+                {progress(thisMonth(retention.monthlyDemos)?.count ?? 0, targets.demos)}
                 {" \u00b7 "}
                 {retention.monthlyDemos.reduce((s, m) => s + m.count, 0)} demos all-time
               </span>
@@ -261,7 +264,7 @@ export default async function ActivityPage() {
           />
           <CardBody>
             <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42%)"
-              target={settings.monthlyDemosTarget} drillBase="/drill/month_demos_" />
+              target={targets.demos} drillBase="/drill/month_demos_" />
           </CardBody>
           <Note>
             A demo counts only once someone actually attended it. Calendly is the
@@ -277,7 +280,7 @@ export default async function ActivityPage() {
             title="New firms per month"
             action={
               <span>
-                {progress(thisMonth(retention.monthlyNewFirms)?.count ?? 0, settings.monthlyNewFirmsTarget)}
+                {progress(thisMonth(retention.monthlyNewFirms)?.count ?? 0, targets.newFirms)}
                 {" \u00b7 "}
                 {retention.monthlyNewFirms.reduce((s, m) => s + m.count, 0)} firms all-time
               </span>
@@ -285,7 +288,7 @@ export default async function ActivityPage() {
           />
           <CardBody>
             <MonthlyNewFirmsChart data={retention.monthlyNewFirms}
-              target={settings.monthlyNewFirmsTarget} drillBase="/drill/month_firms_" />
+              target={targets.newFirms} drillBase="/drill/month_firms_" />
           </CardBody>
           <Note>
             A firm counts once, in the month it first signed up for the app or
@@ -304,14 +307,14 @@ export default async function ActivityPage() {
             title="Total cases submitted per month"
             action={
               <span>
-                {progress(thisMonth(retention.monthlyCases)?.count ?? 0, settings.monthlyCasesTarget)}
+                {progress(thisMonth(retention.monthlyCases)?.count ?? 0, targets.cases)}
                 {" \u00b7 "}
                 {retention.monthlyCases.reduce((s, m) => s + m.count, 0)} cases all-time
               </span>
             }
           />
           <CardBody>
-            <MonthlyBarChart data={retention.monthlyCases} target={settings.monthlyCasesTarget}
+            <MonthlyBarChart data={retention.monthlyCases} target={targets.cases}
               drillBase="/drill/month_cases_" />
           </CardBody>
         </Card>
@@ -323,14 +326,14 @@ export default async function ActivityPage() {
             title="Revenue per month"
             action={
               <span>
-                {progress(thisMonth(retention.monthlyRevenue)?.total ?? 0, settings.monthlyRevenueTarget, money)}
+                {progress(thisMonth(retention.monthlyRevenue)?.total ?? 0, targets.revenue, money)}
                 {" \u00b7 "}
                 {money(retention.monthlyRevenue.reduce((s, m) => s + m.total, 0))} all-time
               </span>
             }
           />
           <CardBody>
-            <MonthlyRevenueChart data={retention.monthlyRevenue} target={settings.monthlyRevenueTarget}
+            <MonthlyRevenueChart data={retention.monthlyRevenue} target={targets.revenue}
               drillBase="/drill/month_revenue_" />
           </CardBody>
           <Note>
@@ -347,10 +350,10 @@ export default async function ActivityPage() {
         </Card>
       </Section>
 
-      <Section title={<>Retention funnel â€” {freq.activatedFirms} activated firms</>}>
+      <Section title={<>Retention funnel Ã¢â‚¬â€ {freq.activatedFirms} activated firms</>}>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader title="Activation â†’ repeat â†’ retained" />
+            <CardHeader title="Activation Ã¢â€ â€™ repeat Ã¢â€ â€™ retained" />
             <CardBody>
               <FunnelChart data={retention.funnel.map((f) => ({ label: f.label, count: f.count }))} />
             </CardBody>
@@ -362,19 +365,19 @@ export default async function ActivityPage() {
               rows={retention.funnel.map((f) => [
                 f.label,
                 String(f.count),
-                f.convFromPrev === null ? "â€”" : `${f.convFromPrev}%`,
-                f.convFromTop === null ? "â€”" : `${f.convFromTop}%`,
+                f.convFromPrev === null ? "Ã¢â‚¬â€" : `${f.convFromPrev}%`,
+                f.convFromTop === null ? "Ã¢â‚¬â€" : `${f.convFromTop}%`,
               ])}
             />
           </Card>
         </div>
         <Note className="px-0 pb-0">
-          Activation = firm submitted â‰¥1 case. 2nd/3rd = firms with â‰¥2/â‰¥3 lifetime cases.
+          Activation = firm submitted Ã¢â€°Â¥1 case. 2nd/3rd = firms with Ã¢â€°Â¥2/Ã¢â€°Â¥3 lifetime cases.
           &ldquo;Active in N-day window&rdquo; = submitted an additional case in that window after the first case.
         </Note>
       </Section>
 
-      <Section title="Cohort retention â€” still a customer">
+      <Section title="Cohort retention Ã¢â‚¬â€ still a customer">
         <LogoRetention
           cohorts={retention.cohorts}
           monthCols={retention.monthCols}
@@ -398,7 +401,7 @@ export default async function ActivityPage() {
       </Section>
 
       {unitEcon ? (
-        <Section title={<>Unit economics â€” paid acquisition payback, {unitEcon.monthLabel}</>}>
+        <Section title={<>Unit economics Ã¢â‚¬â€ paid acquisition payback, {unitEcon.monthLabel}</>}>
           <UnitEconomics snap={unitEcon} observed={observedRetention(retention.cohorts)} />
         </Section>
       ) : null}
@@ -407,7 +410,7 @@ export default async function ActivityPage() {
         Funnel cohort = deals created in the last 7 days, shown at the furthest stage
         each has reached (Closed Won counts as passing every prior stage). Activity
         counts every logged call/email/meeting in the window.
-        <span className="mx-1">Â·</span>
+        <span className="mx-1">Ã‚Â·</span>
         <TextLink href={user.role === "cs" ? "/cs" : "/ae"}>
           Back to dashboard
         </TextLink>
