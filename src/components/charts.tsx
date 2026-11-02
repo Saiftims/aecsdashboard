@@ -256,6 +256,7 @@ export function BillingRetentionChart({
 export function MonthlyRevenueChart({
   data,
   target,
+  stretch,
   drillBase,
 }: {
   data: {
@@ -263,25 +264,28 @@ export function MonthlyRevenueChart({
     subscription: number; transactional: number;
   }[];
   target?: number;
+  /** Stretch goal, drawn as a second, amber dotted line above the target. */
+  stretch?: number;
   drillBase?: string;
 }) {
   const drillProps = useMonthDrill(data, drillBase);
   const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
-  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.total), 1);
+  const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.total), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 8, right: target ? 72 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 72 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis width={58} tick={{ fontSize: 11 }} domain={[0, Math.ceil(maxVal * 1.15)]}
                tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`} />
         {target ? targetLine(target, `Target ${money(target)}`) : null}
+        {stretch ? targetLine(stretch, `Stretch ${money(stretch)}`, C.amber) : null}
         <Tooltip
           formatter={(v, name) => [money(Number(v)), name]}
           labelFormatter={(label, payload) => {
             const d = payload?.[0]?.payload as { total: number; collected: number; modelled: number } | undefined;
             if (!d) return label;
-            return `${label} · ${money(d.total)}${d.modelled > 0 ? ` (${money(d.collected)} in Stripe, ${money(d.modelled)} estimated)` : ""}`;
+            return `${label} Â· ${money(d.total)}${d.modelled > 0 ? ` (${money(d.collected)} in Stripe, ${money(d.modelled)} estimated)` : ""}`;
           }}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -299,19 +303,22 @@ export function MonthlyMqlChart<K extends string>({
   data,
   series,
   target,
+  stretch,
   drillBase,
 }: {
   data: ({ month: string; key?: string; count: number } & Record<K, number>)[];
   series: { key: K; label: string; color: string }[];
   target?: number;
+  /** Stretch goal, drawn as a second, amber dotted line above the target. */
+  stretch?: number;
   drillBase?: string;
 }) {
   const drillProps = useMonthDrill(data, drillBase);
   const shown = series.filter((s) => data.some((d) => Number(d[s.key] ?? 0) > 0));
-  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
+  const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={36} domain={[0, Math.ceil(maxVal * 1.15)]} />
@@ -322,6 +329,7 @@ export function MonthlyMqlChart<K extends string>({
                radius={i === shown.length - 1 ? [4, 4, 0, 0] : undefined} />
         ))}
         {target ? targetLine(target, `Target ${target}`) : null}
+        {stretch ? targetLine(stretch, `Stretch ${stretch}`, C.amber) : null}
       </BarChart>
     </ResponsiveContainer>
   );
@@ -364,17 +372,20 @@ export function LeadSourceChart({
 export function MonthlyNewFirmsChart({
   data,
   target,
+  stretch,
   drillBase,
 }: {
   data: { month: string; key?: string; count: number; firstCase: number; signupOnly: number }[];
   target?: number;
+  /** Stretch goal, drawn as a second, amber dotted line above the target. */
+  stretch?: number;
   drillBase?: string;
 }) {
   const drillProps = useMonthDrill(data, drillBase);
-  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
+  const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
@@ -384,6 +395,7 @@ export function MonthlyNewFirmsChart({
         <Bar dataKey="signupOnly" stackId="firms" name="Signed up, no case yet" fill={C.violetSoft}
              radius={[4, 4, 0, 0]} />
         {target ? targetLine(target, `Target ${target}`) : null}
+        {stretch ? targetLine(stretch, `Stretch ${stretch}`, C.amber) : null}
       </BarChart>
     </ResponsiveContainer>
   );
@@ -391,14 +403,14 @@ export function MonthlyNewFirmsChart({
 
 /** Called as a function, not rendered as a component: recharts only draws
  * a ReferenceLine that is a direct child of the chart. */
-function targetLine(y: number, label: string) {
+function targetLine(y: number, label: string, colour: string = C.text) {
   return (
     <ReferenceLine
       y={y}
-      stroke={C.text}
+      stroke={colour}
       strokeDasharray="5 4"
       ifOverflow="extendDomain"
-      label={{ value: label, position: "right", fontSize: 10, fill: C.text }}
+      label={{ value: label, position: "right", fontSize: 10, fill: colour }}
     />
   );
 }
@@ -407,24 +419,28 @@ export function MonthlyBarChart({
   data,
   color = C.blue,
   target,
+  stretch,
   drillBase,
 }: {
   data: { month: string; key?: string; count: number }[];
   color?: string;
   target?: number;
+  /** Stretch goal, drawn as a second, amber dotted line above the target. */
+  stretch?: number;
   drillBase?: string;
 }) {
   const drillProps = useMonthDrill(data, drillBase);
-  const maxVal = Math.max(target ?? 0, ...data.map((d) => d.count), 1);
+  const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 8, right: target ? 64 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drillProps}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
         <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} />
         {target ? targetLine(target, `Target ${target}`) : null}
+        {stretch ? targetLine(stretch, `Stretch ${stretch}`, C.amber) : null}
       </BarChart>
     </ResponsiveContainer>
   );

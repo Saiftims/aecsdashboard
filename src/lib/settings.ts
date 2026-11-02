@@ -8,6 +8,8 @@ export interface MonthlyTargets {
   revenue: number;
 }
 
+export type MonthlyTargetEntry = Partial<MonthlyTargets> & { stretch?: Partial<MonthlyTargets> };
+
 export interface GtmSettings {
   defaultCasePrice: number;
   atRiskInactivityDays: number;
@@ -32,8 +34,10 @@ export interface GtmSettings {
   /** Per-month overrides of the five targets above, keyed "YYYY-MM" (owner,
    * 2026-11-02: the $500k-ARR-by-January plan sets different numbers for Nov,
    * Dec and Jan). A month with no entry falls back to the flat targets; a
-   * partial entry overrides only the fields it names. */
-  monthlyTargetsByMonth: Record<string, Partial<MonthlyTargets>>;
+   * partial entry overrides only the fields it names. An entry may also carry
+   * `stretch`, a second set of numbers drawn as a stretch line - no fallback,
+   * a month without one has no stretch. */
+  monthlyTargetsByMonth: Record<string, MonthlyTargetEntry>;
   /** Paid-ads spend for the current month and the share of MQLs (and so of new
    * subscribers) those ads get credit for. Drives CAC in the unit economics. */
   monthlyAdSpend: number;
@@ -97,10 +101,18 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   monthlyRevenueTarget: 44500,
   // Option B of the $500k-ARR plan (owner, 2026-11-02): hold October's pace -
   // 32% MQL->demo, 30% demo->plan at ~$385/mo, 3% monthly churn cushion -
-  // and the $41.7k MRR line is crossed on 31 January 2027.
+  // and the $41.7k MRR line is crossed on 31 January 2027. Stretch = Option A,
+  // the same line by 31 December (1.5x October on every input), so it only
+  // exists for November and December.
   monthlyTargetsByMonth: {
-    "2026-11": { mqls: 240, demos: 75, newFirms: 24, cases: 110, revenue: 27500 },
-    "2026-12": { mqls: 240, demos: 77, newFirms: 25, cases: 140, revenue: 36000 },
+    "2026-11": {
+      mqls: 240, demos: 75, newFirms: 24, cases: 110, revenue: 27500,
+      stretch: { mqls: 350, demos: 110, newFirms: 35, cases: 120, revenue: 29000 },
+    },
+    "2026-12": {
+      mqls: 240, demos: 77, newFirms: 25, cases: 140, revenue: 36000,
+      stretch: { mqls: 350, demos: 115, newFirms: 36, cases: 160, revenue: 42000 },
+    },
     "2027-01": { mqls: 250, demos: 80, newFirms: 26, cases: 165, revenue: 44500 },
   },
   monthlyAdSpend: 7500,
@@ -240,17 +252,30 @@ export async function loadSettings(): Promise<GtmSettings> {
 }
 
 /** The five monthly targets in force for a YYYY-MM month: the ledger entry
- * for that exact month (only the fields it names) over the flat settings. */
-export function monthlyTargetsFor(settings: GtmSettings, month: string): MonthlyTargets {
+ * for that exact month (only the fields it names) over the flat settings.
+ * `stretch` holds only the stretch figures the entry names - a field that is
+ * missing or not above the committed target is left undefined, so the chart
+ * draws no line for it. */
+export function monthlyTargetsFor(
+  settings: GtmSettings, month: string,
+): MonthlyTargets & { stretch: Partial<MonthlyTargets> } {
   const o = settings.monthlyTargetsByMonth[month] ?? {};
   const n = (v: unknown, fallback: number) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : fallback);
-  return {
+  const t: MonthlyTargets = {
     mqls: n(o.mqls, settings.monthlyMqlsTarget),
     demos: n(o.demos, settings.monthlyDemosTarget),
     newFirms: n(o.newFirms, settings.monthlyNewFirmsTarget),
     cases: n(o.cases, settings.monthlyCasesTarget),
     revenue: n(o.revenue, settings.monthlyRevenueTarget),
   };
+  const s = o.stretch ?? {};
+  const up = (v: unknown, committed: number) => (Number(v) > committed ? Number(v) : undefined);
+  const stretch: Partial<MonthlyTargets> = {};
+  for (const k of ["mqls", "demos", "newFirms", "cases", "revenue"] as const) {
+    const v = up(s[k], t[k]);
+    if (v !== undefined) stretch[k] = v;
+  }
+  return { ...t, stretch };
 }
 
 /** Monthly people cost for a YYYY-MM month: the ledger entry in force (latest
