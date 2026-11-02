@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import {
-  DailyActivityChart, FunnelChart, LeadSourceChart, MonthlyBarChart, MonthlyMqlChart,
+  DailyActivityChart, FunnelChart, MonthlyBarChart, MonthlyMqlChart,
   MonthlyNewFirmsChart,
   MonthlyRevenueChart,
 } from "@/components/charts";
@@ -114,31 +114,9 @@ export default async function ActivityPage() {
         </StatGrid>
       </Section>
 
-      {leads.ok ? (
-        <Card>
-          <CardHeader
-            title="New leads by source — last 7 days"
-            action={
-              <TextLink href="/drill/leads_7d">
-                {leads.leads.length} leads · see the list
-              </TextLink>
-            }
-          />
-          <CardBody>
-            <LeadSourceChart data={leads.daily} series={LEAD_SOURCES} drillHref="/drill/leads_7d" />
-          </CardBody>
-          <Note>
-            Every lead counted once, wherever it landed: new sales-pipeline deals,
-            every Meta ad-form submission read directly from Meta (including ones
-            nobody has turned into a deal yet), and sheet rows that never reached
-            HubSpot. Meta form fills are split by FlyTech&rsquo;s screening:
-            &ldquo;qualified&rdquo; is anyone FlyTech put on its lead sheet, &ldquo;unqualified&rdquo;
-            is a submission Meta has that the sheet does not {"\u2014"} both are MQLs.
-            &ldquo;Existing lead came back&rdquo; is someone already in HubSpot filling the
-            form or booking again {"\u2014"} intent, not a new person. Case intakes and activation deals are not leads.
-          </Note>
-        </Card>
-      ) : null}
+      {/* The daily "New leads by source" chart was removed here on 2026-11-02
+          (owner: "this is not needed"); the 7-day tile above and the monthly
+          MQL chart below still read the same `collectLeads` definition. */}
 
       <Section title="Activity (7 days)">
         <StatGrid cols={5}>
