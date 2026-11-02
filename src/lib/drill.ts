@@ -23,7 +23,7 @@ export interface DrillRow {
   when?: string | null;
   nextStep?: string | null;
   nextStepDate?: string | null;
-  /** Most recent logged activity: "Call Â· Alex Â· Aug 6". */
+  /** Most recent logged activity: "Call · Alex · Aug 6". */
   lastTouch?: string | null;
 }
 
@@ -55,7 +55,7 @@ const KIND_LABEL: Record<string, string> = {
   note: "Note", task: "Task", call: "Call", email: "Email", meeting: "Meeting",
 };
 
-/** "Call Â· Alex Â· Aug 6" for the freshest activity on the deal (or its firm). */
+/** "Call · Alex · Aug 6" for the freshest activity on the deal (or its firm). */
 function lastTouchLabel(ctx: Ctx, d: DealRow): string | null {
   const a = ctx.lastActivityByTarget.get(d.hubspot_id) ??
     (d.company_hubspot_id
@@ -66,7 +66,7 @@ function lastTouchLabel(ctx: Ctx, d: DealRow): string | null {
   const when = new Date(a.occurred_at).toLocaleDateString("en-US", {
     month: "short", day: "numeric",
   });
-  return `${kind} Â· ${who} Â· ${when}`;
+  return `${kind} · ${who} · ${when}`;
 }
 
 /** Covered = future task scheduled OR touched within the grace window OR a
@@ -173,7 +173,7 @@ function cohort(ctx: Ctx): DealRow[] {
 const funnelReached = (rank: number, label: string) => (ctx: Ctx) =>
   cohort(ctx)
     .filter((d) => (FUNNEL_RANK[d.stage ?? ""] ?? 0) >= rank)
-    .map((d) => dealRow(ctx, d, `${d.stage_label} Â· reached ${label}`));
+    .map((d) => dealRow(ctx, d, `${d.stage_label} · reached ${label}`));
 
 const METRICS: Record<string, { label: string; rows: (ctx: Ctx) => DrillRow[] }> = {
   leads_assigned: {
@@ -446,7 +446,7 @@ async function cohortDrill(key: string): Promise<DrillResult | null> {
   const last = (m: typeof c.members[number]) => m.retained[m.retained.length - 1] ?? true;
   const day = (iso: string | null) => iso ? new Date(iso).toLocaleDateString() : null;
   return {
-    label: `Retention cohort â€” ${c.label} Â· ${c.firms} firm(s) ` +
+    label: `Retention cohort — ${c.label} · ${c.firms} firm(s) ` +
       `(${c.subscribers} subscription, ${c.transactional} transactional)`,
     rows: [...c.members].sort((a, b) => Number(last(b)) - Number(last(a))).map((m) => ({
       title: m.name,
@@ -456,9 +456,9 @@ async function cohortDrill(key: string): Promise<DrillResult | null> {
           ? (m.billing === "subscription" ? "still on plan" : "retained (case in last 90 days)")
           : (m.billing === "subscription"
             ? `cancelled${m.planEnd ? ` ${day(m.planEnd)}` : ""}`
-            : `churned (no case in 90 days${m.lastCaseAt ? ` Â· last ${day(m.lastCaseAt)}` : ""})`),
+            : `churned (no case in 90 days${m.lastCaseAt ? ` · last ${day(m.lastCaseAt)}` : ""})`),
         m.lastCaseAt ? `last case ${day(m.lastCaseAt)}` : "no cases",
-      ].join(" Â· "),
+      ].join(" · "),
       companyId: m.id,
       when: `${c.key}-01T00:00:00Z`,
     })),
@@ -478,7 +478,7 @@ async function revenueDrill(metric: string): Promise<DrillResult | null> {
   const verb = dollars ? "billed" : "submitted";
   const row = (m: RetentionMember): DrillRow => {
     const series = m.months
-      .map((v, i) => `M${i} ${v === null ? "â€”" : unit(v)}`).join(" â†’ ");
+      .map((v, i) => `M${i} ${v === null ? "—" : unit(v)}`).join(" → ");
     return {
       title: m.name,
       subtitle: [
@@ -486,7 +486,7 @@ async function revenueDrill(metric: string): Promise<DrillResult | null> {
         `first ${verb} ${m.cohortLabel}`,
         series,
         m.lapsed ? (dollars ? "STOPPED PAYING" : "STOPPED USING") : null,
-      ].filter(Boolean).join(" Â· "),
+      ].filter(Boolean).join(" · "),
       companyId: m.id,
       when: `${m.cohortKey}-01T00:00:00Z`,
     };
@@ -499,9 +499,9 @@ async function revenueDrill(metric: string): Promise<DrillResult | null> {
     if (!c) return null;
     const lapsed = c.members.filter((m) => m.lapsed).length;
     return {
-      label: `${dollars ? "Revenue" : "Usage"} cohort â€” ${c.label} Â· ${c.firms} firm(s), ` +
+      label: `${dollars ? "Revenue" : "Usage"} cohort — ${c.label} · ${c.firms} firm(s), ` +
              `${unit(c.base)} in month 0` +
-             (lapsed ? ` Â· ${lapsed} since stopped` : ""),
+             (lapsed ? ` · ${lapsed} since stopped` : ""),
       rows: c.members.map(row),
     };
   }
@@ -516,8 +516,8 @@ async function revenueDrill(metric: string): Promise<DrillResult | null> {
     ? `${unit(report.mrr)}/month combined`
     : `${stopped} stopped ${dollars ? "billing" : "submitting"}`;
   return {
-    label: `${kind === "subscription" ? "Subscription" : "Transactional"} firms â€” ` +
-           `${dollars ? "dollars" : "usage"} Â· ${members.length} Â· ${tail}`,
+    label: `${kind === "subscription" ? "Subscription" : "Transactional"} firms — ` +
+           `${dollars ? "dollars" : "usage"} · ${members.length} · ${tail}`,
     rows: members.map(row),
   };
 }
@@ -547,14 +547,14 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
     const bar = rows.find((r) => r.key === key);
     if (!bar) return null;
     return {
-      label: `Revenue â€” ${monthLabel} Â· ${money(bar.total)}`,
+      label: `Revenue — ${monthLabel} · ${money(bar.total)}`,
       rows: (firms.get(key) ?? []).map((f) => ({
         title: firmName(f.companyId) ?? (f.companyId ? f.companyId : "No firm matched"),
         subtitle: [
           f.subscription ? `${money(f.subscription)} subscription` : null,
           f.transactional ? `${money(f.transactional)} transactional` : null,
           f.modelled ? `${money(f.modelled)} of it estimated (not in Stripe)` : null,
-        ].filter(Boolean).join(" Â· "),
+        ].filter(Boolean).join(" · "),
         companyId: f.companyId,
         when: `${key}-01T00:00:00Z`,
       })),
@@ -566,7 +566,7 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
     const d = deal.get(dealId);
     return {
       title: d?.name ?? dealId,
-      subtitle: [detail, d?.stage_label].filter(Boolean).join(" Â· "),
+      subtitle: [detail, d?.stage_label].filter(Boolean).join(" · "),
       companyId: d?.company_hubspot_id ?? null,
       dealId,
       when: at,
@@ -585,16 +585,16 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
       .filter(([, n]) => n > 0)
       .map(([l, n]) => `${n} ${l.toLowerCase()}`).join(", ");
     return {
-      label: `MQLs (new leads) â€” ${monthLabel} Â· ${list.length} (${split})`,
+      label: `MQLs (new leads) — ${monthLabel} · ${list.length} (${split})`,
       rows: list.map((l) => l.dealId
-        ? { ...dealRowFor(l.dealId, l.at, `${label.get(l.source)} Â· ${l.detail}`), title: deal.get(l.dealId)?.name ?? l.name }
-        : { title: l.name, subtitle: `${label.get(l.source)} Â· ${l.detail}`, dealId: null, when: l.at }),
+        ? { ...dealRowFor(l.dealId, l.at, `${label.get(l.source)} · ${l.detail}`), title: deal.get(l.dealId)?.name ?? l.name }
+        : { title: l.name, subtitle: `${label.get(l.source)} · ${l.detail}`, dealId: null, when: l.at }),
     };
   }
   if (kind === "demos") {
     const list = byDateDesc(monthMembers.demos[key] ?? []);
     return {
-      label: `Demos run â€” ${monthLabel} Â· ${list.length}`,
+      label: `Demos run — ${monthLabel} · ${list.length}`,
       rows: list.map((x) => dealRowFor(x.dealId, x.at, "demo attended")),
     };
   }
@@ -623,7 +623,7 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
     const signupOnly = list.filter((x) => !x.firstCaseAt).length;
     const day = (iso: string) => new Date(iso).toLocaleDateString();
     return {
-      label: `New firms â€” ${monthLabel} Â· ${list.length} ` +
+      label: `New firms — ${monthLabel} · ${list.length} ` +
         `(${list.length - signupOnly} submitted a case, ${signupOnly} signed up only)`,
       rows: list.map((x) => ({
         title: firmName(x.companyId) ?? x.companyId,
@@ -632,7 +632,7 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
           x.signedUpAt ? `signed up ${day(x.signedUpAt)}` : "no app signup (intake)",
           x.firstCaseAt ? `first case ${day(x.firstCaseAt)}` : null,
           `${company.get(x.companyId)?.cases_lifetime ?? 0} lifetime case(s)`,
-        ].filter(Boolean).join(" Â· "),
+        ].filter(Boolean).join(" · "),
         companyId: x.companyId,
         when: x.at,
       })),
@@ -649,7 +649,7 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
     perFirm.set(k, f);
   }
   return {
-    label: `Cases submitted â€” ${monthLabel} Â· ${list.length} from ${perFirm.size} firm(s)`,
+    label: `Cases submitted — ${monthLabel} · ${list.length} from ${perFirm.size} firm(s)`,
     rows: [...perFirm.values()].sort((a, b) => b.n - a.n).map((f) => ({
       title: firmName(f.companyId) ?? (f.companyId ?? "No firm (analyst-worked case)"),
       subtitle: `${f.n} case${f.n === 1 ? "" : "s"} this month`,
@@ -669,10 +669,10 @@ async function leadsDrill(): Promise<DrillResult | null> {
     .filter(([, n]) => n > 0)
     .map(([l, n]) => `${n} ${l.toLowerCase()}`).join(", ");
   return {
-    label: `New leads â€” last 7 days Â· ${report.leads.length} (${split})`,
+    label: `New leads — last 7 days · ${report.leads.length} (${split})`,
     rows: report.leads.map((l) => ({
       title: l.name,
-      subtitle: `${label.get(l.source)} Â· ${l.detail}`,
+      subtitle: `${label.get(l.source)} · ${l.detail}`,
       dealId: l.dealId,
       when: l.at,
     })),
@@ -684,15 +684,15 @@ async function speedToLeadDrill(): Promise<DrillResult | null> {
   if (!r.ok) return null;
   const label = new Map(LEAD_SOURCES.map((s) => [s.key, s.label]));
   return {
-    label: `Speed to lead â€” last ${r.days} days Â· ${r.total} inbound leads, ${r.touched} touched, median ${fmtHours(r.medianHours)}`,
+    label: `Speed to lead — last ${r.days} days · ${r.total} inbound leads, ${r.touched} touched, median ${fmtHours(r.medianHours)}`,
     rows: r.leads.map((l) => ({
       title: l.name,
-      subtitle: `${label.get(l.source)} Â· ${l.detail}`,
+      subtitle: `${label.get(l.source)} · ${l.detail}`,
       dealId: l.dealId,
       when: l.arrivedAt,
       lastTouch: l.hours === null
-        ? `Not yet touched Â· waiting ${fmtHours(l.waitingHours)}`
-        : `${CHANNEL_WORD[l.channel!]} Â· ${l.by} Â· ${fmtHours(l.hours)} after the form`,
+        ? `Not yet touched · waiting ${fmtHours(l.waitingHours)}`
+        : `${CHANNEL_WORD[l.channel!]} · ${l.by} · ${fmtHours(l.hours)} after the form`,
     })),
   };
 }
@@ -707,15 +707,15 @@ async function demosPerLeadDrill(): Promise<DrillResult | null> {
     pending: "demo on the deal, credit not yet stamped",
   };
   return {
-    label: `Demos per qualified lead â€” last ${r.weeks.length} weeks Â· ${r.leads.length} qualified leads, ${booked} with a demo (${pctOf(r.leads.length ? booked / r.leads.length : null)})`,
+    label: `Demos per qualified lead — last ${r.weeks.length} weeks · ${r.leads.length} qualified leads, ${booked} with a demo (${pctOf(r.leads.length ? booked / r.leads.length : null)})`,
     rows: r.leads.map((l) => ({
       title: l.name,
-      subtitle: `${label.get(l.source)} Â· ${l.detail}`,
+      subtitle: `${label.get(l.source)} · ${l.detail}`,
       dealId: l.dealId,
       when: l.arrivedAt,
       lastTouch: l.booked
-        ? `Demo Â· ${who[l.bookedBy ?? "pending"]}${l.bookedAt ? ` Â· ${l.bookedAt.slice(0, 10)}` : ""}`
-        : `No demo Â· ${l.stage ? SALES_STAGE_LABELS[l.stage] ?? l.stage : "no deal"}`,
+        ? `Demo · ${who[l.bookedBy ?? "pending"]}${l.bookedAt ? ` · ${l.bookedAt.slice(0, 10)}` : ""}`
+        : `No demo · ${l.stage ? SALES_STAGE_LABELS[l.stage] ?? l.stage : "no deal"}`,
     })),
   };
 }

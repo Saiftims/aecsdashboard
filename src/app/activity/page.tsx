@@ -77,12 +77,12 @@ export default async function ActivityPage() {
   const dmSplit = OTHER_CHANNELS
     .filter((c) => activityTotals.byChannel[c] > 0)
     .map((c) => `${CHANNEL_LABELS[c]} ${activityTotals.byChannel[c]}`)
-    .join(" Ãƒâ€šÃ‚Â· ");
+    .join(" · ");
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Activity & funnel ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â last 7 days"
+        title="Activity & funnel — last 7 days"
         description={<>
           Team activity and this week&apos;s new-business
           funnel. Days are in the dashboard timezone.
@@ -117,10 +117,10 @@ export default async function ActivityPage() {
       {leads.ok ? (
         <Card>
           <CardHeader
-            title="New leads by source ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â last 7 days"
+            title="New leads by source — last 7 days"
             action={
               <TextLink href="/drill/leads_7d">
-                {leads.leads.length} leads Ãƒâ€šÃ‚Â· see the list
+                {leads.leads.length} leads · see the list
               </TextLink>
             }
           />
@@ -156,7 +156,7 @@ export default async function ActivityPage() {
         <Note className="px-0 pb-0">
           Texts come from Quo, the same source as dials. &ldquo;Other
           channels&rdquo; is every touch that is not a dial, an email or a text
-          ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the DMs a rep logged plus meetings, demos and visits.
+          — the DMs a rep logged plus meetings, demos and visits.
           {dmSplit ? <> DMs this week: {dmSplit}.</> : null}
         </Note>
       </Section>
@@ -165,7 +165,7 @@ export default async function ActivityPage() {
         {roleDaily.flatMap((r) => [(
           <Card key={r.role}>
             <CardHeader
-              title={`${r.label} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â daily activity vs target`}
+              title={`${r.label} — daily activity vs target`}
               action={<span>{r.dailyAverage} of {r.activityTarget} a day</span>}
             />
             <CardBody>
@@ -173,8 +173,8 @@ export default async function ActivityPage() {
             </CardBody>
             <Note>
               {r.people.length
-                ? <>{r.people.join(", ")} Ãƒâ€šÃ‚Â· every channel stacked to one
-                    total against the {r.activityTarget}/day target Ãƒâ€šÃ‚Â· calls from{" "}
+                ? <>{r.people.join(", ")} · every channel stacked to one
+                    total against the {r.activityTarget}/day target · calls from{" "}
                     {r.callSource === "quo"
                       ? "Quo (every dial)"
                       : "HubSpot logged calls"}
@@ -192,14 +192,14 @@ export default async function ActivityPage() {
         ])}
       </div>
 
-      <Section title={<>Full funnel ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {cohortSize} deals created this week</>}>
+      <Section title={<>Full funnel — {cohortSize} deals created this week</>}>
         <StatGrid cols={4}>
           {funnel.map((f) => (
             <Stat
               key={f.label}
               label={f.label}
               value={f.count}
-              sub={f.convFromPrev === null ? "top of funnel" : `${f.convFromPrev}% from prev Ãƒâ€šÃ‚Â· ${f.convFromTop}% of leads`}
+              sub={f.convFromPrev === null ? "top of funnel" : `${f.convFromPrev}% from prev · ${f.convFromTop}% of leads`}
               tone={f.label === "Closed Won" ? "good" : undefined}
               href={FUNNEL_HREF[f.label]}
             />
@@ -214,8 +214,8 @@ export default async function ActivityPage() {
           rows={funnel.map((f) => [
             f.label,
             String(f.count),
-            f.convFromPrev === null ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â" : `${f.convFromPrev}%`,
-            f.convFromTop === null ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â" : `${f.convFromTop}%`,
+            f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
+            f.convFromTop === null ? "—" : `${f.convFromTop}%`,
           ])}
         />
       </Card>
@@ -359,10 +359,10 @@ export default async function ActivityPage() {
         </Card>
       </Section>
 
-      <Section title={<>Retention funnel ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {freq.activatedFirms} activated firms</>}>
+      <Section title={<>Retention funnel — {freq.activatedFirms} activated firms</>}>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader title="Activation ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ repeat ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ retained" />
+            <CardHeader title="Activation → repeat → retained" />
             <CardBody>
               <FunnelChart data={retention.funnel.map((f) => ({ label: f.label, count: f.count }))} />
             </CardBody>
@@ -374,19 +374,19 @@ export default async function ActivityPage() {
               rows={retention.funnel.map((f) => [
                 f.label,
                 String(f.count),
-                f.convFromPrev === null ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â" : `${f.convFromPrev}%`,
-                f.convFromTop === null ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â" : `${f.convFromTop}%`,
+                f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
+                f.convFromTop === null ? "—" : `${f.convFromTop}%`,
               ])}
             />
           </Card>
         </div>
         <Note className="px-0 pb-0">
-          Activation = firm submitted ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¥1 case. 2nd/3rd = firms with ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¥2/ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¥3 lifetime cases.
+          Activation = firm submitted ≥1 case. 2nd/3rd = firms with ≥2/≥3 lifetime cases.
           &ldquo;Active in N-day window&rdquo; = submitted an additional case in that window after the first case.
         </Note>
       </Section>
 
-      <Section title="Cohort retention ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â still a customer">
+      <Section title="Cohort retention — still a customer">
         <LogoRetention
           cohorts={retention.cohorts}
           monthCols={retention.monthCols}
@@ -410,7 +410,7 @@ export default async function ActivityPage() {
       </Section>
 
       {unitEcon ? (
-        <Section title={<>Unit economics ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â paid acquisition payback, {unitEcon.monthLabel}</>}>
+        <Section title={<>Unit economics — paid acquisition payback, {unitEcon.monthLabel}</>}>
           <UnitEconomics snap={unitEcon} observed={observedRetention(retention.cohorts)} />
         </Section>
       ) : null}
@@ -419,7 +419,7 @@ export default async function ActivityPage() {
         Funnel cohort = deals created in the last 7 days, shown at the furthest stage
         each has reached (Closed Won counts as passing every prior stage). Activity
         counts every logged call/email/meeting in the window.
-        <span className="mx-1">Ãƒâ€šÃ‚Â·</span>
+        <span className="mx-1">·</span>
         <TextLink href={user.role === "cs" ? "/cs" : "/ae"}>
           Back to dashboard
         </TextLink>

@@ -285,7 +285,7 @@ export function MonthlyRevenueChart({
           labelFormatter={(label, payload) => {
             const d = payload?.[0]?.payload as { total: number; collected: number; modelled: number } | undefined;
             if (!d) return label;
-            return `${label} Â· ${money(d.total)}${d.modelled > 0 ? ` (${money(d.collected)} in Stripe, ${money(d.modelled)} estimated)` : ""}`;
+            return `${label} · ${money(d.total)}${d.modelled > 0 ? ` (${money(d.collected)} in Stripe, ${money(d.modelled)} estimated)` : ""}`;
           }}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} />
