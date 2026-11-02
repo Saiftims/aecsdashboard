@@ -82,7 +82,7 @@ export default async function ActivityPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Activity & funnel — last 7 days"
+        title="Activity & funnel — last 7 days"
         description={<>
           Team activity and this week&apos;s new-business
           funnel. Days are in the dashboard timezone.
@@ -117,7 +117,7 @@ export default async function ActivityPage() {
       {leads.ok ? (
         <Card>
           <CardHeader
-            title="New leads by source — last 7 days"
+            title="New leads by source — last 7 days"
             action={
               <TextLink href="/drill/leads_7d">
                 {leads.leads.length} leads · see the list
@@ -156,7 +156,7 @@ export default async function ActivityPage() {
         <Note className="px-0 pb-0">
           Texts come from Quo, the same source as dials. &ldquo;Other
           channels&rdquo; is every touch that is not a dial, an email or a text
-          — the DMs a rep logged plus meetings, demos and visits.
+          — the DMs a rep logged plus meetings, demos and visits.
           {dmSplit ? <> DMs this week: {dmSplit}.</> : null}
         </Note>
       </Section>
@@ -165,7 +165,7 @@ export default async function ActivityPage() {
         {roleDaily.flatMap((r) => [(
           <Card key={r.role}>
             <CardHeader
-              title={`${r.label} — daily activity vs target`}
+              title={`${r.label} — daily activity vs target`}
               action={<span>{r.dailyAverage} of {r.activityTarget} a day</span>}
             />
             <CardBody>
@@ -192,7 +192,7 @@ export default async function ActivityPage() {
         ])}
       </div>
 
-      <Section title={<>Full funnel — {cohortSize} deals created this week</>}>
+      <Section title={<>Full funnel — {cohortSize} deals created this week</>}>
         <StatGrid cols={4}>
           {funnel.map((f) => (
             <Stat
@@ -214,8 +214,8 @@ export default async function ActivityPage() {
           rows={funnel.map((f) => [
             f.label,
             String(f.count),
-            f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
-            f.convFromTop === null ? "—" : `${f.convFromTop}%`,
+            f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
+            f.convFromTop === null ? "—" : `${f.convFromTop}%`,
           ])}
         />
       </Card>
@@ -359,7 +359,7 @@ export default async function ActivityPage() {
         </Card>
       </Section>
 
-      <Section title={<>Retention funnel — {freq.activatedFirms} activated firms</>}>
+      <Section title={<>Retention funnel — {freq.activatedFirms} activated firms</>}>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader title="Activation → repeat → retained" />
@@ -374,8 +374,8 @@ export default async function ActivityPage() {
               rows={retention.funnel.map((f) => [
                 f.label,
                 String(f.count),
-                f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
-                f.convFromTop === null ? "—" : `${f.convFromTop}%`,
+                f.convFromPrev === null ? "—" : `${f.convFromPrev}%`,
+                f.convFromTop === null ? "—" : `${f.convFromTop}%`,
               ])}
             />
           </Card>
@@ -386,7 +386,7 @@ export default async function ActivityPage() {
         </Note>
       </Section>
 
-      <Section title="Cohort retention — still a customer">
+      <Section title="Cohort retention — still a customer">
         <LogoRetention
           cohorts={retention.cohorts}
           monthCols={retention.monthCols}
@@ -410,7 +410,7 @@ export default async function ActivityPage() {
       </Section>
 
       {unitEcon ? (
-        <Section title={<>Unit economics — paid acquisition payback, {unitEcon.monthLabel}</>}>
+        <Section title={<>Unit economics — paid acquisition payback, {unitEcon.monthLabel}</>}>
           <UnitEconomics snap={unitEcon} observed={observedRetention(retention.cohorts)} />
         </Section>
       ) : null}
