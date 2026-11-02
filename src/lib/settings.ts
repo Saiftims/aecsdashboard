@@ -107,7 +107,8 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   monthlyTargetsByMonth: {
     "2026-11": {
       mqls: 240, demos: 75, newFirms: 24, cases: 110, revenue: 27500,
-      stretch: { mqls: 350, demos: 110, newFirms: 35, cases: 120, revenue: 29000 },
+      // Revenue stretch raised from Option A's $29k to $35k (owner, 2026-11-02).
+      stretch: { mqls: 350, demos: 110, newFirms: 35, cases: 120, revenue: 35000 },
     },
     "2026-12": {
       mqls: 240, demos: 77, newFirms: 25, cases: 140, revenue: 36000,
