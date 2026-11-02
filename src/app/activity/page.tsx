@@ -65,7 +65,11 @@ export default async function ActivityPage() {
     rows.find((r) => r.month === thisMonthLabel);
   // This month's targets: the per-month ledger if it names the month, else
   // the flat settings (owner, 2026-11-02: Nov/Dec/Jan carry the $500k-ARR plan).
-  const targets = monthlyTargetsFor(settings, new Date().toISOString().slice(0, 7));
+  const thisMonthKey = new Date().toISOString().slice(0, 7);
+  const targets = monthlyTargetsFor(settings, thisMonthKey);
+  // Bookings still on the calendar, split at the end of this month.
+  const upcomingThisMonth = retention.upcomingDemos.filter((d) => d.demoDate.startsWith(thisMonthKey)).length;
+  const upcomingLater = retention.upcomingDemos.length - upcomingThisMonth;
   const progress = (value: number, target: number, stretch?: number, fmt = (n: number) => String(n)) =>
     `${fmt(value)} of ${fmt(target)} this month (${Math.round((value / target) * 100)}%)`
     + (stretch ? ` \u00b7 stretch ${fmt(stretch)} (${Math.round((value / stretch) * 100)}%)` : "");
@@ -252,27 +256,54 @@ export default async function ActivityPage() {
       </Section>
 
       <Section title="Monthly demos">
-        <Card>
-          <CardHeader
-            title="Demos run per month"
-            action={
-              <span>
-                {progress(thisMonth(retention.monthlyDemos)?.count ?? 0, targets.demos, targets.stretch.demos)}
-                {" \u00b7 "}
-                {retention.monthlyDemos.reduce((s, m) => s + m.count, 0)} demos all-time
-              </span>
-            }
-          />
-          <CardBody>
-            <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42%)"
-              target={targets.demos} stretch={targets.stretch.demos} drillBase="/drill/month_demos_" />
-          </CardBody>
-          <Note>
-            A demo counts only once someone actually attended it. Calendly is the
-            source of truth: a no-show stays a booking and never lands here, and
-            demos still on the calendar are not counted until they happen.
-          </Note>
-        </Card>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader
+              title="Demos booked per month"
+              action={
+                <span>
+                  {progress(thisMonth(retention.monthlyDemosBooked)?.count ?? 0, targets.demos, targets.stretch.demos)}
+                  {" \u00b7 "}
+                  {upcomingThisMonth} on the calendar for the rest of {thisMonthLabel.slice(0, 3)}
+                  {upcomingLater > 0 ? `, ${upcomingLater} later` : ""}
+                </span>
+              }
+            />
+            <CardBody>
+              <MonthlyBarChart data={retention.monthlyDemosBooked} color="hsl(160 55% 42%)"
+                target={targets.demos} stretch={targets.stretch.demos} drillBase="/drill/month_booked_" />
+            </CardBody>
+            <Note>
+              The month a demo was BOOKED {"\u2014"} first entry into Demo Scheduled,
+              whether a rep booked it or the lead self-served on Calendly {"\u2014"} whatever
+              date the demo itself is set for. This is the number the monthly target is set
+              in. Before Aug 2026 nothing was stamped at booking, so the demos that ran
+              stand in there.
+            </Note>
+          </Card>
+          <Card>
+            <CardHeader
+              title="Demos run per month"
+              action={
+                <span>
+                  {thisMonth(retention.monthlyDemos)?.count ?? 0} so far this month
+                  {" \u00b7 "}
+                  {retention.monthlyDemos.reduce((s, m) => s + m.count, 0)} demos all-time
+                </span>
+              }
+            />
+            <CardBody>
+              <MonthlyBarChart data={retention.monthlyDemos} color="hsl(160 55% 42% / 0.55)"
+                drillBase="/drill/month_demos_" />
+            </CardBody>
+            <Note>
+              A demo counts here only once someone actually attended it. Calendly is the
+              source of truth: a no-show stays a booking and never lands here, and
+              demos still on the calendar are not counted until they happen {"\u2014"} so
+              this month always trails the booked chart until the month is over.
+            </Note>
+          </Card>
+        </div>
       </Section>
 
       <Section title="Monthly new firms">

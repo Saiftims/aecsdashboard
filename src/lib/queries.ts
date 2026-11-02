@@ -1187,6 +1187,12 @@ export interface RetentionReport {
   monthlyCases: MonthCount[];
   monthlyNewFirms: (MonthCount & { firstCase: number; signupOnly: number })[];
   monthlyDemos: MonthCount[];
+  /** Demos booked per month by `sw_demo_booked_at` - the number the monthly
+   * demo TARGET is set in (owner, 2026-11-02). Months before the stamp exists
+   * (Aug 2026) show the demos that ran instead, as the investor feed does. */
+  monthlyDemosBooked: MonthCount[];
+  /** Bookings still on the calendar: `sw_demo_date` today or later. */
+  upcomingDemos: { dealId: string; demoDate: string }[];
   /** Leads per month, split by source - the same definition and the same
    * code path as the 7-day "New leads" tile (`collectLeads`). */
   monthlyMqls: (MonthCount & Record<LeadSource, number>)[];
@@ -1223,6 +1229,9 @@ export interface MonthCount {
 export interface MonthMembers {
   mqls: Record<string, Lead[]>;
   demos: Record<string, { dealId: string; at: string }[]>;
+  /** Demos BOOKED in the month (first entry into Demo Scheduled,
+   * `sw_demo_booked_at`), whenever the demo itself is due to run. */
+  demosBooked: Record<string, { dealId: string; at: string; demoDate: string | null; selfServe: boolean }[]>;
   newFirms: Record<string, {
     companyId: string; at: string; signedUpAt: string | null; firstCaseAt: string | null;
   }[]>;
@@ -1463,7 +1472,7 @@ export async function retentionReport(): Promise<RetentionReport> {
   // monthly case volume (ALL dated cases, including unattributed analyst-worked
   // rows with no firm). Those still count in the month total; they are excluded
   // from byFirm above so they cannot create a phantom cohort.
-  const monthMembers: MonthMembers = { mqls: {}, demos: {}, newFirms: {}, cases: {} };
+  const monthMembers: MonthMembers = { mqls: {}, demos: {}, demosBooked: {}, newFirms: {}, cases: {} };
   const push = <T,>(into: Record<string, T[]>, key: string, item: T) => {
     (into[key] ??= []).push(item);
   };
@@ -1559,6 +1568,41 @@ export async function retentionReport(): Promise<RetentionReport> {
     push(monthMembers.demos, utcMonthKey(when), { dealId: d.hubspot_id, at: raw });
   }
   const monthlyDemos = countSeries(monthMembers.demos);
+
+  // ---- demos BOOKED per calendar month, and what is still on the calendar ----
+  // The monthly demo target is a bookings number (owner, 2026-11-02: "theres
+  // a bunch of demos booked in november that i dont see on the dashboard" -
+  // the run chart above cannot show a demo until it has happened).
+  // `sw_demo_booked_at` is the FIRST entry into Demo Scheduled, write-once,
+  // stamped by the agent from Aug 2026 (DEMO_CREDIT_START); blank `by` =
+  // self-serve. Months before the stamp exists take the demos that ran, so
+  // the bar is never below the run chart there.
+  const DEMO_BOOKED_FROM = "2026-08";
+  const todayKey = new Date(nowMs).toISOString().slice(0, 10);
+  const upcomingDemos: { dealId: string; demoDate: string }[] = [];
+  for (const d of demoRows ?? []) {
+    if (d.is_activation) continue;
+    const props = (d.properties ?? {}) as Record<string, unknown>;
+    const demoDate = typeof props.sw_demo_date === "string" && props.sw_demo_date
+      ? props.sw_demo_date.slice(0, 10) : null;
+    if (demoDate && demoDate >= todayKey) upcomingDemos.push({ dealId: d.hubspot_id, demoDate });
+    const at = props.sw_demo_booked_at;
+    if (typeof at !== "string" || !at) continue;
+    const when = new Date(at);
+    if (Number.isNaN(when.getTime())) continue;
+    push(monthMembers.demosBooked, utcMonthKey(when), {
+      dealId: d.hubspot_id, at, demoDate, selfServe: !props.sw_demo_booked_by,
+    });
+  }
+  upcomingDemos.sort((a, b) => a.demoDate.localeCompare(b.demoDate));
+  const bookedByKey = new Map(countSeries(monthMembers.demosBooked).map((r) => [r.key, r.count]));
+  const monthlyDemosBooked: MonthCount[] = [...new Set([
+    ...monthlyDemos.map((r) => r.key), ...bookedByKey.keys(),
+  ])].sort().map((key) => {
+    const ran = monthlyDemos.find((r) => r.key === key)?.count ?? 0;
+    const booked = bookedByKey.get(key) ?? 0;
+    return { month: shortMonthLabel(key), key, count: key < DEMO_BOOKED_FROM ? Math.max(ran, booked) : booked };
+  });
 
   const monthlyRevenue = await monthlyRevenueSeries();
 
@@ -1691,6 +1735,7 @@ export async function retentionReport(): Promise<RetentionReport> {
 
   return {
     funnel, cohorts, monthCols, monthlyCases, monthlyNewFirms, monthlyDemos,
+    monthlyDemosBooked, upcomingDemos,
     monthlyMqls, mqlSourcesKnown, monthlyRevenue, monthMembers,
     frequency: {
       activatedFirms: activated,
