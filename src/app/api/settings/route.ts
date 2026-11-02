@@ -18,7 +18,7 @@ const ALLOWED_KEYS = new Set([
   "monthly_cases_target", "monthly_revenue_target", "monthly_targets_by_month",
   // Ledgers the Settings page already shows but this list never admitted, so
   // their Save button answered 400 until 2026-11-02.
-  "people_cost_by_month", "agency_cost_by_month", "rep_roles", "segment_config",
+  "people_cost_by_month", "agency_cost_by_month",
   "monthly_ad_spend", "ad_spend_by_month", "ad_lead_share_pct", "monthly_team_cost", "gross_margin_pct",
 ]);
 
