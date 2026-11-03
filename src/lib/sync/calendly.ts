@@ -6,17 +6,23 @@
  * sw_demo_completed in HubSpot when they changed. Stage moves remain with the
  * Python reconcile agent - this only keeps demo DATES fresh.
  *
- * It also REMOVES hiring interviews. Saif's "30 Minute Meeting" Calendly
- * event type is the interview calendar for job candidates, and HubSpot's own
- * Calendly integration turns every booking on it into a contact, a meeting
- * and a Demo Scheduled deal - 13 "self-serve demos" in the week of
- * 2026-10-26 were candidates (owner, 2026-10-28: "those are interviews for
- * candidates, exclude them and remove they are not leads"). Events on an
- * interview event type never stamp a demo date, and their invitees' contact,
- * deals, meetings and notes are deleted from HubSpot and from this cache on
- * every run (incremental sync never purges a deleted record on its own). A
- * candidate who is ALSO a worked lead - a company on the contact, or a deal
- * past Demo Scheduled - is left alone and reported for a human to look at.
+ * It also REMOVES hiring interviews. Saif's Calendly is the interview
+ * calendar for job candidates, and HubSpot's own Calendly integration turns
+ * every booking on it into a contact, a meeting and a Demo Scheduled deal -
+ * 13 "self-serve demos" in the week of 2026-10-26 were candidates (owner,
+ * 2026-10-28: "those are interviews for candidates, exclude them and remove
+ * they are not leads"; 2026-11-03: "exclude all mqls that came in via my
+ * calendar ... permanently remove"). The key is the HOST, not an event type:
+ * any event Saif hosts, on any event type, active OR cancelled (a candidate
+ * who cancels still got a HubSpot contact), starting on/after
+ * INTERVIEW_FROM. The date matters: before August 2026 Saif ran real demos
+ * on the same calendar - Choate, Morrin, Peerali, Pedram and other Closed
+ * Won firms booked it in May-July - and those must stay. Interview events
+ * never stamp a demo date, and their invitees' contact, deals, meetings and
+ * notes are deleted from HubSpot and from this cache on every run
+ * (incremental sync never purges a deleted record on its own). A candidate
+ * who is ALSO a worked lead - a company on the contact, or a deal past Demo
+ * Scheduled - is left alone and reported for a human to look at.
  */
 import { hsDelete, hsUpdateProperties } from "@/lib/hubspot/client";
 import { SALES_STAGES } from "@/lib/hubspot/stages";
@@ -24,13 +30,29 @@ import { must, selectAll, supabaseService } from "@/lib/supabase/server";
 
 const BASE = "https://api.calendly.com";
 
-/** Calendly event types that are NOT demos. The Python agent carries the same
- * list in `config.INTERVIEW_EVENT_TYPES`; change both. If Saif ever runs a
- * real demo it has to be on a different event type. */
+/** Calendly HOSTS whose bookings are interviews, not demos, by user URI and
+ * seat email (Calendly reports both on `event_memberships`). The Python agent
+ * carries the same values in `config.INTERVIEW_HOSTS`; change both. If Saif
+ * ever runs a real demo it has to be on someone else's calendar. */
+export const INTERVIEW_HOSTS = new Set<string>([
+  "https://api.calendly.com/users/730d7bc1-d175-4a94-adff-f41f902a7f00", // Saif Altimimi
+  "saif@silentwitness.ai",
+]);
+/** Saif's bookings before this date were real demos (owner-confirmed by the
+ * Closed Won firms on them); from here on his calendar is hiring only. */
+export const INTERVIEW_FROM = "2026-08-01";
+/** Event types that are interviews regardless of host (kept for the agent's
+ * older key; Saif's "30 Minute Meeting"). */
 export const INTERVIEW_EVENT_TYPES = new Set<string>([
-  // Saif Altimimi - "30 Minute Meeting" (candidate interviews)
   "https://api.calendly.com/event_types/7beedd22-a712-4834-b0d5-b2dbf8edc742",
 ]);
+
+export function isInterviewEvent(ev: CalendlyEvent): boolean {
+  if (ev.start_time < INTERVIEW_FROM) return false;
+  if (INTERVIEW_EVENT_TYPES.has(ev.event_type ?? "")) return true;
+  return (ev.event_memberships ?? []).some((m) =>
+    INTERVIEW_HOSTS.has(m.user ?? "") || INTERVIEW_HOSTS.has((m.user_email ?? "").toLowerCase()));
+}
 
 /** Deals a candidate may hold and still be purged: nothing a human has
  * progressed. Demo Completed or later means someone ran a demo - review. */
@@ -44,6 +66,7 @@ interface CalendlyEvent {
   start_time: string;
   status: string;
   event_type?: string;
+  event_memberships?: { user?: string; user_email?: string; user_name?: string }[];
 }
 
 async function calGet<T>(path: string, params: Record<string, string>): Promise<T> {
@@ -92,6 +115,28 @@ export async function syncCalendly() {
     next = data.pagination?.next_page ?? null;
   }
 
+  // 1b. every interview-host event since INTERVIEW_FROM, cancelled included -
+  // HubSpot's integration makes the contact at booking time, so a candidate
+  // who cancels still has to be removed, and the 60-day window above would
+  // age out an August booking that is still in the CRM.
+  const seen = new Set(events.map((e) => e.uri));
+  for (const host of INTERVIEW_HOSTS) {
+    if (!host.startsWith("http")) continue;
+    for (const status of ["active", "canceled"]) {
+      let page: string | null = "/scheduled_events";
+      let p: Record<string, string> | null = {
+        organization: org, user: host, count: "100", status, min_start_time: `${INTERVIEW_FROM}T00:00:00Z`,
+      };
+      while (page) {
+        const data: { collection: CalendlyEvent[]; pagination?: { next_page?: string | null } } =
+          await calGet(page, p ?? {});
+        p = null;
+        for (const ev of data.collection) if (!seen.has(ev.uri)) { seen.add(ev.uri); events.push(ev); }
+        page = data.pagination?.next_page ?? null;
+      }
+    }
+  }
+
   // 2. invitees per event -> per-email aggregation
   const people = new Map<string, { nextUpcoming: Date | null; lastAttended: Date | null }>();
   // Interview invitees: email -> name as booked (HubSpot's integration names
@@ -99,7 +144,9 @@ export async function syncCalendly() {
   const interviewees = new Map<string, string>();
   for (const ev of events) {
     const start = new Date(ev.start_time);
-    const isInterview = INTERVIEW_EVENT_TYPES.has(ev.event_type ?? "");
+    const isInterview = isInterviewEvent(ev);
+    // A cancelled event only matters for the interview purge.
+    if (!isInterview && ev.status !== "active") continue;
     const invitees = await calGet<{
       collection: { email?: string; name?: string; no_show?: unknown }[];
     }>(`${ev.uri}/invitees`, { count: "100" });
