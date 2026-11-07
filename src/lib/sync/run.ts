@@ -71,8 +71,23 @@ async function alertOnEdge(sb: Sb, kind: RecordedKind, runId: number | null, sta
 }
 
 /** Open a `sync_runs` row. Throws if the bookkeeping write fails - a run
- * nobody can see is not a run. */
+ * nobody can see is not a run.
+ *
+ * First closes out any row of this kind still `running` from more than 15
+ * minutes ago. A function that hits Vercel's 300 s limit is killed before
+ * `finishRun`, so its row stays `running` forever; eight such zombies from
+ * July-October were what the health page's "stuck runs" trap listed on
+ * 2026-11-07. A new run of the same kind starting is proof the old one is
+ * dead, so it is recorded as the timeout it was. Best-effort: a failure here
+ * must not stop the real run. */
 async function startRun(sb: Sb, kind: RecordedKind): Promise<number> {
+  const cutoff = new Date(Date.now() - 15 * 60_000).toISOString();
+  await sb.from("sync_runs").update({
+    status: "error", finished_at: new Date().toISOString(),
+    error: "never finished (killed at the function time limit); closed when the next run started",
+  }).eq("kind", kind).eq("status", "running").lt("started_at", cutoff)
+    .then(({ error }) => { if (error) console.error(`sync_runs close zombies (${kind}):`, error.message); });
+
   const { data } = await must(
     `sync_runs insert (${kind})`,
     sb.from("sync_runs").insert({ kind, status: "running" }).select("id").single(),
