@@ -191,6 +191,24 @@ export async function syncCases() {
 
   const byDomain = new Map<string, CompanyLite>();
   const byAccount = new Map<string, string>(); // acc -> hubspot_company_id
+  // Email -> the company a rep linked that HubSpot contact to. The domain
+  // fallback below cannot place a customer on a personal address (Lordex
+  // Spine Center, trav815@aol.com: five cases in a week with no firm,
+  // 2026-11-07) even when HubSpot already has the contact on the company.
+  const contactRows = await selectAll<{ email: string | null; company_hubspot_id: string | null }>(
+    "contacts", "email, company_hubspot_id", "hubspot_id");
+  const byContactEmail = new Map<string, string>();
+  for (const c of contactRows) {
+    if (c.email && c.company_hubspot_id) byContactEmail.set(c.email.trim().toLowerCase(), c.company_hubspot_id);
+  }
+  /** Firm for an email: its domain's company, else the company its HubSpot
+   * contact is associated with (how personal-email customers get placed). */
+  const companyForEmail = (email: string | null): string | null => {
+    const dom = emailDomain(email);
+    const co = dom ? byDomain.get(dom) : undefined;
+    if (co) return co.hubspot_id;
+    return (email && byContactEmail.get(email.trim().toLowerCase())) || null;
+  };
   // Branded intake portal slug -> firm. A public submission carries no account
   // and no person, so its portal host is the only thing identifying the firm.
   // Indexed on both the domain stem and the squashed company name, because the
@@ -386,14 +404,14 @@ export async function syncCases() {
     if (EXCLUDED_CASE_IDS.includes(pc.caseId)) continue;
     stats.posthog += 1;
 
-    // firm match: account id -> else creator email domain (bootstrap mapping)
+    // firm match: account id -> else creator email (domain, then the HubSpot
+    // contact's company) with a bootstrap mapping
     let companyId: string | null =
       (pc.accountId && byAccount.get(pc.accountId)) || null;
     if (!companyId) {
-      const dom = emailDomain(pc.creatorEmail);
-      const co = dom ? byDomain.get(dom) : undefined;
-      if (co) {
-        companyId = co.hubspot_id;
+      const viaEmail = companyForEmail(pc.creatorEmail);
+      if (viaEmail) {
+        companyId = viaEmail;
         if (pc.accountId && !byAccount.has(pc.accountId)) {
           byAccount.set(pc.accountId, companyId);
           bootstrapMappings.push({
@@ -523,10 +541,9 @@ export async function syncCases() {
     if (existingById.has(caseId)) continue;
     let companyId: string | null = (it.accountId && byAccount.get(it.accountId)) || null;
     if (!companyId) {
-      const dom = emailDomain(it.email);
-      const co = dom ? byDomain.get(dom) : undefined;
-      if (co) {
-        companyId = co.hubspot_id;
+      const viaEmail = companyForEmail(it.email);
+      if (viaEmail) {
+        companyId = viaEmail;
         if (it.accountId && !byAccount.has(it.accountId)) {
           byAccount.set(it.accountId, companyId);
           bootstrapMappings.push({ sw_account_id: it.accountId, hubspot_company_id: companyId, confirmed: false });
@@ -736,8 +753,7 @@ export async function syncCases() {
     let companyId: string | null = byAccount.get(s.accountId) ?? null;
     if (!companyId) {
       const dom = emailDomain(s.email);
-      const co = dom ? byDomain.get(dom) : undefined;
-      if (co) companyId = co.hubspot_id;
+      companyId = companyForEmail(s.email);
       // Unmapped + real firm domain -> create a lightweight company + MQL deal.
       if (!companyId && dom && !FREE_EMAIL_DOMAINS.has(dom)) {
         const name = companyNameFromDomain(dom);

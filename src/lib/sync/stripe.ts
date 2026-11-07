@@ -130,6 +130,17 @@ export async function syncStripe() {
     const n = normName(c.name);
     if (n && !byName.has(n)) byName.set(n, c.hubspot_id);
   }
+  // Billing email -> the company its HubSpot contact is linked to. Catches a
+  // payer on a personal address whose contact a rep has already placed on the
+  // firm, without a manual EMAIL_TO_COMPANY_NAME entry each time (Lordex Spine
+  // Center, trav815@aol.com, Solo plan unmatched since 2026-10, found 2026-11-07).
+  const contactRows = await selectAll<{ email: string | null; company_hubspot_id: string | null }>(
+    "contacts", "email, company_hubspot_id", "hubspot_id");
+  const byContactEmail = new Map<string, string>();
+  for (const c of contactRows) {
+    const e = (c.email ?? "").trim().toLowerCase();
+    if (e && c.company_hubspot_id && !byContactEmail.has(e)) byContactEmail.set(e, c.company_hubspot_id);
+  }
 
   const match = (email: string, name: string | null | undefined) => {
     const manual = EMAIL_TO_COMPANY_NAME[email];
@@ -142,6 +153,8 @@ export async function syncStripe() {
       const id = byDomain.get(dom);
       if (id) return { id, method: "domain" };
     }
+    const viaContact = email ? byContactEmail.get(email) : undefined;
+    if (viaContact) return { id: viaContact, method: "contact" };
     const id = byName.get(normName(name));
     if (id) return { id, method: "name" };
     return { id: null as string | null, method: "none" };

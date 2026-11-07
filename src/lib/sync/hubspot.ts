@@ -98,6 +98,12 @@ function assocIds(o: HsObject, kind: string): string[] {
   return (o.associations?.[kind]?.results ?? []).map((r) => r.id);
 }
 
+/** A HubSpot date property as something Postgres accepts for timestamptz:
+ * the ISO string, or null. HubSpot sends "" for a cleared date. */
+function ts(v: string | null | undefined): string | null {
+  return v && !Number.isNaN(Date.parse(v)) ? v : null;
+}
+
 /** Whether an object's association list for `kind` is actually known.
  *
  * A full sync gets associations inline and HubSpot simply omits the key when an
@@ -281,9 +287,13 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
         ...(assocKnown(d, "contacts")
           ? { primary_contact_id: assocIds(d, "contacts")[0] ?? null } : {}),
         properties: d.properties,
-        hs_created_at: d.properties.createdate,
-        hs_updated_at: d.properties.hs_lastmodifieddate,
-        closed_at: d.properties.closedate,
+        // HubSpot returns "" (not null) for a date a rep has cleared, and
+        // Postgres rejects "" for timestamptz. One cleared close date failed
+        // every deals upsert for 38 h from 2026-11-05 22:59 and froze the
+        // whole HubSpot cache. Never pass an empty string to a timestamp.
+        hs_created_at: ts(d.properties.createdate),
+        hs_updated_at: ts(d.properties.hs_lastmodifieddate),
+        closed_at: ts(d.properties.closedate),
         updated_at: new Date().toISOString(),
       })),
       { onConflict: "hubspot_id" },
@@ -347,8 +357,8 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
           contact_hubspot_id: assocIds(a, "contacts")[0] ?? null,
           deal_hubspot_id: assocIds(a, "deals")[0] ?? null,
           company_hubspot_id: assocIds(a, "companies")[0] ?? null,
-          occurred_at: a.properties.hs_timestamp,
-          due_at: kind === "tasks" ? a.properties.hs_timestamp : null,
+          occurred_at: ts(a.properties.hs_timestamp),
+          due_at: kind === "tasks" ? ts(a.properties.hs_timestamp) : null,
           completed:
             kind === "tasks" ? a.properties.hs_task_status === "COMPLETED" : null,
           properties: a.properties,

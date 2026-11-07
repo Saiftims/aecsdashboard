@@ -410,6 +410,18 @@ async function findContactByEmail(email: string): Promise<HsObject | null> {
   return r.results[0] ?? null;
 }
 
+/** Fallback match when the lead's email is unusable: a contact carrying the
+ * same phone number (HubSpot normalises phone values on search). */
+async function findContactByPhone(phone: string): Promise<HsObject | null> {
+  try {
+    const r = await hsRequest<{ results: HsObject[] }>("POST", "/crm/v3/objects/contacts/search", {
+      filterGroups: [{ filters: [{ propertyName: "phone", operator: "EQ", value: phone }] }],
+      properties: CONTACT_PROPS.split(","), limit: 5,
+    });
+    return r.results[0] ?? null;
+  } catch { return null; }
+}
+
 /** One Meta submission -> HubSpot. Idempotent on the HubSpot side:
  *  - contact: found by email (HubSpot's own Facebook integration usually
  *    creates it within minutes of the submission, and HubSpot dedupes contacts
@@ -425,12 +437,18 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
   }
   const name = (lead.full_name ?? "").trim();
   const { first, last } = splitName(name || email.split("@")[0]);
+  // An address HubSpot refused (a typo like "gmail.fon" or ".coms"). The lead
+  // is still real and still has a phone number, so it goes in without the
+  // email and the address as typed is kept in the note for a rep to fix.
+  // Before this, three such leads were retried every minute for days, never
+  // reached Alex, and sat in the health check as "not in HubSpot".
+  let rejectedEmail: string | null = null;
   try {
     let contact = await findContactByEmail(email);
     let contactCreated = false;
     if (!contact) {
-      const created = await hsCreateObject("contacts", {
-        email, firstname: first, lastname: last,
+      const baseProps = {
+        firstname: first, lastname: last,
         ...(lead.phone ? { phone: lead.phone } : {}),
         ...(lead.company ? { company: lead.company } : {}),
         hubspot_owner_id: ALEX_OWNER_ID,
@@ -438,9 +456,19 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
         ...(lead.form_name ? { sw_lead_source_detail: lead.form_name } : {}),
         ...(lead.campaign_name ? { sw_original_campaign: lead.campaign_name } : {}),
         ...metaPlacementProps(lead),
-      });
-      if (created.skipped) return { error: true, note: "HubSpot writes disabled (HUBSPOT_APPLY)" };
-      if (!created.ok) {
+      };
+      let created = await hsCreateObject("contacts", { email, ...baseProps });
+      if (!created.ok && !created.skipped && /INVALID_EMAIL/.test(created.error ?? "")) {
+        rejectedEmail = email;
+        // Same person may already exist from an earlier form fill: match on phone.
+        contact = lead.phone ? await findContactByPhone(lead.phone) : null;
+        if (!contact) created = await hsCreateObject("contacts", baseProps);
+      }
+      if (contact) {
+        // found by phone above
+      } else if (created.skipped) {
+        return { error: true, note: "HubSpot writes disabled (HUBSPOT_APPLY)" };
+      } else if (!created.ok) {
         // Lost the race with the Facebook integration: "Contact already
         // exists. Existing ID: 123". Use it.
         const m = /Existing ID:\s*(\d+)/.exec(created.error ?? "");
@@ -449,7 +477,7 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
         if (!contact) return { error: true, note: `contact ${m[1]} exists but cannot be read` };
       } else {
         contactCreated = true;
-        contact = { id: created.id!, properties: { email } } as HsObject;
+        contact = { id: created.id!, properties: rejectedEmail ? {} : { email } } as HsObject;
       }
     } else {
       // HubSpot's FB integration usually gets here first and leaves the
@@ -479,6 +507,7 @@ export async function pushLeadToHubSpot(lead: PendingLead, stage: string = SALES
       .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join("\n");
     const body = [
       `Meta ad form submitted ${lead.created_time.slice(0, 16).replace("T", " ")} UTC`,
+      rejectedEmail ? `EMAIL AS TYPED (HubSpot rejected it as invalid - please correct on the contact): ${rejectedEmail}` : "",
       `Form: ${lead.form_name ?? "?"}`, lead.ad_name ? `Ad: ${lead.ad_name}` : "",
       lead.campaign_name ? `Campaign: ${lead.campaign_name}` : "",
       lead.company ? `Company: ${lead.company}` : "", lead.phone ? `Phone: ${lead.phone}` : "",

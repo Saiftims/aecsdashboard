@@ -21,8 +21,12 @@ export async function GET(req: NextRequest) {
   const health = await systemHealth();
   const sb = supabaseService();
 
-  const red = health.problems.filter((p) => p.level === "bad").map((p) => p.text).sort();
-  const signature = red.join("\n");
+  const redItems = health.problems.filter((p) => p.level === "bad");
+  const red = redItems.map((p) => p.text).sort();
+  // Compare WHICH problems are red, not their wording: the text carries live
+  // numbers ("36.0 h ago", then "36.5 h ago"), so keying on it re-posted the
+  // same outage on every 30-minute tick for as long as it lasted.
+  const signature = redItems.map((p) => p.key).sort().join("\n");
   const { data: prev } = await sb.from("settings").select("value").eq("key", "health_alert_signature").maybeSingle();
   const previous = (prev?.value as string | null) ?? "";
 

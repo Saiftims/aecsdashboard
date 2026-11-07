@@ -65,8 +65,10 @@ export interface SystemHealth {
   watermarks: Watermark[];
   checks: Check[];
   tokens: TokenStatus[];
-  /** Red + amber items as one-line strings, for Slack and the summary bar. */
-  problems: { level: Level; text: string }[];
+  /** Red + amber items as one-line strings, for Slack and the summary bar.
+   * `key` identifies the problem without its live numbers (ages, counts), so
+   * the Slack alert can tell "same outage, older" from "new outage". */
+  problems: { level: Level; key: string; text: string }[];
 }
 
 const MIN = 60_000;
@@ -143,12 +145,24 @@ export async function systemHealth(): Promise<SystemHealth> {
   type Run = { kind: string; status: "ok" | "error" | "running"; started_at: string; finished_at: string | null; stats: Record<string, unknown> | null; error: string | null };
   type Co = { hubspot_id: string; name: string | null; domain: string | null; signed_up_at: string | null; first_case_at: string | null };
 
+  // Latest run and latest SUCCESSFUL run per kind, each as its own query. A
+  // single "last 400 runs" window covered about three hours once the Meta
+  // feed ran every minute, so a feed failing for longer than that had no
+  // successful run in view, read as "unknown" instead of red, and never made
+  // the Slack alert (HubSpot, 38 h of failed upserts, 2026-11-05 -> 07).
+  const runSelect = "kind, status, started_at, finished_at, stats, error";
+  const allKinds = FEEDS.flatMap((f) => f.kinds);
+  const latestRunsByKind = Promise.all(allKinds.flatMap((k) => [
+    sb.from("sync_runs").select(runSelect).eq("kind", k).order("started_at", { ascending: false }).limit(1),
+    sb.from("sync_runs").select(runSelect).eq("kind", k).eq("status", "ok").order("started_at", { ascending: false }).limit(1),
+  ])).then((rs) => rs.flatMap((r) => (r.data ?? []) as Run[]));
+
   const [
-    { data: runs }, companies, { data: cases }, { data: stripeCustomers }, { data: subs }, { data: metaLeads },
+    runs, companies, { data: cases }, { data: stripeCustomers }, { data: subs }, { data: metaLeads },
     { data: deals }, { data: lastQuo }, { data: lastPay }, { data: lastSpend }, { data: lastDeal }, { data: lastActivity },
-    { data: lastSignup }, { data: uiRows }, token, { data: caseInvoices },
+    { data: lastSignup }, { data: uiRows }, token, { data: caseInvoices }, { data: recentRuns },
   ] = await Promise.all([
-    sb.from("sync_runs").select("kind, status, started_at, finished_at, stats, error").order("started_at", { ascending: false }).limit(400),
+    latestRunsByKind,
     selectAll<Co>("companies", "hubspot_id, name, domain, signed_up_at, first_case_at", "hubspot_id"),
     sb.from("cases").select("case_id, sw_id, company_hubspot_id, submitted_date, source, creator_email").order("submitted_date", { ascending: false }).limit(2000),
     sb.from("stripe_customers").select("customer_id, email, name, company_hubspot_id, is_internal"),
@@ -165,12 +179,14 @@ export async function systemHealth(): Promise<SystemHealth> {
     sb.from("case_ui_usage").select("case_id").limit(1),
     metaTokenStatus(),
     sb.from("stripe_case_invoices").select("invoice_id, case_id, customer_id, case_name, company_hubspot_id, created_at, status, is_internal").order("created_at", { ascending: false }).limit(1000),
+    // Recent window only for the "stuck running" check below.
+    sb.from("sync_runs").select(runSelect).eq("status", "running").order("started_at", { ascending: false }).limit(50),
   ]);
 
   // ---- feeds ----
-  const runRows = (runs ?? []) as Run[];
+  const byStart = (a: Run, b: Run) => Date.parse(b.started_at) - Date.parse(a.started_at);
   const feeds: FeedStatus[] = FEEDS.map((f) => {
-    const mine = runRows.filter((r) => f.kinds.includes(r.kind));
+    const mine = runs.filter((r) => f.kinds.includes(r.kind)).sort(byStart);
     const last = mine[0] ?? null;
     const lastOk = mine.find((r) => r.status === "ok") ?? null;
     const okAt = lastOk ? (lastOk.finished_at ?? lastOk.started_at) : null;
@@ -309,7 +325,7 @@ export async function systemHealth(): Promise<SystemHealth> {
   // Meta leads with a deal but their person later paid under a different domain is not detectable here - skip.
 
   // Sync runs stuck in "running".
-  const stuck = runRows.filter((r) => r.status === "running" && now - Date.parse(r.started_at) > 15 * MIN);
+  const stuck = ((recentRuns ?? []) as Run[]).filter((r) => now - Date.parse(r.started_at) > 15 * MIN);
   mk("stuck_runs", "Sync runs stuck 'running'", "A run that never finished hit the 300 s function limit or crashed without recording - its kind may be silently stale.",
     "Look at the feed's last error; for Quo/cases a smaller window (incremental) usually fixes it.",
     stuck.slice(0, 20).map((r) => ({ id: `${r.kind}-${r.started_at}`, label: r.kind, detail: `started ${r.started_at.slice(0, 16).replace("T", " ")}` })), 1, 3);
@@ -321,10 +337,10 @@ export async function systemHealth(): Promise<SystemHealth> {
 
   const tokens = [token];
   const problems: SystemHealth["problems"] = [
-    ...feeds.filter((f) => f.level === "bad" || f.level === "warn").map((f) => ({ level: f.level, text: `${f.label}: ${f.note ?? "stale"}${f.lastError ? ` - ${f.lastError.slice(0, 160)}` : ""}` })),
-    ...watermarks.filter((w) => w.level === "bad").map((w) => ({ level: w.level, text: `${w.label}: ${w.latest ? fmtAge((w.ageHours ?? 0) * 60) : "never"}` })),
-    ...checks.filter((c) => c.level !== "ok").map((c) => ({ level: c.level, text: `${c.label}: ${c.count}` })),
-    ...tokens.filter((t) => t.level !== "ok").map((t) => ({ level: t.level, text: `${t.label}: ${t.note}` })),
+    ...feeds.filter((f) => f.level === "bad" || f.level === "warn").map((f) => ({ level: f.level, key: `feed:${f.key}`, text: `${f.label}: ${f.note ?? "stale"}${f.lastError ? ` - ${f.lastError.slice(0, 160)}` : ""}` })),
+    ...watermarks.filter((w) => w.level === "bad").map((w) => ({ level: w.level, key: `watermark:${w.key}`, text: `${w.label}: ${w.latest ? fmtAge((w.ageHours ?? 0) * 60) : "never"}` })),
+    ...checks.filter((c) => c.level !== "ok").map((c) => ({ level: c.level, key: `check:${c.key}`, text: `${c.label}: ${c.count}` })),
+    ...tokens.filter((t) => t.level !== "ok").map((t) => ({ level: t.level, key: `token:${t.key}`, text: `${t.label}: ${t.note}` })),
   ];
 
   return {
