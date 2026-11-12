@@ -93,3 +93,57 @@ describe("extraction parsing", () => {
     }
   });
 });
+
+describe("history import", async () => {
+  const { EXCLUDED_TITLE_RE, internalOnly, planProps } = await import("@/lib/sync/readai");
+  const { identityFromIdToken, meetingToPayload, pkcePair } = await import("@/lib/sync/readai-backfill");
+
+  it("filters standups, interviews and growth syncs by title, keeps customer calls", () => {
+    for (const t of ["Daily Standup", "Growth stand-up", "Interview - CS Manager", "Growth Sync", "Team sync"]) expect(EXCLUDED_TITLE_RE.test(t), t).toBe(true);
+    for (const t of ["Omega Law x Silent Witness", "Demo - Smith & Jones", "Growth plan review with Acme Injury", "Onboarding call"]) expect(EXCLUDED_TITLE_RE.test(t), t).toBe(false);
+  });
+
+  it("skips a meeting only when every attendee is provably ours", () => {
+    const ours = new Set(["chris@silentwitness.ai"]);
+    expect(internalOnly([{ email: "saif@silentwitness.ai" }, { email: "chris@silentwitness.ai" }, { name: "Read.ai Notetaker" }], ours)).toBe(true);
+    expect(internalOnly([{ email: "saif@silentwitness.ai" }, { name: "Dial-in caller" }], ours)).toBe(false);
+    expect(internalOnly([{ email: "saif@silentwitness.ai" }, { email: "jane@omegalaw.com" }], ours)).toBe(false);
+    expect(internalOnly([], ours)).toBe(false);
+  });
+
+  it("maps an API meeting onto the webhook payload shape", () => {
+    const p = meetingToPayload({
+      id: "01ABC", title: "Demo", start_time_ms: 1_762_000_000_000, end_time_ms: 1_762_003_600_000, platform: "zoom", report_url: "https://app.read.ai/x",
+      participants: [{ name: "Jane", email: "jane@omegalaw.com", attended: true }, { name: "Ghost", email: "g@x.com", attended: false }],
+      owner: { name: "Chris", email: "chris@silentwitness.ai" }, summary: "We talked.",
+      action_items: ["Send proposal", { text: "Book follow-up" }],
+      transcript: { turns: [{ speaker: { name: "Jane" }, text: "We use Filevine.", start_time_ms: 1_762_000_001_000 }] },
+    });
+    expect(p.session_id).toBe("01ABC");
+    expect(p.request_id).toBe("backfill:01ABC");
+    expect(p.start_time).toBe("2025-11-01T12:26:40.000Z");
+    expect(p.participants).toEqual([{ name: "Jane", email: "jane@omegalaw.com" }]);
+    expect(p.action_items).toEqual([{ text: "Send proposal" }, { text: "Book follow-up" }]);
+    expect(p.transcript?.speaker_blocks?.[0]).toMatchObject({ speaker: { name: "Jane" }, words: "We use Filevine." });
+  });
+
+  it("lets a newer call overwrite, an older call only fill blanks and never touch last-call fields", () => {
+    const current = { sw_case_management_system: "clio", sw_total_caseload: null, sw_last_call_date: "2026-10-01", sw_last_call_summary: "Oct call" };
+    const desired = { sw_case_management_system: "filevine", sw_total_caseload: 400, sw_last_call_date: "2026-03-01", sw_last_call_summary: "March call", sw_estimated_monthly_case_volume: undefined };
+    const older = planProps(current, desired, true, ["sw_last_call_date", "sw_last_call_summary"]);
+    expect(older.props).toEqual({ sw_total_caseload: 400 });
+    expect(older.fresh).toEqual(["sw_total_caseload"]);
+    const newer = planProps(current, desired, false, ["sw_last_call_date", "sw_last_call_summary"]);
+    expect(newer.set).toEqual(["sw_case_management_system", "sw_total_caseload", "sw_last_call_date", "sw_last_call_summary"]);
+    expect(newer.fresh).toEqual(["sw_total_caseload"]);
+  });
+
+  it("reads the account email out of the id_token and builds a valid PKCE pair", () => {
+    const payload = Buffer.from(JSON.stringify({ email: "Chris@SilentWitness.ai", name: "Chris" })).toString("base64url");
+    expect(identityFromIdToken(`h.${payload}.s`)).toEqual({ email: "chris@silentwitness.ai", name: "Chris" });
+    expect(identityFromIdToken(undefined)).toEqual({ email: null, name: null });
+    const { verifier, challenge } = pkcePair();
+    expect(verifier.length).toBeGreaterThanOrEqual(43);
+    expect(challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+});

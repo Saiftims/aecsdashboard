@@ -414,13 +414,68 @@ export function noteBody(p: ReadAiPayload, x: Extraction): string {
   return lines.filter(Boolean).join("\n");
 }
 
+/** What a call wrote to HubSpot, for the status report: `fresh` are
+ * properties that were empty before this call filled them. */
+export interface HubSpotWrites {
+  fields_set: number;
+  fields_new: number;
+  by_object: Record<string, { set: string[]; fresh: string[] }>;
+  note: "created" | "updated" | "none";
+  task: "created" | "kept" | "none";
+  older_call: boolean;
+}
+
+type Props = Record<string, string | number | null | undefined>;
+const hasValue = (v: unknown) => v !== null && v !== undefined && v !== "";
+const toTime = (v: string | null | undefined) => !v ? NaN : /^\d{10,}$/.test(v) ? Number(v) : Date.parse(v);
+
+/** Decide what to actually send for one object. `current` is what HubSpot
+ * holds now. When the call is older than the last call already recorded
+ * there (history import), it only fills blanks - a call from March must not
+ * overwrite what the firm said in October - and leaves the "last call"
+ * fields alone. */
+export function planProps(current: Record<string, string | null>, desired: Props, olderCall: boolean, lastCallFields: string[]): { props: Props; set: string[]; fresh: string[] } {
+  const props: Props = {};
+  const set: string[] = [];
+  const fresh: string[] = [];
+  for (const [k, v] of Object.entries(desired)) {
+    if (!hasValue(v)) continue;
+    const had = hasValue(current[k]);
+    if (olderCall && (had || lastCallFields.includes(k))) continue;
+    props[k] = v; set.push(k);
+    if (!had) fresh.push(k);
+  }
+  return { props, set, fresh };
+}
+
+async function currentProps(object: string, id: string, keys: string[]): Promise<Record<string, string | null>> {
+  const r = await hsRequest<HsObject>("GET", `/crm/v3/objects/${object}/${id}`, undefined, { properties: keys.join(",") }).catch(() => null);
+  return r?.properties ?? {};
+}
+
 async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior: { noteId: string | null; taskId: string | null }) {
   const callDate = (p.start_time ?? "").slice(0, 10) || undefined;
+  const callMs = toTime(callDate);
   const summary = x.summary.slice(0, 1000);
   const writes: string[] = [];
+  const acct: HubSpotWrites = { fields_set: 0, fields_new: 0, by_object: {}, note: "none", task: "none", older_call: false };
+
+  const apply = async (object: string, id: string, desired: Props, lastCallField: string, lastCallFields: string[]) => {
+    const cur = await currentProps(object, id, Object.keys(desired));
+    const lastMs = toTime(cur[lastCallField]);
+    const older = Number.isFinite(lastMs) && Number.isFinite(callMs) && lastMs > callMs;
+    if (older) acct.older_call = true;
+    const plan = planProps(cur, desired, older, lastCallFields);
+    const res = plan.set.length ? await hsUpdateProperties(object, id, plan.props) : { ok: true } as const;
+    if (res.ok) {
+      acct.fields_set += plan.set.length; acct.fields_new += plan.fresh.length;
+      acct.by_object[`${object}:${id}`] = { set: plan.set, fresh: plan.fresh };
+    }
+    writes.push(`${object} ${id}: ${res.ok ? `${plan.set.length} set, ${plan.fresh.length} new${older ? " (older call)" : ""}` : ("error" in res ? res.error : undefined) ?? ("skipped" in res ? res.skipped : "")}`);
+  };
 
   if (r.company) {
-    const res = await hsUpdateProperties("companies", r.company.id, {
+    await apply("companies", r.company.id, {
       sw_case_management_system: x.case_management_system !== "unknown" ? x.case_management_system : undefined,
       sw_case_management_system_detail: x.case_management_system_detail ?? undefined,
       sw_estimated_monthly_case_volume: x.mva_cases_per_month ?? undefined,
@@ -428,11 +483,10 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
       sw_last_call_date: callDate,
       sw_last_customer_meeting: callDate,
       sw_last_call_summary: summary,
-    });
-    writes.push(`company ${r.company.id}: ${res.ok ? "ok" : res.error ?? res.skipped}`);
+    }, "sw_last_call_date", ["sw_last_call_date", "sw_last_customer_meeting", "sw_last_call_summary"]);
   }
   if (r.deal) {
-    const res = await hsUpdateProperties("deals", r.deal.id, {
+    await apply("deals", r.deal.id, {
       sw_plan_discussed: x.plan_discussed ?? undefined,
       sw_plan_chosen: x.plan_chosen ?? undefined,
       sw_price_concerns: x.price_concerns ?? undefined,
@@ -443,8 +497,7 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
       sw_last_call_date: callDate,
       sw_last_call_summary: summary,
       sw_last_call_report_url: p.report_url ?? undefined,
-    });
-    writes.push(`deal ${r.deal.id}: ${res.ok ? "ok" : res.error ?? res.skipped}`);
+    }, "sw_last_call_date", ["sw_next_step", "hs_next_step", "sw_next_step_date", "sw_last_call_date", "sw_last_call_summary", "sw_last_call_report_url"]);
   }
   for (const c of r.contacts) {
     const email = (c.properties.email ?? "").toLowerCase();
@@ -453,12 +506,11 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
       (x.primary_contact.email ?? "").toLowerCase() === email || (!!name && x.primary_contact.name.toLowerCase() === name));
     const other = x.other_firm_attendees.find((a) => a.name.toLowerCase() === name || (a.email ?? "").toLowerCase() === email);
     const role = isPrimary ? x.primary_contact?.role : other?.role;
-    const res = await hsUpdateProperties("contacts", c.id, {
+    await apply("contacts", c.id, {
       jobtitle: !c.properties.jobtitle && role ? role : undefined,
       sw_contact_role: !c.properties.sw_contact_role && isPrimary ? x.primary_contact_role_category ?? undefined : undefined,
       sw_last_meaningful_contact_date: callDate,
-    });
-    writes.push(`contact ${c.id}: ${res.ok ? "ok" : res.error ?? res.skipped}`);
+    }, "sw_last_meaningful_contact_date", ["sw_last_meaningful_contact_date"]);
   }
 
   // One note per session, attached to everything we matched.
@@ -466,6 +518,7 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
   let noteId = prior.noteId;
   if (noteId) {
     const res = await hsUpdateProperties("notes", noteId, { hs_note_body: body });
+    if (res.ok) acct.note = "updated";
     writes.push(`note ${noteId}: ${res.ok ? "updated" : res.error ?? res.skipped}`);
   } else {
     const assoc = [
@@ -479,14 +532,18 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
         ...(r.ownerId ? { hubspot_owner_id: r.ownerId } : {}),
       }, assoc);
       noteId = res.id ?? null;
+      if (res.ok) acct.note = "created";
       writes.push(`note: ${res.ok ? `created ${res.id}` : res.error ?? res.skipped}`);
     }
   }
 
   // One task for the next step, on the deal owner, due on the agreed date
-  // or in three working days.
+  // or in three working days. Only for recent calls: a next step agreed
+  // months ago (history import) is context for the note, not a to-do.
   let taskId = prior.taskId;
-  if (!taskId && x.next_step && (r.deal || r.contacts.length || r.company)) {
+  const recent = !Number.isFinite(callMs) || Date.now() - callMs < 14 * 864e5;
+  if (taskId) acct.task = "kept";
+  if (!taskId && recent && x.next_step && (r.deal || r.contacts.length || r.company)) {
     const due = x.next_step_due ? new Date(`${x.next_step_due}T16:00:00Z`) : new Date(Date.now() + 3 * 864e5);
     const assoc = [
       ...(r.deal ? [{ toId: r.deal.id, associationTypeId: ASSOC.taskToDeal }] : []),
@@ -501,9 +558,10 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
       ...(r.ownerId ? { hubspot_owner_id: r.ownerId } : {}),
     }, assoc);
     taskId = res.id ?? null;
+    if (res.ok) acct.task = "created";
     writes.push(`task: ${res.ok ? `created ${res.id}` : res.error ?? res.skipped}`);
   }
-  return { noteId, taskId, writes };
+  return { noteId, taskId, writes, acct };
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +586,7 @@ async function slackLine(text: string) {
 
 /** Store a webhook delivery. Returns whether it is new work (false for a
  * replay of a request_id already processed). */
-export async function storeMeeting(p: ReadAiPayload): Promise<{ fresh: boolean }> {
+export async function storeMeeting(p: ReadAiPayload, source: "webhook" | "backfill" = "webhook"): Promise<{ fresh: boolean }> {
   const sb = supabaseService();
   const { data: existing } = await sb.from("readai_meetings").select("request_id,status").eq("session_id", p.session_id).maybeSingle();
   if (existing && existing.request_id && existing.request_id === p.request_id && existing.status !== "error") return { fresh: false };
@@ -536,9 +594,38 @@ export async function storeMeeting(p: ReadAiPayload): Promise<{ fresh: boolean }
     session_id: p.session_id, request_id: p.request_id ?? null, title: p.title ?? null,
     started_at: p.start_time ?? null, ended_at: p.end_time ?? null, platform: p.platform ?? null,
     owner_email: p.owner?.email ?? null, participants: p.participants ?? [], report_url: p.report_url ?? null,
-    raw: p, status: "received", error: null, received_at: new Date().toISOString(),
+    raw: p, status: "received", error: null, received_at: new Date().toISOString(), source,
   }, { onConflict: "session_id" }));
   return { fresh: true };
+}
+
+/** Record a meeting we decided not to process (title filter, internal-only
+ * attendee list) so the history import never fetches or re-judges it. */
+export async function storeSkipped(p: ReadAiPayload, reason: string, source: "webhook" | "backfill" = "backfill"): Promise<void> {
+  const sb = supabaseService();
+  await must("readai_meetings skip", sb.from("readai_meetings").upsert({
+    session_id: p.session_id, request_id: p.request_id ?? null, title: p.title ?? null,
+    started_at: p.start_time ?? null, ended_at: p.end_time ?? null, platform: p.platform ?? null,
+    owner_email: p.owner?.email ?? null, participants: p.participants ?? [], report_url: p.report_url ?? null,
+    raw: p, status: "skipped", error: reason, received_at: new Date().toISOString(), processed_at: new Date().toISOString(), source,
+  }, { onConflict: "session_id", ignoreDuplicates: true }));
+}
+
+/** Internal meetings we never want to spend a transcript read on: standups,
+ * interviews, team syncs. Anything else goes to the model, which still
+ * answers `is_sales_or_cs_call: false` for the rest. */
+export const EXCLUDED_TITLE_RE = /\b(stand-?ups?|interviews?|daily sync|team sync|all[- ]hands|retro(spective)?|sprint planning|1:1|one[- ]on[- ]one)\b|\bgrowth\s+(sync|meeting|call|check-?in|huddle)\b/i;
+
+export async function internalEmailSet(): Promise<Set<string>> {
+  return new Set((await ownersByEmail(supabaseService())).keys());
+}
+
+/** True when every attendee has an email and all of them are ours. Attendee
+ * lists with missing emails (dial-ins, guests) are left for the model. */
+export function internalOnly(participants: ReadAiParticipant[] | undefined, internalEmails: Set<string>): boolean {
+  const { internal, external } = splitParticipants(participants, internalEmails);
+  if (external.length) return false;
+  return internal.length > 0;
 }
 
 export async function processMeeting(sessionId: string): Promise<Record<string, unknown>> {
@@ -574,12 +661,13 @@ export async function processMeeting(sessionId: string): Promise<Record<string, 
     r.ownerId = r.ownerId ?? repOwnerId;
     const w = await writeHubSpot(p, x, r, { noteId: row.hubspot_note_id as string | null, taskId: row.hubspot_task_id as string | null });
     await sb.from("readai_meetings").update({
-      ...bump, status: "synced", extracted: x, error: null,
+      ...bump, status: "synced", extracted: x, error: null, hubspot_writes: w.acct,
       hubspot_company_id: r.company?.id ?? null, hubspot_contact_ids: r.contacts.map((c) => c.id),
       hubspot_deal_id: r.deal?.id ?? null, hubspot_note_id: w.noteId, hubspot_task_id: w.taskId,
     }).eq("session_id", sessionId);
 
-    if (!row.hubspot_note_id) {
+    // Slack once per live call; the history import reports in bulk instead.
+    if (!row.hubspot_note_id && row.source !== "backfill") {
       const portal = env.hubspotPortalId();
       const link = r.deal ? `https://app.hubspot.com/contacts/${portal}/record/0-3/${r.deal.id}`
         : r.company ? `https://app.hubspot.com/contacts/${portal}/record/0-2/${r.company.id}` : p.report_url ?? "";
@@ -593,7 +681,7 @@ export async function processMeeting(sessionId: string): Promise<Record<string, 
         link ? `<${link}|HubSpot>` : null,
       ].filter(Boolean).join(" · "));
     }
-    return { status: "synced", firm: x.firm_name, company: r.company?.id, deal: r.deal?.id, contacts: r.contacts.length, created: { contacts: r.contactsCreated, company: r.companyCreated }, writes: w.writes, properties: propNotes };
+    return { status: "synced", firm: x.firm_name, company: r.company?.id, deal: r.deal?.id, contacts: r.contacts.length, created: { contacts: r.contactsCreated, company: r.companyCreated }, writes: w.writes, fields_new: w.acct.fields_new, fields_set: w.acct.fields_set, properties: propNotes };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await sb.from("readai_meetings").update({ ...bump, status: "error", error: msg.slice(0, 1000) }).eq("session_id", sessionId);

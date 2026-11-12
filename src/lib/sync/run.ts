@@ -15,6 +15,7 @@ import { syncQuo } from "@/lib/sync/quo";
 import { syncStripe } from "@/lib/sync/stripe";
 import { syncMetaLeads, syncMetaSpend } from "@/lib/sync/meta";
 import { syncReadAi } from "@/lib/sync/readai";
+import { backfillPending } from "@/lib/sync/readai-backfill";
 
 export type SyncKind =
   | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup"
@@ -181,7 +182,13 @@ async function runKind(sb: Sb, kind: SyncKind): Promise<Record<string, unknown>>
   if (kind === "meta_spend" || kind === "meta_spend_full") return syncMetaSpend(kind === "meta_spend_full");
   if (kind === "cases") return syncCases();
   if (kind === "rollup") return computeRollups();
-  if (kind === "readai") return syncReadAi();
+  if (kind === "readai") {
+    // Retry what the webhook could not, then spend what is left of the
+    // function's time on the history import for connected accounts.
+    const retry = await syncReadAi();
+    const backfill = await backfillPending({ maxPerAccount: 4, deadline: Date.now() + 200_000 });
+    return { ...retry, backfill };
+  }
   throw new Error(`unknown sync kind ${kind satisfies never}`);
 }
 

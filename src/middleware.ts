@@ -1,10 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// /api/cron, /api/investor and /api/webhooks authenticate themselves with a
-// bearer token or signature (CRON_SECRET / INVESTOR_FEED_TOKEN /
-// READAI_WEBHOOK_*) - no dashboard session is involved.
-const PUBLIC_PATHS = ["/login", "/auth", "/api/cron", "/api/investor", "/api/webhooks"];
+// /api/cron, /api/investor, /api/webhooks and /api/readai authenticate
+// themselves with a bearer token, signature or OAuth state (CRON_SECRET /
+// INVESTOR_FEED_TOKEN / READAI_WEBHOOK_*) - no dashboard session is involved.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/cron", "/api/investor", "/api/webhooks", "/api/readai"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

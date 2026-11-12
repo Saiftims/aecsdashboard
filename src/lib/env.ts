@@ -48,6 +48,11 @@ export const env = {
   /** Shared token carried in the webhook URL (`?token=`). Lets the endpoint
    * be locked down before Read.ai's signing key is in place. */
   readaiWebhookToken: () => clean("READAI_WEBHOOK_TOKEN"),
+  /** OAuth client for the Read.ai REST API (history import). Registered once
+   * with dynamic client registration; the redirect URI must match exactly. */
+  readaiClientId: () => clean("READAI_CLIENT_ID"),
+  readaiClientSecret: () => clean("READAI_CLIENT_SECRET"),
+  readaiRedirectUri: () => clean("READAI_REDIRECT_URI") || "https://gtm-dashboard-fawn.vercel.app/api/readai/oauth/callback",
   /** True on Vercel (build and runtime, every environment). */
   isVercel: () => Boolean(clean("VERCEL")),
 };
