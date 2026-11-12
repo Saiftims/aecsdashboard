@@ -124,6 +124,7 @@ const Attendee = z.object({ name: z.string(), role: z.string().nullable().option
 export const Extraction = z.object({
   is_sales_or_cs_call: z.boolean(),
   not_a_call_reason: z.string().nullable().optional(),
+  organization_type: z.enum(["law_firm", "insurance", "medical_provider", "other"]).nullable().optional(),
   firm_name: z.string().nullable(),
   primary_contact: Attendee.nullable(),
   primary_contact_role_category: z.enum(ROLE_OPTIONS).nullable().optional(),
@@ -148,21 +149,22 @@ export const Extraction = z.object({
 });
 export type Extraction = z.infer<typeof Extraction>;
 
-const SYSTEM_PROMPT = `You read transcripts of Silent Witness sales and customer-success calls with personal-injury law firms and extract CRM facts. Silent Witness sells AI case analysis for motor vehicle accident (MVA) cases, priced as monthly plans: Solo ($300/mo), Boutique ($500-700/mo), Growth ($1,000/mo) and Custom, plus a $1,500 "expert sign-off".
+const SYSTEM_PROMPT = `You read transcripts of Silent Witness sales and customer-success calls and extract CRM facts. Silent Witness sells AI case analysis for motor vehicle accident (MVA) cases, priced as monthly plans: Solo ($300/mo), Boutique ($500-700/mo), Growth ($1,000/mo) and Custom, plus a $1,500 "expert sign-off". Its customers and prospects are personal-injury law firms, insurance companies / adjusters, and chiropractors or other medical providers who treat MVA patients - treat a call with any of these (prospect, customer, partner, referral source) as a sales/CS call.
 
 Answer with ONE JSON object and nothing else, matching this shape exactly:
 {
-  "is_sales_or_cs_call": boolean,            // false for internal meetings, interviews, vendor calls, anything not with a law firm prospect or customer
+  "is_sales_or_cs_call": boolean,            // false ONLY for internal team meetings, job interviews, vendor/investor calls, or anything with no prospect, customer or partner organisation on it
   "not_a_call_reason": string|null,
-  "firm_name": string|null,                  // the law firm's name as said or shown; null if never identified
-  "primary_contact": {"name": string, "role": string|null, "email": string|null} | null,   // the main firm-side person we spoke with; role as they described it (e.g. "managing partner", "case manager", "intake director")
+  "organization_type": "law_firm"|"insurance"|"medical_provider"|"other"|null,
+  "firm_name": string|null,                  // the prospect's/customer's organisation name as said or shown (law firm, insurer, clinic); null if never identified
+  "primary_contact": {"name": string, "role": string|null, "email": string|null} | null,   // the main person on their side we spoke with; role as they described it (e.g. "managing partner", "case manager", "intake director", "claims adjuster", "clinic owner")
   "primary_contact_role_category": "attorney"|"case_manager"|"decision_maker"|"admin"|"influencer"|"other"|null,
   "other_firm_attendees": [{"name": string, "role": string|null, "email": string|null}],   // everyone else from the firm on the call
   "silent_witness_attendees": [string],      // names of Silent Witness people on the call
   "case_management_system": one of ${JSON.stringify(CMS_OPTIONS)},
   "case_management_system_detail": string|null,   // exact wording if "other", or useful detail (e.g. "moving from Needles to Filevine in Q1")
-  "mva_cases_per_month": number|null,        // motor vehicle accident / auto cases the firm takes per month; convert "about 40 a month" to 40, "500 a year" to 42; null if not stated
-  "total_caseload": number|null,             // total active cases if given
+  "mva_cases_per_month": number|null,        // motor vehicle accident / auto cases (or claims, or MVA patients) they handle per month; convert "about 40 a month" to 40, "500 a year" to 42; null if not stated
+  "total_caseload": number|null,             // total active cases / open claims / active patients if given
   "caseload_notes": string|null,             // how the numbers were phrased, caveats
   "plan_discussed": "solo"|"boutique"|"growth"|"custom"|"undecided"|null,
   "plan_chosen": same options|null,          // only if they committed or clearly picked one
@@ -172,7 +174,7 @@ Answer with ONE JSON object and nothing else, matching this shape exactly:
   "summary": string,                         // one sentence, plain, past tense
   "evidence": {"case_management_system": string|null, "case_volume": string|null, "plan": string|null}   // short verbatim quotes supporting those three fields
 }
-Rules: never invent a value - use null when the transcript does not say. Numbers are numbers, not strings. Names as spoken; do not guess emails. Prefer the firm name over a person's name for firm_name.`;
+Rules: never invent a value - use null when the transcript does not say. Numbers are numbers, not strings. Names as spoken; do not guess emails. Prefer the organisation name over a person's name for firm_name. "case_management_system" applies to law firms; for insurers or clinics use "other" with the system named in the detail field, or "unknown".`;
 
 function userPrompt(p: ReadAiPayload, ctx: { internal: ReadAiParticipant[]; external: ReadAiParticipant[]; knownContacts: string[]; knownCompany: string | null }): string {
   const who = (list: ReadAiParticipant[]) => list.map((x) => `${x.name ?? ""}${x.email ? ` <${x.email}>` : ""}`).join(", ") || "(none listed)";
@@ -397,7 +399,7 @@ export function noteBody(p: ReadAiPayload, x: Extraction): string {
   const lines = [
     `Call notes (Read.ai) - ${date}${p.title ? ` - ${p.title}` : ""}`,
     `Summary: ${x.summary}`,
-    x.firm_name ? `Firm: ${x.firm_name}` : "",
+    x.firm_name ? `Firm: ${x.firm_name}${x.organization_type && x.organization_type !== "law_firm" ? ` (${label(x.organization_type)})` : ""}` : "",
     x.primary_contact ? `Spoke with: ${who(x.primary_contact)}` : "",
     x.other_firm_attendees.length ? `Also from the firm: ${x.other_firm_attendees.map(who).join(", ")}` : "",
     x.silent_witness_attendees.length ? `Silent Witness: ${x.silent_witness_attendees.join(", ")}` : "",

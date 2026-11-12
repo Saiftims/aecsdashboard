@@ -219,6 +219,9 @@ export async function backfillAccount(email: string, opts: { max?: number; deadl
 
         try {
           const full = meetingToPayload(await getMeeting(await accessTokenFor(sb, a), m.id));
+          // Some reports hold no transcript at all (restricted access, failed
+          // recording). Nothing to read, so do not spend a model call.
+          if (!full.transcript?.speaker_blocks?.length && !full.summary) { await storeSkipped(full, "no transcript available in Read.ai"); s.filtered++; continue; }
           await storeMeeting(full, "backfill");
           s.processed++;
           const r = await processMeeting(m.id);
