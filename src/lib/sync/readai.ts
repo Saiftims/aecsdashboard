@@ -307,19 +307,22 @@ const splitName = (full: string) => {
   return { first: parts.shift() ?? "", last: parts.join(" ") };
 };
 
-/** Contact by full name, only when it is unambiguous (exactly one hit).
- * Used for attendees Read.ai lists without an email - dial-ins, guests. */
+/** Contact by full name for attendees Read.ai lists without an email
+ * (dial-ins, guests). Full-text search, then both names must agree
+ * (tolerating "J. Tighe" vs "Tighe", "h" vs "Hernandez" initials); among
+ * duplicates prefer the record that has an email, then one with a company. */
 async function findContactByName(fullName: string): Promise<HsObject | null> {
   const { first, last } = splitName(fullName.replace(/[^\w\s'.-]/g, " ").trim());
   if (first.length < 2 || last.length < 2) return null;
-  const r = await hsRequest<{ results: HsObject[]; total?: number }>("POST", "/crm/v3/objects/contacts/search", {
-    filterGroups: [{ filters: [
-      { propertyName: "firstname", operator: "EQ", value: first },
-      { propertyName: "lastname", operator: "EQ", value: last },
-    ] }],
-    properties: CONTACT_PROPS, limit: 3,
+  const r = await hsRequest<{ results: HsObject[] }>("POST", "/crm/v3/objects/contacts/search", {
+    query: `${first} ${last}`, properties: CONTACT_PROPS, limit: 10,
   }).catch(() => ({ results: [] as HsObject[] }));
-  return r.results.length === 1 ? r.results[0] : null;
+  const sq = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  const agree = (a: string, b: string) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
+  const lastOf = (v: string | null | undefined) => sq((v ?? "").trim().split(/\s+/).pop());
+  const hits = r.results.filter((c) => agree(sq(c.properties.firstname), sq(first)) && agree(lastOf(c.properties.lastname), sq(last)));
+  hits.sort((a, b) => Number(!!b.properties.email) - Number(!!a.properties.email) || Number(!!b.properties.company) - Number(!!a.properties.company));
+  return hits[0] ?? null;
 }
 
 async function findCompanyByDomain(domain: string): Promise<HsObject | null> {
