@@ -511,9 +511,12 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
 // ---------------------------------------------------------------------------
 type Sb = ReturnType<typeof supabaseService>;
 
-async function internalEmailSet(sb: Sb): Promise<Set<string>> {
-  const { data } = await sb.from("crm_owners").select("email");
-  return new Set(((data ?? []) as { email: string | null }[]).map((o) => (o.email ?? "").toLowerCase()).filter(Boolean));
+/** HubSpot owners by email, so the rep who was on the call can own the
+ * note and task when the firm is new and has no deal owner yet. */
+async function ownersByEmail(sb: Sb): Promise<Map<string, string>> {
+  const { data } = await sb.from("crm_owners").select("owner_id,email").eq("archived", false);
+  return new Map(((data ?? []) as { owner_id: string; email: string | null }[])
+    .filter((o) => o.email).map((o) => [o.email!.toLowerCase(), o.owner_id]));
 }
 
 async function slackLine(text: string) {
@@ -551,8 +554,9 @@ export async function processMeeting(sessionId: string): Promise<Record<string, 
   const bump = { attempts: (row.attempts as number ?? 0) + 1, processed_at: new Date().toISOString() };
   try {
     const propNotes = await ensureReadAiProperties();
-    const internal = await internalEmailSet(sb);
-    const split = splitParticipants(p.participants, internal);
+    const owners = await ownersByEmail(sb);
+    const split = splitParticipants(p.participants, new Set(owners.keys()));
+    const repOwnerId = split.internal.map((i) => owners.get((i.email ?? "").toLowerCase())).find(Boolean) ?? null;
 
     // A first HubSpot pass on the emails alone gives the model names and a
     // company to anchor on; the full resolution runs again after extraction
@@ -567,6 +571,7 @@ export async function processMeeting(sessionId: string): Promise<Record<string, 
     }
 
     const r = await resolveHubSpot(split.external, x);
+    r.ownerId = r.ownerId ?? repOwnerId;
     const w = await writeHubSpot(p, x, r, { noteId: row.hubspot_note_id as string | null, taskId: row.hubspot_task_id as string | null });
     await sb.from("readai_meetings").update({
       ...bump, status: "synced", extracted: x, error: null,
