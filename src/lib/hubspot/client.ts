@@ -336,4 +336,74 @@ export const ASSOC = {
   meetingToContact: 200,
   meetingToDeal: 212,
   dealToCompany: 5,
+  contactToCompany: 1,
 } as const;
+
+/** Link two existing records with HubSpot's default association for that
+ * object pair (v4). Idempotent: re-linking an existing pair is a no-op. */
+export async function hsAssociate(
+  fromObject: string, fromId: string, toObject: string, toId: string,
+): Promise<WriteResult> {
+  return guardedWrite(async () => {
+    await hsRequest("PUT", `/crm/v4/objects/${fromObject}/${fromId}/associations/default/${toObject}/${toId}`);
+    return { id: toId };
+  });
+}
+
+/** A contact by primary email through the object API (consistent
+ * immediately - the search index lags creation by seconds), then by
+ * secondary email through search. */
+export async function hsFindContactByEmail(email: string, properties: string[]): Promise<HsObject | null> {
+  try {
+    return await hsRequest<HsObject>("GET",
+      `/crm/v3/objects/contacts/${encodeURIComponent(email)}?idProperty=email&properties=${properties.join(",")}`);
+  } catch { /* 404: not a primary email */ }
+  const r = await hsRequest<{ results: HsObject[] }>("POST", "/crm/v3/objects/contacts/search", {
+    filterGroups: [{ filters: [{ propertyName: "hs_additional_emails", operator: "CONTAINS_TOKEN", value: email }] }],
+    properties, limit: 5,
+  });
+  return r.results[0] ?? null;
+}
+
+export interface HsPropertySpec {
+  name: string;
+  label: string;
+  type: "string" | "number" | "date" | "enumeration";
+  fieldType: "text" | "textarea" | "number" | "date" | "select";
+  description?: string;
+  options?: { label: string; value: string }[];
+}
+
+/** Create the custom properties in `specs` that the portal does not have
+ * yet, in property group `groupName`. Returns the names created. A missing
+ * schema-write scope is reported, not thrown: callers fall back to writing
+ * the same facts into a note. */
+export async function hsEnsureProperties(
+  object: string, groupName: string, specs: HsPropertySpec[],
+): Promise<{ created: string[]; missing: string[]; error?: string }> {
+  const have = new Set<string>();
+  try {
+    const page = await hsRequest<{ results: { name: string }[] }>("GET", `/crm/v3/properties/${object}`);
+    for (const p of page.results ?? []) have.add(p.name);
+  } catch (e) {
+    return { created: [], missing: specs.map((s) => s.name), error: e instanceof Error ? e.message : String(e) };
+  }
+  const created: string[] = [];
+  const missing: string[] = [];
+  let error: string | undefined;
+  for (const spec of specs) {
+    if (have.has(spec.name)) continue;
+    if (!env.hubspotWritesEnabled()) { missing.push(spec.name); continue; }
+    try {
+      await hsRequest("POST", `/crm/v3/properties/${object}`, {
+        ...spec, groupName,
+        ...(spec.options ? { options: spec.options.map((o, i) => ({ ...o, displayOrder: i, hidden: false })) } : {}),
+      });
+      created.push(spec.name);
+    } catch (e) {
+      missing.push(spec.name);
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { created, missing, error };
+}

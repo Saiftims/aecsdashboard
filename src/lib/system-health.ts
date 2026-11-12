@@ -84,6 +84,7 @@ const FEEDS: { key: string; label: string; what: string; cadence: string; staleM
   { key: "calendly", label: "Calendly", what: "Demo dates onto deals", cadence: "every 5 min", staleMin: 20, kinds: ["calendly"] },
   { key: "quo", label: "Quo calls & texts", what: "Dials and SMS per rep", cadence: "every 5 min", staleMin: 20, kinds: ["quo", "quo_full", "quo_messages_full"] },
   { key: "meta_spend", label: "Meta ad spend", what: "Daily spend, per-ad insights", cadence: "every 6 h", staleMin: 13 * 60, kinds: ["meta_spend", "meta_spend_full"] },
+  { key: "readai", label: "Read.ai call notes", what: "Transcript facts onto HubSpot companies, deals, notes, tasks", cadence: "on meeting end + retry every 10 min", staleMin: 40, kinds: ["readai"] },
   { key: "agent", label: "HubSpot agent (GitHub Actions)", what: "Owner sweep, Calendly stages, demo credit, Slack MQLs", cadence: "every 3 h (GitHub may delay)", staleMin: 8 * 60, kinds: ["agent_quick", "agent_full"] },
 ];
 

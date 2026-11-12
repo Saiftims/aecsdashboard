@@ -14,11 +14,12 @@ import { computeRollups, syncCases } from "@/lib/sync/cases";
 import { syncQuo } from "@/lib/sync/quo";
 import { syncStripe } from "@/lib/sync/stripe";
 import { syncMetaLeads, syncMetaSpend } from "@/lib/sync/meta";
+import { syncReadAi } from "@/lib/sync/readai";
 
 export type SyncKind =
   | "hubspot_incremental" | "hubspot_full" | "calendly" | "cases" | "rollup"
   | "quo" | "quo_full" | "quo_messages_full" | "stripe" | "meta" | "meta_full"
-  | "meta_spend" | "meta_spend_full";
+  | "meta_spend" | "meta_spend_full" | "readai";
 
 /** Kinds recorded in `sync_runs` that are not run by `runSync` itself. */
 export type RecordedKind = SyncKind | "cases_probe";
@@ -180,6 +181,7 @@ async function runKind(sb: Sb, kind: SyncKind): Promise<Record<string, unknown>>
   if (kind === "meta_spend" || kind === "meta_spend_full") return syncMetaSpend(kind === "meta_spend_full");
   if (kind === "cases") return syncCases();
   if (kind === "rollup") return computeRollups();
+  if (kind === "readai") return syncReadAi();
   throw new Error(`unknown sync kind ${kind satisfies never}`);
 }
 

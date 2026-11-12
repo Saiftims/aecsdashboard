@@ -9,6 +9,7 @@
     { "path": "/api/cron/quo", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/meta", "schedule": "* * * * *" },
     { "path": "/api/cron/meta-spend", "schedule": "20 */6 * * *" },
+    { "path": "/api/cron/readai", "schedule": "*/10 * * * *" },
     { "path": "/api/cron/health", "schedule": "*/30 * * * *" }
   ]
 }

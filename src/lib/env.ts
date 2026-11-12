@@ -38,6 +38,15 @@ export const env = {
   metaAdAccountId: () => clean("META_AD_ACCOUNT_ID") || "act_993053423296349",
   /** HubSpot writes are gated: nothing is written unless explicitly enabled. */
   hubspotWritesEnabled: () => clean("HUBSPOT_APPLY") === "true",
+  /** Anthropic key for transcript extraction (Read.ai call notes). */
+  anthropicApiKey: () => clean("ANTHROPIC_API_KEY"),
+  anthropicModel: () => clean("ANTHROPIC_MODEL") || "claude-sonnet-4-5",
+  /** Read.ai webhook signing key (base64, shown once when the webhook is
+   * created in Read.ai). Verifies `X-Read-Signature`. */
+  readaiWebhookSecret: () => clean("READAI_WEBHOOK_SECRET"),
+  /** Shared token carried in the webhook URL (`?token=`). Lets the endpoint
+   * be locked down before Read.ai's signing key is in place. */
+  readaiWebhookToken: () => clean("READAI_WEBHOOK_TOKEN"),
   /** True on Vercel (build and runtime, every environment). */
   isVercel: () => Boolean(clean("VERCEL")),
 };
