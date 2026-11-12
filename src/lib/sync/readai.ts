@@ -218,11 +218,38 @@ async function askClaude(system: string, user: string): Promise<string> {
   return (data.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
 }
 
+/** Coerce the model's enum fields to the vocabulary before validation: on
+ * a non-sales meeting it tends to answer null for the case management
+ * system, and an off-list spelling should degrade to "other"/null rather
+ * than fail the whole call. Everything else is still validated strictly. */
+export function normalizeExtraction(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const r = { ...(raw as Record<string, unknown>) };
+  const pick = <T extends readonly string[]>(v: unknown, opts: T, fallback: T[number] | null) => {
+    const s = typeof v === "string" ? v.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+    return (opts as readonly string[]).includes(s) ? s : fallback;
+  };
+  r.case_management_system = pick(r.case_management_system, CMS_OPTIONS, typeof r.case_management_system === "string" && r.case_management_system.trim() ? "other" : "unknown");
+  if (r.case_management_system === "other" && !r.case_management_system_detail && typeof (raw as Record<string, unknown>).case_management_system === "string") {
+    r.case_management_system_detail = (raw as Record<string, unknown>).case_management_system;
+  }
+  r.plan_discussed = pick(r.plan_discussed, PLAN_OPTIONS, null);
+  r.plan_chosen = pick(r.plan_chosen, PLAN_OPTIONS, null);
+  r.primary_contact_role_category = pick(r.primary_contact_role_category, ROLE_OPTIONS, null);
+  r.organization_type = pick(r.organization_type, ["law_firm", "insurance", "medical_provider", "other"] as const, null);
+  if (typeof r.next_step_due === "string" && !/^\d{4}-\d{2}-\d{2}$/.test(r.next_step_due)) r.next_step_due = null;
+  for (const k of ["mva_cases_per_month", "total_caseload"]) {
+    if (typeof r[k] === "string") { const n = Number(String(r[k]).replace(/[^\d.]/g, "")); r[k] = Number.isFinite(n) && String(r[k]).trim() ? n : null; }
+  }
+  if (typeof r.summary !== "string") r.summary = "";
+  return r;
+}
+
 export async function extractCallFacts(
   p: ReadAiPayload, ctx: { internal: ReadAiParticipant[]; external: ReadAiParticipant[]; knownContacts: string[]; knownCompany: string | null },
 ): Promise<Extraction> {
   const reply = await askClaude(SYSTEM_PROMPT, userPrompt(p, ctx));
-  return Extraction.parse(parseModelJson(reply));
+  return Extraction.parse(normalizeExtraction(parseModelJson(reply)));
 }
 
 // ---------------------------------------------------------------------------
