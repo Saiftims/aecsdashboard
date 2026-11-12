@@ -41,9 +41,10 @@ export const env = {
   /** Anthropic key for transcript extraction (Read.ai call notes). */
   anthropicApiKey: () => clean("ANTHROPIC_API_KEY"),
   anthropicModel: () => clean("ANTHROPIC_MODEL") || "claude-sonnet-4-5",
-  /** Read.ai webhook signing key (base64, shown once when the webhook is
-   * created in Read.ai). Verifies `X-Read-Signature`. */
-  readaiWebhookSecret: () => clean("READAI_WEBHOOK_SECRET"),
+  /** Read.ai webhook signing keys (base64, shown once when each webhook is
+   * created). Comma-separated: every Read.ai user webhook has its own key,
+   * so one per rep pointing at the same URL. Verifies `X-Read-Signature`. */
+  readaiWebhookSecrets: () => clean("READAI_WEBHOOK_SECRET").split(",").map((s) => s.trim()).filter(Boolean),
   /** Shared token carried in the webhook URL (`?token=`). Lets the endpoint
    * be locked down before Read.ai's signing key is in place. */
   readaiWebhookToken: () => clean("READAI_WEBHOOK_TOKEN"),

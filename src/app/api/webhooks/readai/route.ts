@@ -7,7 +7,8 @@ export const maxDuration = 300;
 /** Read.ai webhook (Integrations -> Webhooks -> trigger "meeting_end").
  *
  * Accepted when either check passes:
- *  - `X-Read-Signature` verifies against READAI_WEBHOOK_SECRET, or
+ *  - `X-Read-Signature` verifies against one of the keys in
+ *    READAI_WEBHOOK_SECRET (comma-separated, one per Read.ai webhook), or
  *  - the URL carries `?token=` equal to READAI_WEBHOOK_TOKEN.
  * With neither configured the endpoint refuses everything on Vercel.
  *
@@ -17,12 +18,13 @@ export const maxDuration = 300;
  * fails here is picked up by /api/cron/readai. */
 export async function POST(req: NextRequest) {
   const raw = await req.text();
-  const secret = env.readaiWebhookSecret();
+  const secrets = env.readaiWebhookSecrets();
   const token = env.readaiWebhookToken();
-  const okSig = secret ? verifyReadAiSignature(raw, req.headers.get("x-read-signature"), secret) : false;
+  const sig = req.headers.get("x-read-signature");
+  const okSig = secrets.some((s) => verifyReadAiSignature(raw, sig, s));
   const okTok = token ? tokensMatch(req.nextUrl.searchParams.get("token"), token) : false;
   if (!okSig && !okTok) {
-    if (!secret && !token && !env.isVercel()) { /* local dev without config */ } else {
+    if (!secrets.length && !token && !env.isVercel()) { /* local dev without config */ } else {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
   }
