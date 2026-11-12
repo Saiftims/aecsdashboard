@@ -269,6 +269,8 @@ const COMPANY_PROPS: HsPropertySpec[] = [
     options: CMS_OPTIONS.map((v) => ({ label: label(v), value: v })) },
   { name: "sw_case_management_system_detail", label: "Case management system detail", type: "string", fieldType: "text" },
   { name: "sw_total_caseload", label: "Total active caseload", type: "number", fieldType: "number" },
+  { name: "sw_caseload_notes", label: "Caseload notes", type: "string", fieldType: "textarea",
+    description: "How the firm described its volume on the last call, in their words - including when they would not give a number." },
   { name: "sw_last_call_date", label: "Last recorded call", type: "date", fieldType: "date" },
   { name: "sw_last_call_summary", label: "Last call summary", type: "string", fieldType: "textarea" },
 ];
@@ -545,6 +547,7 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
       sw_case_management_system_detail: x.case_management_system_detail ?? undefined,
       sw_estimated_monthly_case_volume: x.mva_cases_per_month ?? undefined,
       sw_total_caseload: x.total_caseload ?? undefined,
+      sw_caseload_notes: x.caseload_notes ? x.caseload_notes.slice(0, 1000) : undefined,
       sw_last_call_date: callDate,
       sw_last_customer_meeting: callDate,
       sw_last_call_summary: summary,
