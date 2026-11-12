@@ -165,3 +165,21 @@ describe("extraction normalisation", async () => {
     expect(z.case_management_system_detail).toBe("Salesforce");
   });
 });
+
+describe("extraction normalisation", async () => {
+  const { Extraction, normalizeExtraction } = await import("@/lib/sync/readai");
+  const base = { is_sales_or_cs_call: false, not_a_call_reason: "internal", firm_name: null, primary_contact: null, mva_cases_per_month: null, total_caseload: null, plan_discussed: null, plan_chosen: null, price_concerns: null, next_step: null, summary: "Internal sync." };
+  it("accepts null / off-list enum values instead of failing the call", () => {
+    const x = Extraction.parse(normalizeExtraction({ ...base, case_management_system: null, plan_discussed: "Boutique plan", primary_contact_role_category: "paralegal" }));
+    expect(x.case_management_system).toBe("unknown");
+    expect(x.plan_discussed).toBeNull();
+    expect(x.primary_contact_role_category).toBeNull();
+    const y = Extraction.parse(normalizeExtraction({ ...base, case_management_system: "Smart Advocate", mva_cases_per_month: "40", next_step_due: "next Friday" }));
+    expect(y.case_management_system).toBe("smartadvocate");
+    expect(y.mva_cases_per_month).toBe(40);
+    expect(y.next_step_due).toBeNull();
+    const z = Extraction.parse(normalizeExtraction({ ...base, case_management_system: "Salesforce" }));
+    expect(z.case_management_system).toBe("other");
+    expect(z.case_management_system_detail).toBe("Salesforce");
+  });
+});
