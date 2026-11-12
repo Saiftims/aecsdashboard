@@ -163,7 +163,7 @@ Answer with ONE JSON object and nothing else, matching this shape exactly:
   "silent_witness_attendees": [string],      // names of Silent Witness people on the call
   "case_management_system": one of ${JSON.stringify(CMS_OPTIONS)},
   "case_management_system_detail": string|null,   // exact wording if "other", or useful detail (e.g. "moving from Needles to Filevine in Q1")
-  "mva_cases_per_month": number|null,        // motor vehicle accident / auto cases (or claims, or MVA patients) they handle per month; convert "about 40 a month" to 40, "500 a year" to 42; null if not stated
+  "mva_cases_per_month": number|null,        // motor vehicle accident / auto cases (or claims, or MVA patients) the organisation takes in per month - their intake volume, NOT how many cases they plan to submit to Silent Witness or which plan tier they picked; convert "about 40 a month" to 40, "500 a year" to 42; null if only the Silent Witness usage was discussed
   "total_caseload": number|null,             // total active cases / open claims / active patients if given
   "caseload_notes": string|null,             // how the numbers were phrased, caveats
   "plan_discussed": "solo"|"boutique"|"growth"|"custom"|"undecided"|null,
@@ -307,6 +307,21 @@ const splitName = (full: string) => {
   return { first: parts.shift() ?? "", last: parts.join(" ") };
 };
 
+/** Contact by full name, only when it is unambiguous (exactly one hit).
+ * Used for attendees Read.ai lists without an email - dial-ins, guests. */
+async function findContactByName(fullName: string): Promise<HsObject | null> {
+  const { first, last } = splitName(fullName.replace(/[^\w\s'.-]/g, " ").trim());
+  if (first.length < 2 || last.length < 2) return null;
+  const r = await hsRequest<{ results: HsObject[]; total?: number }>("POST", "/crm/v3/objects/contacts/search", {
+    filterGroups: [{ filters: [
+      { propertyName: "firstname", operator: "EQ", value: first },
+      { propertyName: "lastname", operator: "EQ", value: last },
+    ] }],
+    properties: CONTACT_PROPS, limit: 3,
+  }).catch(() => ({ results: [] as HsObject[] }));
+  return r.results.length === 1 ? r.results[0] : null;
+}
+
 async function findCompanyByDomain(domain: string): Promise<HsObject | null> {
   if (!domain) return null;
   const r = await hsRequest<{ results: HsObject[] }>("POST", "/crm/v3/objects/companies/search", {
@@ -361,6 +376,18 @@ async function resolveHubSpot(external: ReadAiParticipant[], x: Extraction | nul
   for (const email of emails) {
     const c = await hsFindContactByEmail(email, CONTACT_PROPS);
     if (c) contacts.push(c);
+  }
+  // No email to go on: try the names Read.ai gave us, then the person the
+  // transcript named, accepting only an unambiguous match.
+  if (!contacts.length) {
+    const names = new Set<string>();
+    for (const p of external) { const n = (p.name ?? `${p.first_name ?? ""} ${p.last_name ?? ""}`).trim(); if (n && !p.email) names.add(n); }
+    if (x?.primary_contact?.name) names.add(x.primary_contact.name.trim());
+    for (const n of names) {
+      const c = await findContactByName(n);
+      if (c && !contacts.some((k) => k.id === c.id)) contacts.push(c);
+      if (contacts.length) break;
+    }
   }
 
   // Company: via a found contact, then the external email domain, then the
