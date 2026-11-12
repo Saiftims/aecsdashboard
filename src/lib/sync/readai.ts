@@ -225,9 +225,10 @@ async function askClaude(system: string, user: string): Promise<string> {
 export function normalizeExtraction(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const r = { ...(raw as Record<string, unknown>) };
+  const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const pick = <T extends readonly string[]>(v: unknown, opts: T, fallback: T[number] | null) => {
-    const s = typeof v === "string" ? v.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
-    return (opts as readonly string[]).includes(s) ? s : fallback;
+    if (typeof v !== "string") return fallback;
+    return (opts as readonly string[]).find((o) => squash(o) === squash(v)) ?? fallback;
   };
   r.case_management_system = pick(r.case_management_system, CMS_OPTIONS, typeof r.case_management_system === "string" && r.case_management_system.trim() ? "other" : "unknown");
   if (r.case_management_system === "other" && !r.case_management_system_detail && typeof (raw as Record<string, unknown>).case_management_system === "string") {
