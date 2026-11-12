@@ -163,5 +163,7 @@ describe("extraction normalisation", async () => {
     const z = Extraction.parse(normalizeExtraction({ ...base, case_management_system: "Salesforce" }));
     expect(z.case_management_system).toBe("other");
     expect(z.case_management_system_detail).toBe("Salesforce");
+    const w = Extraction.parse(normalizeExtraction({ ...base, case_management_system: "unknown", other_firm_attendees: [{ name: "Nate James" }, { name: "Speaker 2" }, { name: "UNKNOWN_SPEAKER" }] }));
+    expect(w.other_firm_attendees.map((a) => a.name)).toEqual(["Nate James"]);
   });
 });

@@ -243,6 +243,11 @@ export function normalizeExtraction(raw: unknown): unknown {
     if (typeof r[k] === "string") { const n = Number(String(r[k]).replace(/[^\d.]/g, "")); r[k] = Number.isFinite(n) && String(r[k]).trim() ? n : null; }
   }
   if (typeof r.summary !== "string") r.summary = "";
+  // Transcript placeholders are not people.
+  const placeholder = /^(speaker\s*\d*|unknown[_ ]speaker|unknown|guest\s*\d*|participant\s*\d*)$/i;
+  if (Array.isArray(r.other_firm_attendees)) {
+    r.other_firm_attendees = r.other_firm_attendees.filter((a) => !(a && typeof a === "object" && typeof (a as { name?: unknown }).name === "string" && placeholder.test((a as { name: string }).name.trim())));
+  }
   return r;
 }
 
