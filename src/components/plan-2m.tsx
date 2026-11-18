@@ -110,10 +110,10 @@ export function Plan2M() {
       </div>
 
       <Callout tone="info" title="The short answer">
-        Current momentum (Chris alone, $15k/mo on Meta, churn as today) ends June at about <b>{m(june(results[0]).arr)}</b>. Adding one BDR and one AE
-        (Scenario B) gets to <b>{m(june(results[1]).arr)}</b>. Hitting $2M needs Scenario C: a CS manager now, <b>2 BDRs and 2 AEs</b> hired Dec–Feb, Meta
-        scaled to ~$35k/mo, and a deliberate push from Solo ($300) to Boutique/Growth plans. C crosses $2M in <b>{hitMonth(results[2])}</b> and ends June at{" "}
-        <b>{m(cJune.arr)}</b>. In June that means ~{r0(cJune.mqls)} MQLs, ~{r0(cJune.demos)} demos, ~{r0(cJune.wins)} new firms and ~{r0(cJune.cases)} cases a month.
+        Current momentum (Chris alone, $15k/mo on Meta, churn as today) ends June at about <b>{m(june(results[0]).arr)}</b>. Adding one BDR and one AE with a CS manager
+        (Scenario B) gets to <b>{m(june(results[1]).arr)}</b> — on the line, with no margin for a soft month. Scenario C makes $2M safe: a CS manager now,{" "}
+        <b>2 BDRs and 2 AEs</b> hired Dec–Feb, Meta scaled to ~$35k/mo, and a deliberate push from Solo ($300) to Boutique/Growth plans. C crosses $2M in{" "}
+        <b>{hitMonth(results[2])}</b> and ends June at <b>{m(cJune.arr)}</b>. In June that means ~{r0(cJune.mqls)} MQLs, ~{r0(cJune.demos)} demos, ~{r0(cJune.wins)} new firms and ~{r0(cJune.cases)} cases a month.
       </Callout>
 
       <section className="flex flex-col gap-2">
@@ -127,13 +127,14 @@ export function Plan2M() {
               ["MQLs (deals created)", ...ACT.dealsCreated.map(String)],
               ["Demos held", ...ACT.demos.map(String)],
               ["New firms (closed won)", ...ACT.closedWon.map(String)],
-              ["Paying firms in month", ...ACT.payingFirms.map(String)],
+              ["Firms charged in month", ...ACT.payingFirms.map(String)],
+            ["Customers to date (ever paid)", ...ACT.customersToDate.map(String)],
               ["Cases submitted", ...ACT.cases.map(String)],
-              ["Revenue collected", ...ACT.revenue.map((v) => money(v))],
+              ["Gross revenue (Stripe)", ...ACT.revenue.map((v) => money(v))],
             ]}
           />
         </Card>
-        <Caption>* Nov = 1st–17th. Nov revenue projects to ~$26.5k (+55% vs Oct). Source: HubSpot deals/demos, Stripe net charges (external customers), app cases, Meta Ads.</Caption>
+        <Caption>* Nov = 1st–17th. Nov gross revenue projects to ~$28k (+33% vs Oct). Revenue is gross Stripe charges before refunds (subscriptions + per-case), external customers only. Source: HubSpot deals/demos, Stripe, app cases, Meta Ads.</Caption>
       </section>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -149,7 +150,8 @@ export function Plan2M() {
               ["MQL → demo", pct(UNIT.mqlToDemo), "Jul 37%, Aug 59%, Sep 43%, Oct 23%"],
               ["Demo → closed won", pct(UNIT.demoToWon), "Jul 37%, Aug 34%, Sep 39%, Oct 21% (cohort still open)"],
               ["Demos per AE / month", String(UNIT.demosPerAe), "Chris: 70 in Oct, 71 in Nov 1–17"],
-              ["Revenue per paying firm / month", money(UNIT.arpa), "Aug–Oct $376–416; 46 of 62 subs are $300 Solo"],
+              ["Gross revenue per paying firm / month", money(UNIT.arpa), "Sep $496, Oct $466 (subscription + per-case); 46 of 63 subs are $300 Solo"],
+                ["Paying firms today", "60 / 84", "60 charged since Oct 1; 84 customers have paid at least once; 63 active subscriptions"],
               ["Cases per paying firm / month", UNIT.casesPerFirm.toFixed(1), "Sep 2.0, Oct 2.0"],
               ["Monthly logo churn", "1%", "2 cancellations in 5.5 months (Paronyan Oct, Farsad Nov) on an avg ~40 subs; pauses/failed cards not counted"],
             ]}
@@ -163,7 +165,7 @@ export function Plan2M() {
               September and closed 67 of 71 deals. One person is the entire pipeline.
             </P>
             <P>
-              <b>Price point is low.</b> 46 of 62 active subscriptions are $300 Solo. Average revenue per paying firm is ~$410/mo. Firms on Filevine (22) and
+              <b>Price point is low.</b> 46 of 63 active subscriptions are $300 Solo. Gross revenue per paying firm is ~$465/mo including per-case fees. Firms on Filevine (22) and
               Litify/Needles (9) are the larger accounts to move to Boutique/Growth.
             </P>
             <P>
@@ -218,7 +220,7 @@ export function Plan2M() {
             })}
           />
         </Card>
-        <Caption>Paying firms = subscribers plus per-case payers active in the month. Cases assume 2.0/firm/mo rising to 2.6 with a CS manager. New firms/mo is closed-won deals.</Caption>
+        <Caption>Paying firms = firms charged in the month (subscribers plus per-case payers); 84 firms have paid to date. Cases assume 2.0/firm/mo rising to 2.6 with a CS manager. New firms/mo is closed-won deals.</Caption>
       </section>
 
       <Card>
@@ -329,7 +331,7 @@ export function Plan2M() {
           <CardBody className="flex flex-col gap-2">
             <P>1. Win rate holds near 30% as demo volume triples. The Oct cohort is at 21% so far — watch it close out before hiring AE #3.</P>
             <P>2. Meta CPL stays under ~$100 at $35k/mo. Oct ran $81 at $15k; expect degradation, which the model already builds in.</P>
-            <P>3. Revenue per firm climbs from $410 to ~$550: cases/firm from 2.0 to 2.6, and at least a third of new firms land on Boutique or Growth, not Solo.</P>
+            <P>3. Gross revenue per firm climbs from $465 to ~$600: cases/firm from 2.0 to 2.6, and at least a third of new firms land on Boutique or Growth, not Solo.</P>
             <P>4. Churn stays near today&apos;s ~1%/mo as the base grows 5×. Only 2 firms have cancelled so far; the risk is new Solo firms that never submit a second case.</P>
             <P>5. Delivery scales ~8× on cases (89/mo → ~900/mo). That is an operations plan on its own: analysts, QA, and Dr. Hashish&apos;s sign-off capacity.</P>
           </CardBody>
@@ -343,7 +345,7 @@ export function Plan2M() {
               ["MQLs / month", "~270", r0(results[2][3].mqls), r0(cJune.mqls)],
               ["Demos / month", "~100", r0(results[2][3].demos), r0(cJune.demos)],
               ["New firms / month", "~25", r0(results[2][3].wins), r0(cJune.wins)],
-              ["Paying firms", String(UNIT.payingFirmsNow), r0(results[2][3].firms), r0(cJune.firms)],
+              ["Paying firms / month", String(UNIT.payingFirmsNow), r0(results[2][3].firms), r0(cJune.firms)],
               ["Cases / month", "~85", r0(results[2][3].cases), r0(cJune.cases)],
               ["Revenue / firm / month", money(UNIT.arpa), money(results[2][3].arpa), money(cJune.arpa)],
               ["Revenue / month", k(NOV_PROJECTED_REVENUE), k(results[2][3].revenue), k(cJune.revenue)],
@@ -353,7 +355,7 @@ export function Plan2M() {
       </div>
 
       <Caption>
-        Sources: HubSpot deals (pipeline default, sw_demo_date, closedate), Stripe charges and subscriptions (external customers, net of refunds), app case submissions,
+        Sources: HubSpot deals (pipeline default, sw_demo_date, closedate), Stripe charges and subscriptions (external customers, gross before refunds), app case submissions,
         Meta Ads spend and leads; all via the GTM dashboard database as of 2026-11-17. Active subscriptions today: {ACTIVE_SUBS} ({money(MRR)} MRR).
       </Caption>
     </div>

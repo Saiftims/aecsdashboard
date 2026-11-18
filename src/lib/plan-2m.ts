@@ -10,13 +10,14 @@ export const ACT = {
   dealsCreated: [130, 102, 72, 277, 186],
   demos: [38, 50, 38, 70, 71],
   closedWon: [16, 19, 28, 28, 15],
-  payingFirms: [9, 18, 30, 45, 32],
+  payingFirms: [13, 18, 30, 45, 32], // customers charged in the month
+  customersToDate: [17, 29, 50, 70, 84], // distinct customers who have ever paid
   cases: [32, 45, 60, 89, 53],
-  revenue: [6700, 6772, 12468, 17132, 16148],
+  revenue: [7700, 7076, 14867, 20982, 16448], // GROSS Stripe charges (before refunds), external customers
 };
-export const NOV_PROJECTED_REVENUE = 26500;
-export const ACTIVE_SUBS = 62;
-export const MRR = 23045;
+export const NOV_PROJECTED_REVENUE = 28000; // gross; $16.4k collected by Nov 17, $25.3k sub MRR
+export const ACTIVE_SUBS = 63;
+export const MRR = 25295;
 
 export const UNIT = {
   baseMetaSpend: 15000,
@@ -26,11 +27,12 @@ export const UNIT = {
   demoToWon: 0.3,
   demosPerAe: 80,
   demosPerBdr: 35,
-  arpa: 410,
+  arpa: 465, // gross $/revenue-generating firm/month (Sep $496, Oct $466)
   casesPerFirm: 2.0,
   churn: 0.01,
   churnWithCs: 0.0075,
-  payingFirmsNow: 64,
+  payingFirmsNow: 60, // customers charged Oct 1 – Nov 17; 84 have paid at least once
+  customersToDate: 84,
 };
 
 export const TARGET_ARR = 2_000_000;
