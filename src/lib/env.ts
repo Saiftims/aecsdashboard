@@ -28,6 +28,8 @@ export const env = {
   cronSecret: () => clean("CRON_SECRET"),
   /** Bearer token the investor data room presents to GET /api/investor. */
   investorFeedToken: () => clean("INVESTOR_FEED_TOKEN"),
+  /** `?k=` value that unlocks the public /share/* pages (no dashboard login). */
+  planShareKey: () => clean("PLAN_SHARE_KEY"),
   /** Meta Graph token with leads_retrieval + pages_show_list + pages_read_engagement. */
   metaAccessToken: () => required("META_ACCESS_TOKEN"),
   metaPageId: () => clean("META_PAGE_ID") || "852956741232072",

@@ -4,7 +4,8 @@ import { NextResponse, type NextRequest } from "next/server";
 // /api/cron, /api/investor, /api/webhooks and /api/readai authenticate
 // themselves with a bearer token, signature or OAuth state (CRON_SECRET /
 // INVESTOR_FEED_TOKEN / READAI_WEBHOOK_*) - no dashboard session is involved.
-const PUBLIC_PATHS = ["/login", "/auth", "/api/cron", "/api/investor", "/api/webhooks", "/api/readai"];
+// /share/* pages check ?k=PLAN_SHARE_KEY themselves (link-shareable, no login).
+const PUBLIC_PATHS = ["/login", "/auth", "/api/cron", "/api/investor", "/api/webhooks", "/api/readai", "/share"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
