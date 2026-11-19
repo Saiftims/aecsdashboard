@@ -70,7 +70,7 @@ async function writeCompanyIntake(companyId: string, calls: Row[]): Promise<bool
 /** Examine up to `max` not-yet-examined synced calls, newest first, `concurrency`
  * at a time, stopping before `deadline`. `dry` reads and reports without
  * storing or writing anything. */
-export async function backfillIntake(opts: { max?: number; deadline?: number; dry?: boolean; concurrency?: number } = {}): Promise<IntakeBackfillStats> {
+export async function backfillIntake(opts: { max?: number; deadline?: number; dry?: boolean; concurrency?: number; offset?: number } = {}): Promise<IntakeBackfillStats> {
   const sb = supabaseService();
   const max = opts.max ?? 30;
   const deadline = opts.deadline ?? Date.now() + 240_000;
@@ -127,7 +127,10 @@ export async function backfillIntake(opts: { max?: number; deadline?: number; dr
     }
   };
 
-  const batch = todo.slice(0, max);
+  // `offset` only makes sense with `dry`, to sample older calls: a real run
+  // always takes the newest calls still to do.
+  const start = dry ? Math.max(0, opts.offset ?? 0) : 0;
+  const batch = todo.slice(start, start + max);
   const width = Math.max(1, Math.min(opts.concurrency ?? 3, 6));
   for (let i = 0; i < batch.length && Date.now() < deadline; i += width) {
     await Promise.all(batch.slice(i, i + width).map(one));
