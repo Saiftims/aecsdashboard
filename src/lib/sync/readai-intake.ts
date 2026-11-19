@@ -32,7 +32,7 @@ export interface IntakeBackfillStats {
   synced_calls: number; remaining_before: number; examined: number; with_intake: number; failed: number;
   notes_updated: number; companies_updated: number; remaining: number; dry: boolean;
   properties: string[]; errors: string[];
-  calls: { date: string; firm: unknown; handled_by: unknown; tools: unknown; documents: unknown; notes: unknown; quote: unknown }[];
+  calls: { date: string; firm: unknown; handled_by: unknown; tools: unknown; documents: unknown; notes: unknown; quote: unknown; speaker: unknown }[];
 }
 
 const examined = (x: Stored | null) => !!x && "intake_handled_by" in x;
@@ -99,13 +99,13 @@ export async function backfillIntake(opts: { max?: number; deadline?: number; dr
       const merged: Stored = {
         ...(row.extracted ?? {}),
         intake_handled_by: x.intake_handled_by, intake_tools: x.intake_tools, intake_documents: x.intake_documents, intake_notes: x.intake_notes,
-        evidence: { ...((row.extracted?.evidence as Stored | undefined) ?? {}), intake: x.evidence.intake ?? null },
+        evidence: { ...((row.extracted?.evidence as Stored | undefined) ?? {}), intake: x.evidence.intake ?? null, intake_speaker: x.evidence.intake_speaker ?? null },
       };
       s.examined++;
       const found = hasIntake(merged);
       if (found) s.with_intake++;
       if (found || dry) {
-        s.calls.push({ date: (row.started_at ?? "").slice(0, 10), firm: firm ?? row.title, handled_by: x.intake_handled_by, tools: x.intake_tools, documents: x.intake_documents, notes: x.intake_notes, quote: x.evidence.intake ?? null });
+        s.calls.push({ date: (row.started_at ?? "").slice(0, 10), firm: firm ?? row.title, handled_by: x.intake_handled_by, tools: x.intake_tools, documents: x.intake_documents, notes: x.intake_notes, quote: x.evidence.intake ?? null, speaker: x.evidence.intake_speaker ?? null });
       }
       if (dry) return;
       await must("readai_meetings intake", sb.from("readai_meetings").update({ extracted: merged }).eq("session_id", row.session_id));

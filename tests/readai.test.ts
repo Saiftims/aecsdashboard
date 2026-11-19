@@ -162,6 +162,15 @@ describe("intake", async () => {
     expect(Object.values(intakeProps(none)).filter(Boolean)).toEqual([]);
   });
 
+  it("drops intake the model attributes to one of our own people", () => {
+    const told = { ...base, silent_witness_attendees: ["Chris Sanz", "Alex Q"], intake_handled_by: "in_house", intake_documents: "clients text photos to intake specialist", intake_notes: "Runs Silent Witness on the intake call." };
+    const ours = Extraction.parse(normalizeExtraction({ ...told, evidence: { intake: "we have a firm who uses us in their intake call center", intake_speaker: "Chris S" } }));
+    expect([ours.intake_handled_by, ours.intake_tools, ours.intake_documents, ours.intake_notes, ours.evidence.intake]).toEqual([null, null, null, null, null]);
+    const theirs = Extraction.parse(normalizeExtraction({ ...told, evidence: { intake: "our intake girls have them text the photos", intake_speaker: "Morgan Hilliard" } }));
+    expect(theirs.intake_handled_by).toBe("in_house");
+    expect(theirs.intake_documents).toBe("clients text photos to intake specialist");
+  });
+
   it("writes the intake lines into the note, and one 'not discussed' line when there is nothing", () => {
     const x = Extraction.parse({ ...base, intake_handled_by: "in_house", intake_tools: "Lead Docket", intake_documents: "Clients text photos to the case manager.", intake_notes: "Dedicated intake team of three.", evidence: { intake: "we have three intake girls" } });
     const body = noteBody({ session_id: "s", start_time: "2026-11-12T15:00:00Z" }, x);

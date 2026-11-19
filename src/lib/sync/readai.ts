@@ -155,6 +155,7 @@ export const Extraction = z.object({
     case_volume: z.string().nullable().optional(),
     plan: z.string().nullable().optional(),
     intake: z.string().nullable().optional(),
+    intake_speaker: z.string().nullable().optional(),
   }).default({}),
 });
 export type Extraction = z.infer<typeof Extraction>;
@@ -186,10 +187,10 @@ Answer with ONE JSON object and nothing else, matching this shape exactly:
   "next_step": string|null,                  // the concrete agreed next action, who does it (e.g. "Chris sends Boutique proposal; firm to submit 2 test cases by Friday")
   "next_step_due": "YYYY-MM-DD"|null,        // only if a date or clear timeframe was agreed; resolve relative dates from the call date given
   "summary": string,                         // one sentence, plain, past tense
-  "evidence": {"case_management_system": string|null, "case_volume": string|null, "plan": string|null, "intake": string|null}   // short verbatim quotes supporting those fields; "intake" must be something the firm said
+  "evidence": {"case_management_system": string|null, "case_volume": string|null, "plan": string|null, "intake": string|null, "intake_speaker": string|null}   // short verbatim quotes supporting those fields; "intake" is the firm's own words about its intake and "intake_speaker" the name of the person who said them, as the transcript labels the speaker
 }
 Rules: never invent a value - use null when the transcript does not say. Numbers are numbers, not strings. Names as spoken; do not guess emails. Prefer the organisation name over a person's name for firm_name. "case_management_system" applies to law firms; for insurers or clinics use "other" with the system named in the detail field, or "unknown".
-The four "intake_*" fields describe the FIRM'S OWN client intake: how it takes on its new clients and gathers their documents. They are never about Silent Witness - not the Silent Witness "intake form", not how the firm will submit cases or share links with Silent Witness, not Silent Witness being run "at intake". Record only what someone from the firm said about their own process. A product the Silent Witness rep merely listed in a question ("are you using Filevine, Clio, Dropbox?") is not the firm's tool unless the firm confirmed it. Leave each intake field null when the firm did not speak to it; most older calls never covered intake, and null is the right answer for them.`;
+The four "intake_*" fields describe the FIRM'S OWN client intake: how it takes on its new clients and gathers their documents. They are never about Silent Witness - not the Silent Witness "intake form", not how the firm will submit cases or share links with Silent Witness, not Silent Witness being run "at intake". Record only what someone from the firm said about their own process. What a Silent Witness person says is never the firm's intake - in particular their stories about how other firms or customers use Silent Witness ("we have a firm who uses us in their intake call center") describe someone else. A product the Silent Witness rep merely listed in a question ("are you using Filevine, Clio, Dropbox?") is not the firm's tool unless the firm confirmed it. When the firm did answer a question about its intake or its case documents, record the answer even if it was brief or vague ("the office uses Outlook and file sharing, I don't know more", "I keep everything on my desktop, not in Clio"), in intake_documents or intake_notes as fits. Leave every intake field null when nobody from the firm spoke to it.`;
 
 function userPrompt(p: ReadAiPayload, ctx: { internal: ReadAiParticipant[]; external: ReadAiParticipant[]; knownContacts: string[]; knownCompany: string | null }): string {
   const who = (list: ReadAiParticipant[]) => list.map((x) => `${x.name ?? ""}${x.email ? ` <${x.email}>` : ""}`).join(", ") || "(none listed)";
@@ -265,6 +266,16 @@ export function normalizeExtraction(raw: unknown): unknown {
   for (const k of ["intake_tools", "intake_documents", "intake_notes"]) {
     const v = Array.isArray(r[k]) ? (r[k] as unknown[]).filter((i) => typeof i === "string").join(", ") : r[k];
     r[k] = typeof v === "string" && v.trim() ? v.trim() : null;
+  }
+  // Intake has to come from the firm. When the model attributes its intake
+  // quote to one of our own people (a rep describing how another customer
+  // works), nothing about this firm was learned - drop it all.
+  const ev = r.evidence && typeof r.evidence === "object" ? r.evidence as Record<string, unknown> : null;
+  const speaker = typeof ev?.intake_speaker === "string" ? squash(ev.intake_speaker) : "";
+  const ours = (Array.isArray(r.silent_witness_attendees) ? r.silent_witness_attendees : []).filter((n): n is string => typeof n === "string").map(squash).filter((n) => n.length > 2);
+  if (speaker.length > 2 && ours.some((n) => n.startsWith(speaker) || speaker.startsWith(n))) {
+    for (const k of INTAKE_FIELDS) r[k] = null;
+    r.evidence = { ...ev, intake: null, intake_speaker: null };
   }
   if (typeof r.next_step_due === "string" && !/^\d{4}-\d{2}-\d{2}$/.test(r.next_step_due)) r.next_step_due = null;
   for (const k of ["mva_cases_per_month", "total_caseload"]) {
