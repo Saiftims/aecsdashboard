@@ -148,6 +148,41 @@ describe("history import", async () => {
   });
 });
 
+describe("intake", async () => {
+  const { Extraction, intakeLines, intakeProps, latestIntake, normalizeExtraction, noteBody } = await import("@/lib/sync/readai");
+  const base = { is_sales_or_cs_call: true, firm_name: "Acme Injury Law", primary_contact: null, mva_cases_per_month: null, total_caseload: null, plan_discussed: null, plan_chosen: null, price_concerns: null, next_step: null, summary: "Demo." };
+
+  it("accepts the model's spellings and treats a call that never covered intake as all-null", () => {
+    const x = Extraction.parse(normalizeExtraction({ ...base, intake_handled_by: "In-house", intake_tools: ["Lead Docket", "Case Status"], intake_documents: "  ", intake_notes: "Two intake specialists sign up clients by phone." }));
+    expect(x.intake_handled_by).toBe("in_house");
+    expect(x.intake_tools).toBe("Lead Docket, Case Status");
+    expect(x.intake_documents).toBeNull();
+    const none = Extraction.parse(normalizeExtraction({ ...base, intake_handled_by: "a call centre in Manila" }));
+    expect([none.intake_handled_by, none.intake_tools, none.intake_documents, none.intake_notes]).toEqual([null, null, null, null]);
+    expect(Object.values(intakeProps(none)).filter(Boolean)).toEqual([]);
+  });
+
+  it("writes the intake lines into the note, and one 'not discussed' line when there is nothing", () => {
+    const x = Extraction.parse({ ...base, intake_handled_by: "in_house", intake_tools: "Lead Docket", intake_documents: "Clients text photos to the case manager.", intake_notes: "Dedicated intake team of three.", evidence: { intake: "we have three intake girls" } });
+    const body = noteBody({ session_id: "s", start_time: "2026-11-12T15:00:00Z" }, x);
+    for (const needle of ["Intake: In House - tools: Lead Docket", "Intake documents: Clients text photos", "Intake notes: Dedicated intake team of three.", '"we have three intake girls"']) expect(body).toContain(needle);
+    const without = noteBody({ session_id: "s", start_time: "2026-11-12T15:00:00Z" }, x, { intake: false });
+    expect(without).not.toContain("Intake");
+    expect(without).not.toContain("intake girls");
+    expect(intakeLines(Extraction.parse(base))).toEqual(["Intake: not discussed"]);
+    expect(intakeProps(x)).toMatchObject({ sw_intake_handled_by: "in_house", sw_intake_tools: "Lead Docket" });
+  });
+
+  it("builds a firm's intake from all its calls, the newest call that spoke to each field winning", () => {
+    const got = latestIntake([
+      { started_at: "2026-08-01T00:00:00Z", extracted: { intake_handled_by: "outsourced", intake_tools: "Lead Docket", intake_documents: null, intake_notes: "Answering service takes the first call." } },
+      { started_at: "2026-11-01T00:00:00Z", extracted: { intake_handled_by: "in_house", intake_tools: null, intake_documents: null, intake_notes: null } },
+      { started_at: "2026-10-01T00:00:00Z", extracted: null },
+    ]);
+    expect(got).toEqual({ intake_handled_by: "in_house", intake_tools: "Lead Docket", intake_documents: null, intake_notes: "Answering service takes the first call." });
+  });
+});
+
 describe("extraction normalisation", async () => {
   const { Extraction, normalizeExtraction } = await import("@/lib/sync/readai");
   const base = { is_sales_or_cs_call: false, not_a_call_reason: "internal", firm_name: null, primary_contact: null, mva_cases_per_month: null, total_caseload: null, plan_discussed: null, plan_chosen: null, price_concerns: null, next_step: null, summary: "Internal sync." };

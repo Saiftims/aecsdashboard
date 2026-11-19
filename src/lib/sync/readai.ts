@@ -6,8 +6,9 @@
  *
  *   1. asks Claude for the sales facts in the transcript - firm, who we spoke
  *      to and their role, who else was there, case management system, motor
- *      vehicle accident cases a month and total caseload, plan discussed and
- *      price concerns, next step, one-sentence summary;
+ *      vehicle accident cases a month and total caseload, how the firm runs
+ *      its own client intake (who does it, tools, how documents arrive),
+ *      plan discussed and price concerns, next step, one-sentence summary;
  *   2. finds the HubSpot contact(s) by the participants' emails, their
  *      company and open deal (creating a contact only when we have an
  *      external email, a company only when the call named the firm and no
@@ -118,6 +119,10 @@ export const CMS_OPTIONS = [
 ] as const;
 export const PLAN_OPTIONS = ["solo", "boutique", "growth", "custom", "undecided"] as const;
 export const ROLE_OPTIONS = ["attorney", "case_manager", "decision_maker", "admin", "influencer", "other"] as const;
+/** Who signs up the firm's own new clients. */
+export const INTAKE_OPTIONS = ["in_house", "outsourced", "mixed"] as const;
+/** The intake facts, in the order they are written to the note. */
+export const INTAKE_FIELDS = ["intake_handled_by", "intake_tools", "intake_documents", "intake_notes"] as const;
 
 const Attendee = z.object({ name: z.string(), role: z.string().nullable().optional(), email: z.string().nullable().optional() });
 
@@ -135,6 +140,10 @@ export const Extraction = z.object({
   mva_cases_per_month: z.number().nullable(),
   total_caseload: z.number().nullable(),
   caseload_notes: z.string().nullable().optional(),
+  intake_handled_by: z.enum(INTAKE_OPTIONS).nullable().default(null),
+  intake_tools: z.string().nullable().default(null),
+  intake_documents: z.string().nullable().default(null),
+  intake_notes: z.string().nullable().default(null),
   plan_discussed: z.enum(PLAN_OPTIONS).nullable(),
   plan_chosen: z.enum(PLAN_OPTIONS).nullable(),
   price_concerns: z.string().nullable(),
@@ -145,6 +154,7 @@ export const Extraction = z.object({
     case_management_system: z.string().nullable().optional(),
     case_volume: z.string().nullable().optional(),
     plan: z.string().nullable().optional(),
+    intake: z.string().nullable().optional(),
   }).default({}),
 });
 export type Extraction = z.infer<typeof Extraction>;
@@ -166,15 +176,20 @@ Answer with ONE JSON object and nothing else, matching this shape exactly:
   "mva_cases_per_month": number|null,        // motor vehicle accident / auto cases (or claims, or MVA patients) the organisation takes in per month - their intake volume, NOT how many cases they plan to submit to Silent Witness or which plan tier they picked; convert "about 40 a month" to 40, "500 a year" to 42; null if only the Silent Witness usage was discussed
   "total_caseload": number|null,             // total active cases / open claims / active patients if given
   "caseload_notes": string|null,             // how the numbers were phrased, caveats
+  "intake_handled_by": "in_house"|"outsourced"|"mixed"|null,   // who signs up the firm's OWN new clients: "in_house" = the firm's staff (an attorney, paralegals, case managers, a dedicated intake team); "outsourced" = an outside call centre, answering or intake service; "mixed" = both; null if they did not say
+  "intake_tools": string|null,               // software the firm uses to run its intake, as they named it, comma-separated (e.g. "Lead Docket, Case Status, CallRail"); null if none named
+  "intake_documents": string|null,           // how the firm receives and stores documents and evidence for a new case (photos, police reports, medical records, repair estimates): who sends them, by what channel, where they are kept (e.g. "clients text photos to the case manager; records requested by a paralegal and saved in Dropbox"); null if they did not say
+  "intake_notes": string|null,               // 1-3 plain sentences on how the firm's intake works: who does it and how many people, the steps, how cases are screened, what is slow or painful; null if not discussed
   "plan_discussed": "solo"|"boutique"|"growth"|"custom"|"undecided"|null,
   "plan_chosen": same options|null,          // only if they committed or clearly picked one
   "price_concerns": string|null,             // any pushback on price, budget, per-case cost, contract length; null if none voiced
   "next_step": string|null,                  // the concrete agreed next action, who does it (e.g. "Chris sends Boutique proposal; firm to submit 2 test cases by Friday")
   "next_step_due": "YYYY-MM-DD"|null,        // only if a date or clear timeframe was agreed; resolve relative dates from the call date given
   "summary": string,                         // one sentence, plain, past tense
-  "evidence": {"case_management_system": string|null, "case_volume": string|null, "plan": string|null}   // short verbatim quotes supporting those three fields
+  "evidence": {"case_management_system": string|null, "case_volume": string|null, "plan": string|null, "intake": string|null}   // short verbatim quotes supporting those fields; "intake" must be something the firm said
 }
-Rules: never invent a value - use null when the transcript does not say. Numbers are numbers, not strings. Names as spoken; do not guess emails. Prefer the organisation name over a person's name for firm_name. "case_management_system" applies to law firms; for insurers or clinics use "other" with the system named in the detail field, or "unknown".`;
+Rules: never invent a value - use null when the transcript does not say. Numbers are numbers, not strings. Names as spoken; do not guess emails. Prefer the organisation name over a person's name for firm_name. "case_management_system" applies to law firms; for insurers or clinics use "other" with the system named in the detail field, or "unknown".
+The four "intake_*" fields describe the FIRM'S OWN client intake: how it takes on its new clients and gathers their documents. They are never about Silent Witness - not the Silent Witness "intake form", not how the firm will submit cases or share links with Silent Witness, not Silent Witness being run "at intake". Record only what someone from the firm said about their own process. A product the Silent Witness rep merely listed in a question ("are you using Filevine, Clio, Dropbox?") is not the firm's tool unless the firm confirmed it. Leave each intake field null when the firm did not speak to it; most older calls never covered intake, and null is the right answer for them.`;
 
 function userPrompt(p: ReadAiPayload, ctx: { internal: ReadAiParticipant[]; external: ReadAiParticipant[]; knownContacts: string[]; knownCompany: string | null }): string {
   const who = (list: ReadAiParticipant[]) => list.map((x) => `${x.name ?? ""}${x.email ? ` <${x.email}>` : ""}`).join(", ") || "(none listed)";
@@ -204,18 +219,26 @@ export function parseModelJson(text: string): unknown {
 async function askClaude(system: string, user: string): Promise<string> {
   const key = env.anthropicApiKey();
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({
-      model: env.anthropicModel(), max_tokens: 1500, temperature: 0,
-      system, messages: [{ role: "user", content: user }],
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!res.ok) throw new Error(`anthropic -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const data = await res.json() as { content?: { type: string; text?: string }[] };
-  return (data.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+  // Rate-limited (429) and overloaded (529) answers clear within seconds;
+  // two patient retries keep a bulk re-read from failing calls at random.
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: env.anthropicModel(), max_tokens: 2000, temperature: 0,
+        system, messages: [{ role: "user", content: user }],
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if ((res.status === 429 || res.status === 529) && attempt < 2) {
+      await new Promise((r) => setTimeout(r, Math.min(Number(res.headers.get("retry-after")) || 10 * (attempt + 1), 30) * 1000));
+      continue;
+    }
+    if (!res.ok) throw new Error(`anthropic -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const data = await res.json() as { content?: { type: string; text?: string }[] };
+    return (data.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+  }
 }
 
 /** Coerce the model's enum fields to the vocabulary before validation: on
@@ -238,6 +261,11 @@ export function normalizeExtraction(raw: unknown): unknown {
   r.plan_chosen = pick(r.plan_chosen, PLAN_OPTIONS, null);
   r.primary_contact_role_category = pick(r.primary_contact_role_category, ROLE_OPTIONS, null);
   r.organization_type = pick(r.organization_type, ["law_firm", "insurance", "medical_provider", "other"] as const, null);
+  r.intake_handled_by = pick(r.intake_handled_by, INTAKE_OPTIONS, null);
+  for (const k of ["intake_tools", "intake_documents", "intake_notes"]) {
+    const v = Array.isArray(r[k]) ? (r[k] as unknown[]).filter((i) => typeof i === "string").join(", ") : r[k];
+    r[k] = typeof v === "string" && v.trim() ? v.trim() : null;
+  }
   if (typeof r.next_step_due === "string" && !/^\d{4}-\d{2}-\d{2}$/.test(r.next_step_due)) r.next_step_due = null;
   for (const k of ["mva_cases_per_month", "total_caseload"]) {
     if (typeof r[k] === "string") { const n = Number(String(r[k]).replace(/[^\d.]/g, "")); r[k] = Number.isFinite(n) && String(r[k]).trim() ? n : null; }
@@ -271,9 +299,49 @@ const COMPANY_PROPS: HsPropertySpec[] = [
   { name: "sw_total_caseload", label: "Total active caseload", type: "number", fieldType: "number" },
   { name: "sw_caseload_notes", label: "Caseload notes", type: "string", fieldType: "textarea",
     description: "How the firm described its volume on the last call, in their words - including when they would not give a number." },
+  { name: "sw_intake_handled_by", label: "Intake handled by", type: "enumeration", fieldType: "select",
+    description: "From call transcripts (Read.ai). Who signs up the firm's new clients: its own staff, an outside intake / answering service, or both.",
+    options: INTAKE_OPTIONS.map((v) => ({ label: label(v), value: v })) },
+  { name: "sw_intake_tools", label: "Intake tools", type: "string", fieldType: "text",
+    description: "Software the firm named for running its intake (Lead Docket, Case Status…)." },
+  { name: "sw_intake_documents", label: "How they receive documents", type: "string", fieldType: "textarea",
+    description: "How photos, police reports, records and estimates reach the firm for a new case, and where they are kept." },
+  { name: "sw_intake_notes", label: "Intake process notes", type: "string", fieldType: "textarea",
+    description: "How the firm described its intake: who does it, the steps, how cases are screened, what is slow." },
   { name: "sw_last_call_date", label: "Last recorded call", type: "date", fieldType: "date" },
   { name: "sw_last_call_summary", label: "Last call summary", type: "string", fieldType: "textarea" },
 ];
+
+type IntakeFacts = Pick<Extraction, (typeof INTAKE_FIELDS)[number]>;
+
+/** The company properties for whatever a call said about intake. */
+export function intakeProps(x: Partial<IntakeFacts>): Record<string, string | undefined> {
+  return {
+    sw_intake_handled_by: x.intake_handled_by ?? undefined,
+    sw_intake_tools: x.intake_tools ? x.intake_tools.slice(0, 250) : undefined,
+    sw_intake_documents: x.intake_documents ? x.intake_documents.slice(0, 1000) : undefined,
+    sw_intake_notes: x.intake_notes ? x.intake_notes.slice(0, 1500) : undefined,
+  };
+}
+
+/** The intake lines of the call note; a single "not discussed" line when the
+ * call never covered it, so a rep can see the question was missed. */
+export function intakeLines(x: Partial<IntakeFacts>): string[] {
+  if (!INTAKE_FIELDS.some((k) => x[k])) return ["Intake: not discussed"];
+  return [
+    `Intake: ${x.intake_handled_by ? label(x.intake_handled_by) : "who handles it not stated"}${x.intake_tools ? ` - tools: ${x.intake_tools}` : ""}`,
+    x.intake_documents ? `Intake documents: ${x.intake_documents}` : "",
+    x.intake_notes ? `Intake notes: ${x.intake_notes}` : "",
+  ].filter(Boolean);
+}
+
+/** One firm's intake picture from all of its calls: for each field, what the
+ * most recent call that spoke to it said. */
+export function latestIntake(calls: { started_at: string | null; extracted: Partial<IntakeFacts> | null }[]): IntakeFacts {
+  const newestFirst = [...calls].sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""));
+  const first = <K extends (typeof INTAKE_FIELDS)[number]>(k: K) => (newestFirst.find((c) => c.extracted?.[k])?.extracted?.[k] ?? null) as IntakeFacts[K];
+  return { intake_handled_by: first("intake_handled_by"), intake_tools: first("intake_tools"), intake_documents: first("intake_documents"), intake_notes: first("intake_notes") };
+}
 const DEAL_PROPS: HsPropertySpec[] = [
   { name: "sw_plan_discussed", label: "Plan discussed", type: "enumeration", fieldType: "select",
     options: PLAN_OPTIONS.map((v) => ({ label: label(v), value: v })) },
@@ -458,7 +526,7 @@ async function resolveHubSpot(external: ReadAiParticipant[], x: Extraction | nul
 // ---------------------------------------------------------------------------
 // HubSpot writes
 // ---------------------------------------------------------------------------
-export function noteBody(p: ReadAiPayload, x: Extraction): string {
+export function noteBody(p: ReadAiPayload, x: Extraction, opts: { intake?: boolean } = {}): string {
   const date = (p.start_time ?? "").slice(0, 10);
   const who = (a: { name: string; role?: string | null }) => a.role ? `${a.name} (${a.role})` : a.name;
   const lines = [
@@ -470,11 +538,12 @@ export function noteBody(p: ReadAiPayload, x: Extraction): string {
     x.silent_witness_attendees.length ? `Silent Witness: ${x.silent_witness_attendees.join(", ")}` : "",
     `Case management system: ${x.case_management_system === "unknown" ? "not discussed" : label(x.case_management_system)}${x.case_management_system_detail ? ` - ${x.case_management_system_detail}` : ""}`,
     `MVA cases / month: ${x.mva_cases_per_month ?? "not stated"}${x.total_caseload ? ` - total caseload ${x.total_caseload}` : ""}${x.caseload_notes ? ` (${x.caseload_notes})` : ""}`,
+    ...(opts.intake === false ? [] : intakeLines(x)),
     `Plan: ${x.plan_chosen ? `chose ${label(x.plan_chosen)}` : x.plan_discussed ? `discussed ${label(x.plan_discussed)}` : "not discussed"}`,
     `Price concerns: ${x.price_concerns ?? "none voiced"}`,
     `Next step: ${x.next_step ?? "none agreed"}${x.next_step_due ? ` (by ${x.next_step_due})` : ""}`,
-    x.evidence.case_management_system || x.evidence.case_volume || x.evidence.plan
-      ? `Quotes: ${[x.evidence.case_management_system, x.evidence.case_volume, x.evidence.plan].filter(Boolean).map((q) => `"${q}"`).join(" / ")}`
+    x.evidence.case_management_system || x.evidence.case_volume || x.evidence.plan || (opts.intake !== false && x.evidence.intake)
+      ? `Quotes: ${[x.evidence.case_management_system, x.evidence.case_volume, x.evidence.plan, opts.intake === false ? null : x.evidence.intake].filter(Boolean).map((q) => `"${q}"`).join(" / ")}`
       : "",
     p.report_url ? `Report: ${p.report_url}` : "",
   ];
@@ -548,6 +617,7 @@ async function writeHubSpot(p: ReadAiPayload, x: Extraction, r: Resolved, prior:
       sw_estimated_monthly_case_volume: x.mva_cases_per_month ?? undefined,
       sw_total_caseload: x.total_caseload ?? undefined,
       sw_caseload_notes: x.caseload_notes ? x.caseload_notes.slice(0, 1000) : undefined,
+      ...intakeProps(x),
       sw_last_call_date: callDate,
       sw_last_customer_meeting: callDate,
       sw_last_call_summary: summary,

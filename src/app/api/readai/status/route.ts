@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
         firm: x.firm_name ?? null, contact: (x.primary_contact as { name?: string; role?: string } | null)?.name ?? null,
         role: (x.primary_contact as { name?: string; role?: string } | null)?.role ?? null,
         cms: x.case_management_system ?? null, mva_per_month: x.mva_cases_per_month ?? null, caseload: x.total_caseload ?? null,
+        intake_handled_by: x.intake_handled_by ?? null, intake_tools: x.intake_tools ?? null, intake_documents: x.intake_documents ?? null, intake_notes: x.intake_notes ?? null,
         plan: x.plan_chosen ?? x.plan_discussed ?? null, price_concerns: x.price_concerns ?? null, next_step: x.next_step ?? null, summary: x.summary ?? null,
         fields_new: r.hubspot_writes?.fields_new ?? 0, fields_set: r.hubspot_writes?.fields_set ?? 0, note: r.hubspot_writes?.note ?? null, task: r.hubspot_writes?.task ?? null,
         company_id: r.hubspot_company_id, deal_id: r.hubspot_deal_id, error: r.status === "synced" ? null : r.error, report_url: r.report_url,
