@@ -620,16 +620,17 @@ async function monthDrill(metric: string): Promise<DrillResult | null> {
   }
   if (kind === "firms") {
     const list = byDateDesc(monthMembers.newFirms[key] ?? []);
-    const signupOnly = list.filter((x) => !x.firstCaseAt).length;
+    const noCase = list.filter((x) => !x.firstCaseAt).length;
     const day = (iso: string) => new Date(iso).toLocaleDateString();
     return {
       label: `New firms — ${monthLabel} · ${list.length} ` +
-        `(${list.length - signupOnly} submitted a case, ${signupOnly} signed up only)`,
+        `(${list.length - noCase} submitted a case, ${noCase} no case yet)`,
       rows: list.map((x) => ({
         title: firmName(x.companyId) ?? x.companyId,
         subtitle: [
-          x.firstCaseAt ? "Submitted a case" : "Signed up, no case yet",
-          x.signedUpAt ? `signed up ${day(x.signedUpAt)}` : "no app signup (intake)",
+          x.firstCaseAt ? "Submitted a case" : x.planStartedAt ? "On a plan, no case yet" : "Signed up, no case yet",
+          x.signedUpAt ? `signed up ${day(x.signedUpAt)}` : x.firstCaseAt ? "no app signup (intake)" : "no app signup on record",
+          x.planStartedAt ? `plan started ${day(x.planStartedAt)}` : null,
           x.firstCaseAt ? `first case ${day(x.firstCaseAt)}` : null,
           `${company.get(x.companyId)?.cases_lifetime ?? 0} lifetime case(s)`,
         ].filter(Boolean).join(" · "),

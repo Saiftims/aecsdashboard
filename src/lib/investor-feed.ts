@@ -224,7 +224,7 @@ export async function investorFeed(): Promise<InvestorFeed> {
       contacted: "Sales deals created in the period that moved past MQL (excluding Nurture and Closed Lost).",
       demosBooked: "First entry into Demo Scheduled; before Aug 2026 the demos that ran stand in, so no-shows read 0 there.",
       demosCompleted: "Attended Calendly demos plus demos the CSM marked completed in HubSpot; no-shows never count.",
-      newFirms: "A firm counts once, in the month it first signed up for the app or submitted its first case.",
+      newFirms: "A firm counts once, in the month it first signed up for the app, submitted its first case or started a paid plan.",
       revenue: "Gross Stripe charges in the month charged (refunds not deducted); firms Stripe has never billed are modelled at $250 a case or their flat fee.",
       mrr: "Live Stripe plans at what they actually bill (discounts applied), plus flat-fee firms invoiced outside Stripe.",
       transactionalMonthly: "Per-case Stripe cash over the last three full months, divided by three.",

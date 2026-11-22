@@ -278,12 +278,14 @@ export default async function ActivityPage() {
               target={targets.newFirms} stretch={targets.stretch.newFirms} drillBase="/drill/month_firms_" />
           </CardBody>
           <Note>
-            A firm counts once, in the month it first signed up for the app or
-            submitted its first case, whichever came first. The dark part has
-            submitted a case; the pale part has signed up but not sent one yet,
-            and moves into the dark part of its own month when it does. A
-            closed-won deal with no signup and no case is still pipeline. The
-            cohort tables below stay on first-case months.
+            A firm counts once, in the month it first signed up for the app,
+            submitted its first case or started a paid plan, whichever came
+            first — the same rule as &ldquo;Firms signed up&rdquo; in the unit
+            economics table. The dark part has submitted a case; the pale part
+            has signed up or is on a plan but has not sent one yet, and moves
+            into the dark part of its own month when it does. A closed-won deal
+            with no signup, case or plan is still pipeline. The cohort tables
+            below stay on first-case months.
           </Note>
         </Card>
       </Section>

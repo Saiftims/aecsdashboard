@@ -1185,7 +1185,9 @@ export interface RetentionReport {
   cohorts: CohortRow[];
   monthCols: number;
   monthlyCases: MonthCount[];
-  monthlyNewFirms: (MonthCount & { firstCase: number; signupOnly: number })[];
+  /** `firstCase` firms have submitted a case; `noCase` have signed up or
+   * started a plan but not sent one yet. */
+  monthlyNewFirms: (MonthCount & { firstCase: number; noCase: number })[];
   monthlyDemos: MonthCount[];
   /** Demos booked per month by `sw_demo_booked_at` - the number the monthly
    * demo TARGET is set in (owner, 2026-11-02). Months before the stamp exists
@@ -1234,6 +1236,8 @@ export interface MonthMembers {
   demosBooked: Record<string, { dealId: string; at: string; demoDate: string | null; selfServe: boolean }[]>;
   newFirms: Record<string, {
     companyId: string; at: string; signedUpAt: string | null; firstCaseAt: string | null;
+    /** Start of the firm's first paid Stripe plan, if it has had one. */
+    planStartedAt: string | null;
   }[]>;
   /** companyId null = an analyst-worked case no firm could be named for. */
   cases: Record<string, { caseId: string | null; companyId: string | null; at: string }[]>;
@@ -1423,7 +1427,7 @@ export async function retentionReport(): Promise<RetentionReport> {
     // paged because companies is past PostgREST's 1,000-row cap.
     selectAll<CompanyRow>("companies").then((data) => ({ data })),
     sb.from("stripe_subscriptions")
-      .select("company_hubspot_id, status, monthly_cents, started_at, cancelled_at, is_internal"),
+      .select("company_hubspot_id, status, monthly_cents, billed_cents, started_at, cancelled_at, is_internal"),
   ]);
   const statusRows = (companyRows ?? []) as (CompanyRow & { signed_up_at?: string | null })[];
   // Trial firms (sw_customer_status='trial' on the HubSpot company, e.g.
@@ -1489,32 +1493,75 @@ export async function retentionReport(): Promise<RetentionReport> {
   const monthlyCases = countSeries(monthMembers.cases);
 
   // ---- new firms per calendar month ----
-  // A firm is new in the month of its first app signup OR first case,
-  // whichever came first, and appears once (owner, 2026-10-08 - this replaces
-  // the first-case-only rule of 2026-08-28). The bar is split by whether the
-  // firm has submitted a case yet, so a signup-only firm moves into the case
-  // segment of its own month once it sends one. Closed-won paperwork alone
-  // still does not make a new firm. The logo-retention table groups
-  // subscribers by subscribe month and transactional firms by first case.
+  // A firm is new in the month of its first app signup, first case OR first
+  // paid plan, whichever came first, and appears once. The paid plan was added
+  // on 2026-11-22 (owner: "count a paid plan start as a new firm everywhere")
+  // after November read 14 here and 16 in the unit-economics table: Sheldon J.
+  // Vann and Tandy Law had each paid for a Solo plan with no signup or case on
+  // record. It extends the signup-or-case rule of 2026-10-08. The bar is split
+  // by whether the firm has submitted a case yet, so a firm with none moves
+  // into the case segment of its own month once it sends one. Closed-won
+  // paperwork alone still does not make a new firm. The logo-retention table
+  // groups subscribers by subscribe month and transactional firms by first
+  // case.
   const signedUp = new Map<string, number>();
+  const domainOfFirm = new Map<string, string>();
   for (const r of statusRows ?? []) {
     const t = r.signed_up_at ? new Date(r.signed_up_at).getTime() : NaN;
     if (!Number.isNaN(t)) signedUp.set(r.hubspot_id, t);
+    const dom = (r.domain ?? "").toLowerCase().replace(/^www\./, "");
+    if (dom) domainOfFirm.set(r.hubspot_id, dom);
   }
-  for (const companyId of new Set([...byFirm.keys(), ...signedUp.keys()])) {
+  // First paid plan per firm, on the unit-economics rule: a plan that bills
+  // something, and not one whose first payment never cleared.
+  const planStart = new Map<string, number>();
+  for (const s of stripeSubs ?? []) {
+    if (s.is_internal || !s.company_hubspot_id || !s.started_at) continue;
+    if (STRIPE_NOT_A_PLAN.has(String(s.status ?? ""))) continue;
+    if ((s.billed_cents ?? s.monthly_cents ?? 0) <= 0) continue;
+    const t = new Date(s.started_at).getTime();
+    if (Number.isNaN(t)) continue;
+    planStart.set(s.company_hubspot_id, Math.min(planStart.get(s.company_hubspot_id) ?? Infinity, t));
+  }
+  type NewFirm = { companyId: string; onset: number; signup: number | null; firstCase: number | null; plan: number | null };
+  const earliest = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.min(a, b));
+  const newFirmList: NewFirm[] = [];
+  for (const companyId of new Set([...byFirm.keys(), ...signedUp.keys(), ...planStart.keys()])) {
     const firstCase = byFirm.get(companyId)?.[0] ?? null;
     const signup = signedUp.get(companyId) ?? null;
-    const onset = Math.min(firstCase ?? Infinity, signup ?? Infinity);
-    push(monthMembers.newFirms, utcMonthKey(new Date(onset)), {
-      companyId,
-      at: new Date(onset).toISOString(),
-      signedUpAt: signup === null ? null : new Date(signup).toISOString(),
-      firstCaseAt: firstCase === null ? null : new Date(firstCase).toISOString(),
+    const plan = planStart.get(companyId) ?? null;
+    newFirmList.push({ companyId, onset: Math.min(firstCase ?? Infinity, signup ?? Infinity, plan ?? Infinity), signup, firstCase, plan });
+  }
+  // One firm, one bar. HubSpot sometimes holds two company records for the
+  // same domain (Loomis Law Office, November 2026: the plan on one record, the
+  // first case on another), so records sharing a domain fold into the earliest.
+  const firmByDomain = new Map<string, NewFirm>();
+  const foldedFirms: NewFirm[] = [];
+  for (const f of newFirmList.sort((a, b) => a.onset - b.onset)) {
+    const dom = domainOfFirm.get(f.companyId);
+    const prior = dom ? firmByDomain.get(dom) : undefined;
+    if (prior) {
+      prior.signup = earliest(prior.signup, f.signup);
+      prior.firstCase = earliest(prior.firstCase, f.firstCase);
+      prior.plan = earliest(prior.plan, f.plan);
+      continue;
+    }
+    if (dom) firmByDomain.set(dom, f);
+    foldedFirms.push(f);
+  }
+  const isoOrNull = (t: number | null) => (t === null ? null : new Date(t).toISOString());
+  for (const f of foldedFirms) {
+    push(monthMembers.newFirms, utcMonthKey(new Date(f.onset)), {
+      companyId: f.companyId,
+      at: new Date(f.onset).toISOString(),
+      signedUpAt: isoOrNull(f.signup),
+      firstCaseAt: isoOrNull(f.firstCase),
+      planStartedAt: isoOrNull(f.plan),
     });
   }
   const monthlyNewFirms = countSeries(monthMembers.newFirms).map((row) => {
     const firstCase = monthMembers.newFirms[row.key].filter((f) => f.firstCaseAt).length;
-    return { ...row, firstCase, signupOnly: row.count - firstCase };
+    return { ...row, firstCase, noCase: row.count - firstCase };
   });
 
   // ---- MQLs per calendar month ----

@@ -368,14 +368,14 @@ export function LeadSourceChart({
 }
 
 /** New firms per month, split into firms that have submitted a case and firms
- * that have only signed up so far. */
+ * that have signed up or started a plan but not sent one yet. */
 export function MonthlyNewFirmsChart({
   data,
   target,
   stretch,
   drillBase,
 }: {
-  data: { month: string; key?: string; count: number; firstCase: number; signupOnly: number }[];
+  data: { month: string; key?: string; count: number; firstCase: number; noCase: number }[];
   target?: number;
   /** Stretch goal, drawn as a second, amber dotted line above the target. */
   stretch?: number;
@@ -392,7 +392,7 @@ export function MonthlyNewFirmsChart({
         <Tooltip />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="firstCase" stackId="firms" name="Submitted a case" fill={C.violet} />
-        <Bar dataKey="signupOnly" stackId="firms" name="Signed up, no case yet" fill={C.violetSoft}
+        <Bar dataKey="noCase" stackId="firms" name="Signed up or on a plan, no case yet" fill={C.violetSoft}
              radius={[4, 4, 0, 0]} />
         {target ? targetLine(target, `Target ${target}`) : null}
         {stretch ? targetLine(stretch, `Stretch ${stretch}`, C.amber) : null}
