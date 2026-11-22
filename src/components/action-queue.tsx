@@ -45,7 +45,7 @@ export function ActionQueue({ items, title }: { items: QueueItem[]; title: strin
           {[...buckets.entries()].map(([bucket, rows]) => (
             <div key={bucket} className="px-4 py-3">
               <div className="mb-1 flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                   {rows[0].priority}. {bucket}
                 </span>
                 <Badge>{rows.length}</Badge>

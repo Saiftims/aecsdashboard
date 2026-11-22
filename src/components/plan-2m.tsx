@@ -94,7 +94,7 @@ export function Plan2M() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-8">
       <div>
-        <div className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Silent Witness · GTM plan · Nov 17, 2026</div>
+        <div className="mb-1.5 text-[13px] font-semibold text-blue-600 dark:text-blue-400">Silent Witness · GTM plan · Nov 17, 2026</div>
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 md:text-3xl">Path to $2M annualized revenue by June 2027</h1>
         <p className="mt-2 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
           Where Silent Witness lands with the current team versus with new hires. Every input is taken from HubSpot, Stripe, Meta and the app as of Nov 17;

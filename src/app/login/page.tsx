@@ -2,6 +2,7 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import { useState } from "react";
+import { Brand } from "@/components/brand";
 import { Button, Callout, Card, Field, inputCls } from "@/components/ui";
 
 export default function LoginPage() {
@@ -27,12 +28,9 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-4 dark:bg-zinc-950">
       <Card className="w-full max-w-sm p-6">
-        <div className="mb-5 flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-900 text-xs font-bold text-white dark:bg-zinc-100 dark:text-zinc-900">SW</span>
-          <span className="text-sm font-semibold tracking-tight">Silent Witness <span className="text-zinc-400">GTM</span></span>
-        </div>
-        <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Sign in</h1>
-        <p className="mb-5 mt-1 text-sm text-zinc-500">Sign in with your team account.</p>
+        <Brand className="mb-6" />
+        <h1 className="text-xl font-bold tracking-[-0.025em] text-zinc-950 dark:text-white">Sign in</h1>
+        <p className="mb-5 mt-1 text-sm text-zinc-600 dark:text-zinc-400">Sign in with your team account.</p>
         <form onSubmit={signIn} className="space-y-3">
           <Field label="Email">
             <input

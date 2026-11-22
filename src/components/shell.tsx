@@ -8,6 +8,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { Brand } from "@/components/brand";
 import { RefreshButton } from "@/components/refresh-button";
 
 export type NavItem = { href: string; label: string; icon: keyof typeof ICONS; group: string };
@@ -32,7 +33,7 @@ function NavLinks({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => 
     <nav className="space-y-4">
       {groups.map((g) => (
         <div key={g}>
-          <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">{g}</div>
+          <div className="mb-1 px-2 text-xs font-medium text-zinc-400 dark:text-zinc-500">{g}</div>
           <div className="space-y-0.5">
             {items.filter((i) => i.group === g).map((n) => {
               const Icon = ICONS[n.icon];
@@ -42,8 +43,8 @@ function NavLinks({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => 
                   className={clsx(
                     "flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition",
                     active
-                      ? "bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900"
-                      : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50",
+                      ? "bg-blue-50 text-blue-700 dark:bg-blue-600/20 dark:text-blue-200"
+                      : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white",
                   )}>
                   <Icon className={clsx("h-4 w-4 shrink-0", active ? "opacity-100" : "opacity-70")} />
                   {n.label}
@@ -75,11 +76,10 @@ function ThemeToggle() {
   );
 }
 
-function Brand() {
+function BrandLink() {
   return (
-    <Link href="/" className="flex items-center gap-2 px-2">
-      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-900 text-xs font-bold text-white dark:bg-zinc-100 dark:text-zinc-900">SW</span>
-      <span className="text-sm font-semibold tracking-tight">Silent Witness <span className="text-zinc-400">GTM</span></span>
+    <Link href="/" className="block px-2 py-1" aria-label="Silent Witness GTM home">
+      <Brand />
     </Link>
   );
 }
@@ -96,7 +96,7 @@ export function Shell({ items, user, children }: {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">{user.name}</div>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-400">{user.role}</div>
+          <div className="text-[11px] capitalize text-zinc-400 dark:text-zinc-500">{user.role}</div>
         </div>
         <ThemeToggle />
       </div>
@@ -106,7 +106,7 @@ export function Shell({ items, user, children }: {
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-zinc-200 bg-white px-3 py-4 dark:border-zinc-800 dark:bg-zinc-900 md:flex">
-        <Brand />
+        <BrandLink />
         <div className="my-4 px-1"><RefreshButton /></div>
         <div className="min-h-0 flex-1 overflow-y-auto"><NavLinks items={items} /></div>
         {footer}
@@ -114,7 +114,7 @@ export function Shell({ items, user, children }: {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-zinc-200 bg-white/90 px-4 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/90 md:hidden">
-          <Brand />
+          <BrandLink />
           <button type="button" onClick={() => setOpen((o) => !o)} className="rounded-md p-1.5 text-zinc-600 dark:text-zinc-300" aria-label="Menu">
             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>

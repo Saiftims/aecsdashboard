@@ -269,7 +269,7 @@ export function MarketingAds({ report, ranges }: { report: MarketingReport; rang
 function Metric({ label, value, sub, strong, tone }: { label: string; value: string; sub?: string; strong?: boolean; tone?: "warn" }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-[11px] font-medium uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="truncate text-xs text-zinc-600 dark:text-zinc-400">{label}</div>
       <div className={clsx(
         "mt-0.5 tabular-nums tracking-tight",
         strong ? "text-2xl font-semibold" : "text-sm font-medium text-zinc-700 dark:text-zinc-200",

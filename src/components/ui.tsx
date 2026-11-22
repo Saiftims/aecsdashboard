@@ -18,9 +18,9 @@ export function PageHeader({ title, description, actions, eyebrow }: {
   return (
     <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
       <div className="min-w-0">
-        {eyebrow ? <div className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">{eyebrow}</div> : null}
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 md:text-2xl">{title}</h1>
-        {description ? <p className="mt-1 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">{description}</p> : null}
+        {eyebrow ? <div className="mb-1.5 text-[13px] font-semibold text-blue-600 dark:text-blue-400">{eyebrow}</div> : null}
+        <h1 className="text-2xl font-bold tracking-[-0.025em] text-zinc-950 dark:text-white md:text-[28px] md:leading-9">{title}</h1>
+        {description ? <p className="mt-1.5 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">{description}</p> : null}
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
@@ -35,8 +35,8 @@ export function Section({ title, description, action, children, className }: {
     <section className={className}>
       <div className="mb-2 flex items-end justify-between gap-3">
         <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{title}</h2>
-          {description ? <p className="mt-0.5 text-xs text-zinc-400">{description}</p> : null}
+          <h2 className="text-[15px] font-semibold text-zinc-950 dark:text-white">{title}</h2>
+          {description ? <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{description}</p> : null}
         </div>
         {action}
       </div>
@@ -68,7 +68,7 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={clsx(
-        "rounded-xl border border-zinc-200/80 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900",
+        "rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900",
         className,
       )}
       {...props}
@@ -82,7 +82,7 @@ export function CardHeader({ title, description, action }: {
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
       <div className="min-w-0">
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{title}</h3>
+        <h3 className="text-sm font-semibold tracking-[-0.01em] text-zinc-950 dark:text-white">{title}</h3>
         {description ? <p className="mt-0.5 text-xs text-zinc-500">{description}</p> : null}
       </div>
       {action ? <div className="flex shrink-0 items-center gap-2 text-xs text-zinc-500">{action}</div> : null}
@@ -142,12 +142,12 @@ export function Stat({ label, value, sub, tone, href }: {
 }) {
   const inner = (
     <Card className={clsx("group relative px-4 py-3",
-      href && "transition hover:border-zinc-300 hover:shadow-md dark:hover:border-zinc-700")}>
+      href && "transition hover:border-blue-300 hover:shadow-[0_8px_24px_-8px_rgba(6,16,34,0.12)] dark:hover:border-blue-700")}>
       <div className="flex items-start justify-between gap-2">
-        <div className="truncate text-[11px] font-medium uppercase tracking-wider text-zinc-500">{label}</div>
-        {href ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300 transition group-hover:text-zinc-500" /> : null}
+        <div className="truncate text-xs text-zinc-600 dark:text-zinc-400">{label}</div>
+        {href ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300 transition group-hover:text-blue-600 dark:text-zinc-600" /> : null}
       </div>
-      <div className={clsx("mt-1 text-2xl font-semibold tabular-nums tracking-tight", tone ? TONE_TEXT[tone] : "text-zinc-900 dark:text-zinc-50")}>
+      <div className={clsx("mt-1 text-2xl font-bold tabular-nums tracking-[-0.02em]", tone ? TONE_TEXT[tone] : "text-zinc-950 dark:text-white")}>
         {value}
       </div>
       {sub ? <div className="mt-0.5 truncate text-xs text-zinc-500" title={typeof sub === "string" ? sub : undefined}>{sub}</div> : null}
@@ -163,14 +163,14 @@ export function TargetCard({ label, value, target, sub, href }: {
   const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
   const done = target > 0 && value >= target;
   const inner = (
-    <Card className={clsx("px-4 py-3", href && "transition hover:border-zinc-300 hover:shadow-md dark:hover:border-zinc-700")}>
-      <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">{label}</div>
+    <Card className={clsx("px-4 py-3", href && "transition hover:border-blue-300 hover:shadow-[0_8px_24px_-8px_rgba(6,16,34,0.12)] dark:hover:border-blue-700")}>
+      <div className="text-xs text-zinc-600 dark:text-zinc-400">{label}</div>
       <div className="mt-1 flex items-baseline gap-1">
-        <span className={clsx("text-2xl font-semibold tabular-nums tracking-tight", done && TONE_TEXT.good)}>{value}</span>
+        <span className={clsx("text-2xl font-bold tabular-nums tracking-[-0.02em]", done && TONE_TEXT.good)}>{value}</span>
         <span className="text-sm text-zinc-400">/ {target}</span>
       </div>
       <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-        <div className={clsx("h-full rounded-full transition-all", done ? "bg-emerald-500" : pct >= 50 ? "bg-blue-500" : "bg-amber-500")}
+        <div className={clsx("h-full rounded-full transition-all", done ? "bg-emerald-500" : pct >= 50 ? "bg-blue-600" : "bg-amber-500")}
           style={{ width: `${pct}%` }} />
       </div>
       {sub ? <div className="mt-1 text-xs text-zinc-500">{sub}</div> : null}
@@ -223,8 +223,8 @@ export function Pills({ items, size = "sm" }: {
     "whitespace-nowrap rounded-md font-medium transition",
     size === "sm" ? "px-2.5 py-1 text-xs" : "px-2 py-0.5 text-[11px]",
   );
-  const on = "bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900";
-  const off = "text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-700/70";
+  const on = "bg-white text-blue-700 shadow-sm ring-1 ring-zinc-200 dark:bg-blue-600 dark:text-white dark:ring-0";
+  const off = "text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-700/70";
   return (
     <div className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
       {items.map((it) => it.href ? (
@@ -272,7 +272,7 @@ export function Table({ headers, rows, strongLast, dense, sticky, empty, rowClas
     <div className={clsx("overflow-x-auto", maxHeight && "overflow-y-auto")} style={maxHeight ? { maxHeight } : undefined}>
       <table className="w-full text-sm">
         <thead className={clsx(sticky && "sticky top-0 z-10 bg-white dark:bg-zinc-900")}>
-          <tr className="border-b border-zinc-200 text-[11px] uppercase tracking-wider text-zinc-500 dark:border-zinc-800">
+          <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
             {cols.map((c, i) => (
               <th key={c.key ?? i} style={c.width ? { width: c.width } : undefined}
                 className={clsx(pad, "font-medium", {
@@ -331,7 +331,7 @@ export function Button({ className, variant = "primary", size = "md", ...props }
         "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
         size === "md" ? "px-3 py-1.5 text-sm" : "px-2 py-1 text-xs",
         {
-          "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white": variant === "primary",
+          "bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800": variant === "primary",
           "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800": variant === "secondary",
           "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800": variant === "ghost",
           "bg-red-600 text-white hover:bg-red-500": variant === "danger",
@@ -344,11 +344,11 @@ export function Button({ className, variant = "primary", size = "md", ...props }
 }
 
 export const inputCls =
-  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-400";
+  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-950 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-400";
 
 /** Compact select for card headers and filters. */
 export const selectCls =
-  "rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200";
+  "rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 outline-none focus:border-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:focus:border-blue-400";
 
 export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
   return (

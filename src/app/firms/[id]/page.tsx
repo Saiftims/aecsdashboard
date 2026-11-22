@@ -272,7 +272,7 @@ export default async function FirmPage({
               )) : <p className="text-zinc-400">Computed on next rollup sync</p>}
               {(company.risk_flags ?? []).length ? (
                 <div className="mt-3 border-t border-zinc-100 pt-2 dark:border-zinc-800">
-                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Risk flags</div>
+                  <div className="mb-1 text-xs font-semibold text-zinc-600 dark:text-zinc-400">Risk flags</div>
                   <div className="flex flex-wrap gap-1">
                     {company.risk_flags.map((f: string) => (
                       <Badge key={f} tone="red">{f}</Badge>

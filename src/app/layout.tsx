@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { Shell, type NavItem } from "@/components/shell";
 import { currentAppUser } from "@/lib/supabase/server";
 
-const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+// Inter, the typeface silentwitness.ai is set in.
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: "Silent Witness GTM",
@@ -38,7 +39,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body className={`${geist.variable} ${geist.className} min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100`}>
+      <body className={`${inter.variable} ${inter.className} min-h-screen bg-zinc-50 text-zinc-950 antialiased dark:bg-zinc-950 dark:text-zinc-100`}>
         {user ? (
           <Shell items={nav} user={{ name: user.full_name ?? user.email, role: user.role }}>{children}</Shell>
         ) : (
