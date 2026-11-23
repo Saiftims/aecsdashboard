@@ -64,7 +64,9 @@ export function referralEmail(input: ReferralEmailInput): { subject: string; pre
   const greeting = name ? `Hi ${name},` : "Hi,";
   const ctaUrl = input.ctaUrl ?? REFERRAL_URL;
   const card = `${input.assetBase ?? EMAIL_ASSET_BASE}/referral-card.jpg`;
-  const subject = `${REFERRAL_REWARD} for every firm you refer to Silent Witness`;
+  // No dollar amount in the subject: it reads as a promotion to mail filters
+  // (owner asked for the change, 2026-11-22). The reward is in the preheader.
+  const subject = "Know a firm that should see Silent Witness?";
   const preheader = `Expert intelligence at intake, for the attorneys you know. A ${REFERRAL_REWARD} gift card for every firm that signs up.`;
   // The opener is the owner's positioning line (2026-11-22): "Silent Witness
   // delivers expert intelligence at intake. Our analysis helps firms settle
