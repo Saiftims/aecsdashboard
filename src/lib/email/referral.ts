@@ -2,9 +2,10 @@
  * another firm, for a $500 gift card.
  *
  * The design follows the referral page, silentwitness.ai/referral: the
- * outlined "Referral program" pill, the two-line headline with the second line
- * in brand blue, the navy gift card, the numbered steps and the closing
- * "Know a firm that should see this?" panel. The offer, the three steps and
+ * two-line headline with the second line in brand blue, the navy gift card,
+ * the numbered steps and the closing "Know a firm that should see this?"
+ * panel. (The page's outlined "Referral program" pill above the headline was
+ * removed here at the owner's request, 2026-11-22.) The offer, the three steps and
  * the small print restate that page and its program terms (read 2026-11-22);
  * if the page changes, change this to match.
  *
@@ -21,7 +22,6 @@ const MUTED = "#5b6270";
 const BLUE = "#3560d8";
 const NAVY = "#0b1734";
 const WASH = "#eef2fe";
-const PILL_BORDER = "#a5b9ed";
 const CANVAS = "#f4f6fa";
 const HAIRLINE = "#e9eaeb";
 const FONT = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
@@ -70,7 +70,9 @@ export function referralEmail(input: ReferralEmailInput): { subject: string; pre
   // delivers expert intelligence at intake. Our analysis helps firms settle
   // faster and build up stronger cases."
   const intro = "Silent Witness delivers expert intelligence at intake. Our analysis helps firms settle faster and build stronger cases.";
-  const offer = `Now put it in front of the attorneys you know. Introduce a firm, and when they sign up we send you a ${REFERRAL_REWARD} gift card. No cap.`;
+  // Kept as an invitation, not an instruction (owner, 2026-11-22: "let other
+  // firms know", less direct).
+  const offer = `If it has made a difference for your firm, we would love for you to let other firms know. For every firm you introduce that signs up, we will send you a ${REFERRAL_REWARD} gift card as our thank-you.`;
   const cta = "Refer a firm";
   const cardAlt = `${REFERRAL_REWARD} gift card per firm that signs up. Issued to you. No limit.`;
   const finePrint = "The firm must be new to Silent Witness and sign up within 90 days of our first conversation. Gift cards are issued within 30 days of their first paid invoice.";
@@ -134,11 +136,8 @@ export function referralEmail(input: ReferralEmailInput): { subject: string; pre
           </td>
         </tr>
         <tr>
-          <td class="sw-pad" style="padding:48px 48px 0 48px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-              <td style="border:1px solid ${PILL_BORDER};border-radius:999px;padding:5px 14px;font:600 13px/20px ${FONT};color:${INK};">Referral program</td>
-            </tr></table>
-            <h1 class="sw-h1" style="margin:18px 0 0 0;font:700 48px/52px ${FONT};letter-spacing:-0.03em;color:${INK};">Refer a firm.<br><span style="color:${BLUE};">Earn ${REFERRAL_REWARD}.</span></h1>
+          <td class="sw-pad" style="padding:44px 48px 0 48px;">
+            <h1 class="sw-h1" style="margin:0;font:700 48px/52px ${FONT};letter-spacing:-0.03em;color:${INK};">Refer a firm.<br><span style="color:${BLUE};">Earn ${REFERRAL_REWARD}.</span></h1>
           </td>
         </tr>
         <tr>
