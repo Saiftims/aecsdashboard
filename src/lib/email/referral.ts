@@ -73,8 +73,9 @@ export function referralEmail(input: ReferralEmailInput): { subject: string; pre
   // faster and build up stronger cases."
   const intro = "Silent Witness delivers expert intelligence at intake. Our analysis helps firms settle faster and build stronger cases.";
   // Kept as an invitation, not an instruction (owner, 2026-11-22: "let other
-  // firms know", less direct).
-  const offer = `If it has made a difference for your firm, we would love for you to let other firms know. For every firm you introduce that signs up, we will send you a ${REFERRAL_REWARD} gift card as our thank-you.`;
+  // firms know", less direct). It names who to think of and says what the
+  // referred firm gets (the free walkthrough, from the page's step two).
+  const offer = `If it has made a difference for your firm, we would love for you to let another firm know: co-counsel, a former colleague, a firm down the hall. We will walk them through one of their real cases, free. And for every firm you introduce that signs up, we will send you a ${REFERRAL_REWARD} gift card as our thank-you.`;
   const cta = "Refer a firm";
   const cardAlt = `${REFERRAL_REWARD} gift card per firm that signs up. Issued to you. No limit.`;
   const finePrint = "The firm must be new to Silent Witness and sign up within 90 days of our first conversation. Gift cards are issued within 30 days of their first paid invoice.";
