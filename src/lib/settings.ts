@@ -89,7 +89,7 @@ export const DEFAULT_SETTINGS: GtmSettings = {
   stalledDealDays: 14,
   dashboardTimezone: "America/Los_Angeles",
   slaFirstContactHours: 2,
-  aeDailyActivityTarget: 100,
+  aeDailyActivityTarget: 300,
   csDailyActivityTarget: 40,
   // Flat fallbacks = the plan's January run-rate, so a month after the ledger
   // ends holds the end state rather than dropping back to the pre-plan
@@ -208,7 +208,7 @@ export async function loadSettings(): Promise<GtmSettings> {
   out.healthyCasesPer30d = Number(out.healthyCasesPer30d) || 2;
   out.stalledDealDays = Number(out.stalledDealDays) || 14;
   out.slaFirstContactHours = Number(out.slaFirstContactHours) || 2;
-  out.aeDailyActivityTarget = Number(out.aeDailyActivityTarget) || 100;
+  out.aeDailyActivityTarget = Number(out.aeDailyActivityTarget) || 300;
   out.csDailyActivityTarget = Number(out.csDailyActivityTarget) || 40;
   out.monthlyMqlsTarget = Number(out.monthlyMqlsTarget) || 120;
   out.monthlyDemosTarget = Number(out.monthlyDemosTarget) || 60;
