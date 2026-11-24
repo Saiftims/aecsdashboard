@@ -91,6 +91,68 @@ export const HS_COMMUNICATION_CHANNELS: Record<string, string> = {
   CUSTOM_CHANNEL_CONVERSATION: "other",
 };
 
+/** The HubSpot call properties that say where a call record came from. Named
+ * as HubSpot names them so the sync (raw properties) and the dashboard (the
+ * same keys read out of the cached `properties`) share one shape. */
+export interface CallOrigin {
+  /** How the record came to exist: CRM_UI, INTEGRATION, API, ... */
+  hs_object_source?: string | null;
+  /** INTEGRATIONS_PLATFORM when a calling integration logged the call. */
+  hs_call_source?: string | null;
+  hs_call_to_number?: string | null;
+  hs_call_from_number?: string | null;
+}
+
+/** Record sources that mean "written through the API": a connected app such
+ * as Quo copying its calls in, or this dashboard's own quick logger. */
+const API_CALL_SOURCES: ReadonlySet<string> = new Set([
+  "INTEGRATION", "INTEGRATIONS_PLATFORM", "API",
+]);
+
+/** Whether HubSpot itself placed this call (its dialer / calling tool), as
+ * opposed to a record of a call that happened somewhere else.
+ *
+ * It matters for a rep who also has a Quo seat: Quo is the source of truth for
+ * their Quo dials, so HubSpot's copies of those are dropped - but a call
+ * dialled through HubSpot never touches Quo and was being dropped with them.
+ *
+ * Deliberately strict, because a wrong "yes" double counts a Quo dial against
+ * the rep's target while a wrong "no" only leaves things as they were:
+ *   - the record must say where it came from, and it must not be the API
+ *     (Quo's copies and the quick logger's calls both arrive that way);
+ *   - it must carry a phone number, which a call typed in by hand with
+ *     "Log call" does not - that one is a note about a dial Quo already has.
+ * A row cached before these properties were synced has none of them and so
+ * reads as "no" until the next sync refreshes it.
+ */
+export function placedByHubSpot(c: CallOrigin): boolean {
+  const sources = [c.hs_object_source, c.hs_call_source]
+    .filter((s): s is string => Boolean(s))
+    .map((s) => s.toUpperCase());
+  if (!sources.length) return false;
+  if (sources.some((s) => API_CALL_SOURCES.has(s))) return false;
+  return Boolean(c.hs_call_to_number || c.hs_call_from_number);
+}
+
+/** HubSpot stores a call's outcome as the id of a disposition, not its label.
+ * These are the six every portal ships with, mapped onto the quick logger's
+ * outcome words so "connected" means the same thing whichever way the call
+ * was logged. A custom outcome a portal adds has its own id and is not here. */
+export const HS_CALL_OUTCOMES: Record<string, string> = {
+  "f240bbac-87c9-4f6e-bf70-924b57d47db7": "connected",
+  "73a0d17f-1163-4015-bdd5-ec830791da20": "no_answer",
+  "b2cf5968-551e-4856-9783-52b3da59a7d0": "voicemail_left",
+  "a4c4c377-d246-4b32-a13b-75a56a4cd0ff": "left_live_message",
+  "9d9162e7-6cf3-4944-bf63-4dff82258764": "busy",
+  "17b47fee-58de-441e-a44c-c6300d46f273": "wrong_number",
+};
+
+/** A call disposition as an outcome word; an id we do not know is kept as is. */
+export function callOutcome(disposition: string | null | undefined): string | null {
+  if (!disposition) return null;
+  return HS_CALL_OUTCOMES[disposition.toLowerCase()] ?? disposition;
+}
+
 /** Words a rep might open a HubSpot note with, mapped to a channel. */
 const ALIASES: Record<string, string> = {
   linkedin: "linkedin", "linked in": "linkedin", "linked-in": "linkedin",

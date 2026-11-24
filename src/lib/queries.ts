@@ -3,14 +3,14 @@
 import { differenceInDays, startOfMonth, subDays } from "date-fns";
 import { median } from "@/lib/metrics";
 import {
-  OTHER_CHANNELS, bucketOf, isSms, type OtherChannel,
+  OTHER_CHANNELS, bucketOf, isSms, placedByHubSpot, type OtherChannel,
 } from "@/lib/activity-channels";
 import {
   SALES_STAGES, hubspotDealUrl, type ActivationStage,
 } from "@/lib/hubspot/stages";
 import {
   activityTodayFor, buildRoleActivity, callsTodayFor, fetchRepSources,
-  quoBackedOwners, roleOf, textsComeFromQuo,
+  quoBackedOwners, quoCoversCall, roleOf, textsComeFromQuo,
 } from "@/lib/rep-activity";
 import {
   loadRevenueFacts, monthIndexOf, stripeRevenueBetween, type RevenueFacts,
@@ -256,6 +256,12 @@ export interface ActivityRow {
   completed_at: string | null;
   /** For tasks: hs_lastmodifieddate, completion-time fallback. */
   modified_at: string | null;
+  /** For calls: where the record came from - see placedByHubSpot. Absent on a
+   * row cached before the sync started pulling them. */
+  hs_object_source?: string | null;
+  hs_call_source?: string | null;
+  hs_call_to_number?: string | null;
+  hs_call_from_number?: string | null;
 }
 
 /** Best available completion time for a completed task. */
@@ -301,7 +307,11 @@ export async function fetchCore() {
       "contact_hubspot_id, deal_hubspot_id, company_hubspot_id, " +
       "occurred_at, due_at, completed, " +
       "completed_at:properties->>hs_task_completion_date, " +
-      "modified_at:properties->>hs_lastmodifieddate"),
+      "modified_at:properties->>hs_lastmodifieddate, " +
+      "hs_object_source:properties->>hs_object_source, " +
+      "hs_call_source:properties->>hs_call_source, " +
+      "hs_call_to_number:properties->>hs_call_to_number, " +
+      "hs_call_from_number:properties->>hs_call_from_number"),
   ]);
   return { settings, deals, companies, contacts, activities };
 }
@@ -665,6 +675,7 @@ export async function aeDashboard(ownerId?: string | null) {
   const isAe = role !== "cs";
   const todayTouches = todayActs.map((a) => ({
     owner_id: a.owner_id, occurred_at: a.occurred_at, type: actType(a), kind: a.kind,
+    hubspotDialed: placedByHubSpot(a),
   }));
 
   // The rep is measured on total activity, not on each channel: hitting the
@@ -852,15 +863,17 @@ export async function activityReport(ownerId?: string | null) {
   const quoMessages = forOwner(allQuoMsgs);
   // Quo is the source of truth for dials and texts by any rep it can account
   // for, so that rep's HubSpot rows for the same channel are dropped rather
-  // than added to them.
+  // than added to them - all but a call dialled through HubSpot itself, which
+  // Quo never saw.
   const quoOwners = quoBackedOwners(allQuo);
   const quoTexts = textsComeFromQuo(allQuoMsgs);
+  const quoCovers = (a: ActivityRow) =>
+    quoCoversCall({ owner_id: a.owner_id, hubspotDialed: placedByHubSpot(a) }, quoOwners);
   const hsCalls = (type: string) => acts7.filter(
-    (a) => t(a) === type && !(a.owner_id && quoOwners.has(a.owner_id)),
+    (a) => t(a) === type && !quoCovers(a),
   ).length;
   const superseded = (a: ActivityRow) =>
-    (a.owner_id && quoOwners.has(a.owner_id) &&
-      (t(a) === "call" || t(a) === "voicemail")) ||
+    ((t(a) === "call" || t(a) === "voicemail") && quoCovers(a)) ||
     (isSms(t(a)) && quoTexts);
 
   const byChannel = Object.fromEntries(
@@ -895,6 +908,7 @@ export async function activityReport(ownerId?: string | null) {
   const roleDaily = buildRoleActivity({
     touches: acts7.map((a) => ({
       owner_id: a.owner_id, occurred_at: a.occurred_at, type: t(a), kind: a.kind,
+      hubspotDialed: placedByHubSpot(a),
     })),
     quoCalls,
     quoMessages,

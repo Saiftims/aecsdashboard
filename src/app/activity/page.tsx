@@ -154,7 +154,9 @@ export default async function ActivityPage() {
                 ? <>{r.people.join(", ")} · every channel stacked to one
                     total against the {r.activityTarget}/day target · calls from{" "}
                     {r.callSource === "quo"
-                      ? "Quo (every dial)"
+                      ? (r.hubspotDialer
+                        ? "Quo (every dial) plus the HubSpot dialer"
+                        : "Quo (every dial)")
                       : "HubSpot logged calls"}
                     {", texts from "}
                     {r.smsSource === "quo" ? "Quo" : "HubSpot logged messages"}.</>

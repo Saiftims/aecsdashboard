@@ -8,7 +8,9 @@
  *
  * Calls AND texts come from Quo where we can map the rep to a Quo seat, because
  * HubSpot's Quo integration only logs an interaction when the number already
- * exists as a contact - it dropped 6 of Chris's 24 dials on 2026-07-31. Emails
+ * exists as a contact - it dropped 6 of Chris's 24 dials on 2026-07-31. The
+ * exception is a call dialled through HubSpot itself (its dialer): Quo never
+ * sees those, so they are counted on top of the rep's Quo dials. Emails
  * stay on HubSpot, which sees all of them. Social DMs (LinkedIn, Instagram, ...)
  * exist only where a rep logged them; see lib/activity-channels.ts.
  */
@@ -62,6 +64,8 @@ export interface RoleActivity {
   /** Total touches per day expected of this role, across all channels. */
   activityTarget: number;
   callSource: "quo" | "hubspot";
+  /** Calls dialled through HubSpot are in the series alongside the Quo dials. */
+  hubspotDialer: boolean;
   smsSource: "quo" | "hubspot";
   data: DayBucket[];
   /** Mean daily total over the window, for "45 of 75 a day" style captions. */
@@ -117,6 +121,20 @@ export function quoBackedOwners(
   );
 }
 
+/** Whether a HubSpot call row is one Quo already accounts for, so counting it
+ * would double the rep's dials.
+ *
+ * True for a Quo-backed rep's HubSpot calls - except one HubSpot placed
+ * itself. Dropping those too meant a rep on the HubSpot dialer showed no calls
+ * at all the moment a single Quo call (even an inbound one) landed in the
+ * window. */
+export function quoCoversCall(
+  t: { owner_id: string | null; hubspotDialed?: boolean },
+  quoOwners: Set<string>,
+): boolean {
+  return Boolean(t.owner_id && quoOwners.has(t.owner_id) && !t.hubspotDialed);
+}
+
 /** Whether HubSpot's SMS rows should be ignored wholesale.
  *
  * Unlike calls, HubSpot never learns of a text independently - its SMS
@@ -161,6 +179,9 @@ interface TouchRow {
   /** HubSpot object name. Optional, but without it a task the quick logger
    * stamped with a type (`walk_in`) reads as a channel and counts as contact. */
   kind?: string | null;
+  /** A call HubSpot itself placed (see placedByHubSpot). Counted even for a
+   * rep whose other dials come from Quo. */
+  hubspotDialed?: boolean;
 }
 
 /** Build one series per role over the last `days` days. */
@@ -191,6 +212,7 @@ export function buildRoleActivity({
         ? settings.aeDailyActivityTarget
         : settings.csDailyActivityTarget,
       callSource: "hubspot",
+      hubspotDialer: false,
       smsSource: "hubspot",
       data: emptyDays(days, tz, now),
       dailyAverage: 0,
@@ -217,11 +239,12 @@ export function buildRoleActivity({
     // Quo owns this rep's dial and text counts; counting HubSpot's copy of the
     // same channel would double it.
     const isCall = t.type === "call" || t.type === "voicemail";
-    if (isCall && t.owner_id && quoOwners.has(t.owner_id)) continue;
+    if (isCall && quoCoversCall(t, quoOwners)) continue;
     if (isSms(t.type) && quoTexts) continue;
     const b = bucket(role, t.occurred_at);
     if (!b) continue;
     b[bucketOf(t.type)] += 1;
+    if (isCall && t.hubspotDialed) series.get(role)!.hubspotDialer = true;
     if (t.owner_id) contributors.get(role)!.add(t.owner_id);
   }
 
@@ -290,7 +313,7 @@ export function activityTodayFor({
     if (!isTodayFor(t.occurred_at) || !inScope(t.owner_id)) continue;
     if (t.kind === "task" || t.type === "note" || t.type === "task") continue;
     const isCall = t.type === "call" || t.type === "voicemail";
-    if (isCall && t.owner_id && quoOwners.has(t.owner_id)) continue;
+    if (isCall && quoCoversCall(t, quoOwners)) continue;
     if (isSms(t.type) && quoTexts) continue;
     out[bucketOf(t.type)] += 1;
   }
@@ -304,7 +327,8 @@ export function activityTodayFor({
   return out;
 }
 
-/** Today's call count for one rep, from Quo when Quo knows them. */
+/** Today's call count for one rep, from Quo when Quo knows them, plus any
+ * call they dialled through HubSpot. */
 export function callsTodayFor({
   ownerId, touches, quoCalls, settings, now = new Date(),
 }: {
@@ -326,7 +350,7 @@ export function callsTodayFor({
   const fromHubSpot = touches.filter(
     (t) => t.occurred_at && inScope(t.owner_id) &&
       (t.type === "call" || t.type === "voicemail") &&
-      !(t.owner_id && quoOwners.has(t.owner_id)) &&
+      !quoCoversCall(t, quoOwners) &&
       localDayLabel(t.occurred_at, tz) === today,
   ).length;
   return fromQuo + fromHubSpot;

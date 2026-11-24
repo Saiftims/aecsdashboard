@@ -5,7 +5,9 @@ import {
   type HsObject,
 } from "@/lib/hubspot/client";
 import { SALES_STAGE_LABELS } from "@/lib/hubspot/stages";
-import { HS_COMMUNICATION_CHANNELS, channelFromText } from "@/lib/activity-channels";
+import {
+  HS_COMMUNICATION_CHANNELS, callOutcome, channelFromText, placedByHubSpot,
+} from "@/lib/activity-channels";
 import { env } from "@/lib/env";
 import { must, selectAll, supabaseService } from "@/lib/supabase/server";
 
@@ -74,7 +76,12 @@ const DEAL_PROPS = [
 
 const ENGAGEMENTS: Record<string, string[]> = {
   calls: ["hs_timestamp", "hs_call_title", "hs_call_body", "hs_call_direction",
-          "hs_call_disposition", "hubspot_owner_id"],
+          "hs_call_disposition", "hubspot_owner_id",
+          // Where the record came from, so a call dialled through HubSpot can
+          // be told from Quo's copy of a Quo call (see placedByHubSpot). The
+          // detail is the connected app's name, kept for checking the cache.
+          "hs_object_source", "hs_object_source_detail_1", "hs_call_source",
+          "hs_call_to_number", "hs_call_from_number"],
   meetings: ["hs_timestamp", "hs_meeting_title", "hs_meeting_body",
              "hs_meeting_outcome", "hs_meeting_start_time", "hubspot_owner_id"],
   notes: ["hs_timestamp", "hs_note_body", "hubspot_owner_id"],
@@ -319,6 +326,12 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
       throw e;
     }
     stats[kind] = rows.length;
+    // How many calls read as dialled through HubSpot. Zero while a rep is
+    // using the dialer means the source properties are not what
+    // placedByHubSpot expects, and those dials are still being dropped.
+    if (kind === "calls") {
+      stats.callsPlacedByHubSpot = rows.filter((r) => placedByHubSpot(r.properties)).length;
+    }
     activityIds.push(...rows.map((r) => r.id));
     if (!rows.length) continue;
     await must(`activities upsert (${kind})`, sb.from("activities").upsert(
@@ -338,7 +351,7 @@ export async function syncHubSpot(mode: "full" | "incremental", sinceMs?: number
           body,
           outcome:
             parseMarker(body, "outcome") ??
-            a.properties.hs_call_disposition ??
+            callOutcome(a.properties.hs_call_disposition) ??
             a.properties.hs_meeting_outcome ??
             a.properties.hs_email_direction ??
             null,

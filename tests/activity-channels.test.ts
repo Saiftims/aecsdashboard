@@ -1,8 +1,58 @@
 import { describe, expect, it } from "vitest";
 import {
   CHANNEL_LABELS, HS_COMMUNICATION_CHANNELS, OTHER_CHANNELS, bucketOf,
-  channelFromText, isOtherChannel, isOutreach, isSms,
+  callOutcome, channelFromText, isOtherChannel, isOutreach, isSms, placedByHubSpot,
 } from "@/lib/activity-channels";
+
+describe("placedByHubSpot", () => {
+  const numbers = { hs_call_to_number: "+13105550100", hs_call_from_number: "+13105550199" };
+
+  it("recognises a call HubSpot dialled itself", () => {
+    expect(placedByHubSpot({ hs_object_source: "CRM_UI", ...numbers })).toBe(true);
+    expect(placedByHubSpot({ hs_object_source: "CRM_UI", hs_call_to_number: "+13105550100" })).toBe(true);
+  });
+
+  it("rejects a call an app wrote through the API", () => {
+    // Quo's copies of its own calls and the quick logger's calls arrive this
+    // way; counting them would double a dial Quo already reported.
+    expect(placedByHubSpot({ hs_object_source: "INTEGRATION", ...numbers })).toBe(false);
+    expect(placedByHubSpot({ hs_object_source: "API", ...numbers })).toBe(false);
+    expect(placedByHubSpot({ hs_call_source: "INTEGRATIONS_PLATFORM", ...numbers })).toBe(false);
+    // Either property saying "API" is enough.
+    expect(placedByHubSpot({
+      hs_object_source: "CRM_UI", hs_call_source: "INTEGRATIONS_PLATFORM", ...numbers,
+    })).toBe(false);
+  });
+
+  it("rejects a call typed in by hand, which has no number", () => {
+    expect(placedByHubSpot({ hs_object_source: "CRM_UI" })).toBe(false);
+    expect(placedByHubSpot({ hs_object_source: "CRM_UI", hs_call_to_number: "" })).toBe(false);
+  });
+
+  it("says no when the record does not say where it came from", () => {
+    // A row cached before the source properties were synced. Guessing "yes"
+    // would double count; "no" leaves the count as it was.
+    expect(placedByHubSpot({})).toBe(false);
+    expect(placedByHubSpot({ ...numbers })).toBe(false);
+    expect(placedByHubSpot({ hs_object_source: null, hs_call_source: null, ...numbers })).toBe(false);
+  });
+});
+
+describe("callOutcome", () => {
+  it("turns HubSpot's stock disposition ids into the logger's outcome words", () => {
+    expect(callOutcome("f240bbac-87c9-4f6e-bf70-924b57d47db7")).toBe("connected");
+    expect(callOutcome("73a0d17f-1163-4015-bdd5-ec830791da20")).toBe("no_answer");
+    expect(callOutcome("b2cf5968-551e-4856-9783-52b3da59a7d0")).toBe("voicemail_left");
+    expect(callOutcome("F240BBAC-87C9-4F6E-BF70-924B57D47DB7")).toBe("connected");
+  });
+
+  it("keeps an id it does not know, and passes nothing through as nothing", () => {
+    expect(callOutcome("11111111-2222-3333-4444-555555555555"))
+      .toBe("11111111-2222-3333-4444-555555555555");
+    expect(callOutcome(null)).toBeNull();
+    expect(callOutcome("")).toBeNull();
+  });
+});
 
 describe("channelFromText", () => {
   it("reads the channel a rep opened a HubSpot note with", () => {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
-import { activityTodayFor, buildRoleActivity, textsComeFromQuo } from "@/lib/rep-activity";
+import {
+  activityTodayFor, buildRoleActivity, callsTodayFor, textsComeFromQuo,
+} from "@/lib/rep-activity";
 
 const NOW = new Date("2026-08-10T18:00:00Z"); // 11:00 in America/Los_Angeles
 const ALEX = "77777777";                      // unlisted owner => AE
@@ -10,7 +12,10 @@ const iso = (hoursAgo: number) =>
 const settings = { ...DEFAULT_SETTINGS, dashboardTimezone: "America/Los_Angeles" };
 
 const build = (
-  touches: { owner_id: string | null; occurred_at: string; type: string; kind?: string }[],
+  touches: {
+    owner_id: string | null; occurred_at: string; type: string; kind?: string;
+    hubspotDialed?: boolean;
+  }[],
   quoCalls: { call_id: string; hubspot_owner_id: string | null; created_at: string }[] = [],
   quoMessages: { message_id: string; hubspot_owner_id: string | null; created_at: string }[] = [],
 ) =>
@@ -201,5 +206,46 @@ describe("calls still behave as before", () => {
   it("keeps HubSpot calls for a rep Quo knows nothing about", () => {
     const r = build([{ owner_id: "99999", occurred_at: iso(2), type: "call" }]);
     expect(total(r, "ae", "calls")).toBe(1);
+  });
+});
+
+describe("calls dialled through HubSpot", () => {
+  const dialed = (hoursAgo: number) => ({
+    owner_id: ALEX, occurred_at: iso(hoursAgo), type: "call", kind: "call",
+    hubspotDialed: true,
+  });
+  // A prospect ringing the rep's Quo line back is enough to make them a
+  // "Quo rep" for the whole window.
+  const inboundQuo = [{ call_id: "q1", hubspot_owner_id: ALEX, created_at: iso(50) }];
+
+  it("counts them on top of the rep's Quo calls", () => {
+    // Before: one Quo call in the window wiped every HubSpot dial, so a rep
+    // on the dialer showed 1 call for a day of 3.
+    const r = build([dialed(1), dialed(2), dialed(3)], inboundQuo);
+    expect(total(r, "ae", "calls")).toBe(4);
+    const ae = r.find((s) => s.role === "ae")!;
+    expect(ae.callSource).toBe("quo");
+    expect(ae.hubspotDialer).toBe(true);
+  });
+
+  it("still drops HubSpot's copy of a Quo call for the same rep", () => {
+    const r = build(
+      [dialed(1), { owner_id: ALEX, occurred_at: iso(50), type: "call", kind: "call" }],
+      inboundQuo,
+    );
+    expect(total(r, "ae", "calls")).toBe(2);
+  });
+
+  it("does not flag the series when no dialer call was counted", () => {
+    const r = build([{ owner_id: ALEX, occurred_at: iso(2), type: "call" }], inboundQuo);
+    expect(r.find((s) => s.role === "ae")!.hubspotDialer).toBe(false);
+  });
+
+  it("counts them in today's total and today's calls", () => {
+    const quoCalls = inboundQuo.map((c) => ({ ...c, direction: "incoming" }));
+    const touches = [dialed(1), dialed(2)];
+    expect(activityTodayFor({ ownerId: ALEX, touches, quoCalls, settings, now: NOW }))
+      .toMatchObject({ calls: 2, total: 2 });
+    expect(callsTodayFor({ ownerId: ALEX, touches, quoCalls, settings, now: NOW })).toBe(2);
   });
 });
