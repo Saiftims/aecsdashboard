@@ -37,6 +37,8 @@ export interface MercuryTransaction {
   postedAt?: string | null;
   counterpartyName?: string | null;
   bankDescription?: string | null;
+  /** The memo sent with the payment, e.g. "Contractor:Consulting". */
+  externalMemo?: string | null;
   /** The category the team (or a Mercury rule) put on the transaction. */
   categoryData?: { name?: string | null } | null;
 }

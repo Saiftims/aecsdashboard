@@ -25,12 +25,21 @@
  * card. A card paid off from Mercury shows as one payment, not as what was
  * bought on it.
  *
- * META AD SPEND IS A MEMO, NEVER AN EXPENSE LINE. Meta is billed to the Chase
- * card that Mercury pays off (owner, 2026-11-25), and Mercury has never paid
- * Meta directly, so the ads' cost is already inside the card payments. What
- * Meta itself reports (`meta_ad_spend_daily`, by the month the ads ran) is
- * shown under the statement so the reader can see it; adding it to expenses
- * or burn would count it twice.
+ * META AD SPEND IS AN EXPENSE ONLY FOR MONTHS BEFORE OCTOBER 2026. Meta is
+ * billed to a Chase card (owner, 2026-11-25) and Mercury has never paid Meta
+ * directly. From 2026-10-29 Mercury pays that card, so the ads' cost is inside
+ * the card payments and adding it again would count it twice. Before then the
+ * card was paid from somewhere Mercury cannot see, so those months' burn was
+ * missing the ads altogether: for them, what Meta itself reports
+ * (`meta_ad_spend_daily`) is added as its own expense line (owner,
+ * 2026-11-25: "add it for those months"). It never touches the cash
+ * statement, because the money did not leave Mercury.
+ *
+ * A PAYMENT WITH NO CATEGORY IN MERCURY GETS ONE HERE where the ledger itself
+ * says what it is - see CATEGORY_RULES (owner, 2026-11-25: "dig into
+ * uncategorized and categorize it properly"). A category set in Mercury always
+ * wins, and a payee no rule knows stays Uncategorized rather than being
+ * guessed at.
  */
 import {
   listAccounts, listTransactions, mercuryConfigured,
@@ -38,8 +47,17 @@ import {
 import { loadRevenueFacts, monthIndexOf } from "@/lib/revenue";
 import { selectAll } from "@/lib/supabase/server";
 
-/** Spend with no category set on it in Mercury. */
+/** Spend with no category in Mercury that no rule below recognises either. */
 export const UNCATEGORIZED = "Uncategorized";
+/** Mercury's own category name, so rule-matched pay lands on the same line. */
+export const PAYROLL = "Payroll";
+export const CONTRACTORS = "Contractors & Consulting";
+/** Meta's reported spend for a month its card bill was not paid from Mercury. */
+export const META_ADS = "Meta ads (not paid from Mercury)";
+
+/** The month Mercury first paid the Chase card Meta is billed to (2026-10-29).
+ * From here on the ads are inside the card payments. */
+const CARD_PAID_FROM_MERCURY_SINCE = 2026 * 12 + 9;
 
 export interface BankTxn {
   /** Dollars; negative is money out. */
@@ -50,11 +68,50 @@ export interface BankTxn {
   kind: string | null;
   counterparty: string | null;
   description: string | null;
+  /** The memo sent with the payment. */
+  memo: string | null;
   /** The category set on the transaction in Mercury, if any. */
   category: string | null;
 }
 
-export type Flow = "transfer" | "stripe_payout" | "other_receipt" | "expense";
+type Describable = Pick<BankTxn, "counterparty" | "description"> & { memo?: string | null };
+
+/** What an uncategorized payment is, read off the ledger as of 2026-11-25.
+ * First match wins. Each rule is here because the transactions say so, not
+ * because the name sounds like it:
+ *
+ *  - Intuit's "PAYROLL" and "TAX" debits are the payroll run and the payroll
+ *    tax it remits; the team had already filed half of them under Payroll.
+ *  - "Final Pay Pay Period: 7/12/26-7/25/26" is a departing employee's pay.
+ *  - Ahmad "Alex" Qoqazeh is the AE (see lib/sync/meta.ts), paid monthly.
+ *  - Marwane Ait Si Ahmad: one of his three payments was filed under Payroll.
+ *  - "Contractor:Consulting" is the memo Mercury carries on the Ontario Inc
+ *    and Apricot Inc payments; the two without it are the same payees. */
+const CATEGORY_RULES: { category: string; counterparty?: RegExp; description?: RegExp; memo?: RegExp }[] = [
+  { category: PAYROLL, counterparty: /^intuit\b/i, description: /;\s*(payroll|tax)\s*;/i },
+  { category: PAYROLL, memo: /\b(final pay|pay period)\b/i },
+  { category: PAYROLL, counterparty: /\bqoqazeh\b/i },
+  { category: PAYROLL, counterparty: /^marwane ait si ahmad\b/i },
+  { category: CONTRACTORS, memo: /\bcontractor\s*:\s*consulting\b/i },
+  { category: CONTRACTORS, counterparty: /^ontario inc\b/i },
+  { category: CONTRACTORS, counterparty: /^apricot\b/i },
+];
+
+function ruleCategory(t: Describable): string | null {
+  const hit = CATEGORY_RULES.find((r) =>
+    (!r.counterparty || r.counterparty.test(t.counterparty ?? ""))
+    && (!r.description || r.description.test(t.description ?? ""))
+    && (!r.memo || r.memo.test(t.memo ?? "")));
+  return hit?.category ?? null;
+}
+
+/** The expense line a payment belongs on: Mercury's category if the team set
+ * one, else what the rules make of it, else Uncategorized. */
+export function categoryOf(t: Describable & Pick<BankTxn, "category">): string {
+  return t.category?.trim() || ruleCategory(t) || UNCATEGORIZED;
+}
+
+export type Flow = "transfer" | "stripe_payout" | "vendor_refund" | "other_receipt" | "expense";
 
 /** Mercury's kinds for money moving between accounts the company owns: to or
  * from a linked account at another bank, between its Mercury accounts, or in
@@ -68,12 +125,20 @@ const TRANSFER_KINDS: ReadonlySet<string> = new Set([
  * A receipt that is not a Stripe payout (a vendor's refund, a customer's wire,
  * an investor's) is reported in the cash statement only. It is not revenue,
  * because revenue is Stripe's to state, and it does not reduce burn, so a
- * funding wire can never make the company look as if it has stopped burning. */
-export function flowOf(t: Pick<BankTxn, "amount" | "kind" | "counterparty" | "description">): Flow {
+ * funding wire can never make the company look as if it has stopped burning.
+ *
+ * The one exception is money a vendor sends BACK: it says "refund" and comes
+ * from a payee the rules above know (Apricot's $7,840 "Silent Witness Refund",
+ * 2026-10-02). That is spend undone, so it comes off that vendor's expense
+ * line. Both conditions are needed - the word alone, from a stranger, stays a
+ * receipt. */
+export function flowOf(t: Pick<BankTxn, "amount" | "kind"> & Describable): Flow {
   if (TRANSFER_KINDS.has(t.kind ?? "")) return "transfer";
   // Either sign: a payout Stripe claws back nets against the ones it paid.
   if (/\bstripe\b/i.test(`${t.counterparty ?? ""} ${t.description ?? ""}`)) return "stripe_payout";
-  return t.amount > 0 ? "other_receipt" : "expense";
+  if (t.amount <= 0) return "expense";
+  return /\brefund/i.test(`${t.memo ?? ""} ${t.description ?? ""}`) && ruleCategory(t)
+    ? "vendor_refund" : "other_receipt";
 }
 
 export interface FinanceMonth {
@@ -87,17 +152,19 @@ export interface FinanceMonth {
   revenue: number | null;
   /** How much of `revenue` was later refunded. Shown, not deducted. */
   refunded: number | null;
-  /** Payments out of Mercury, as a positive number. */
+  /** The month's cost, as a positive number: payments out of Mercury, less
+   * vendor refunds, plus Meta ads paid outside Mercury (before Oct 2026). */
   expenses: number;
   byCategory: Record<string, number>;
   /** revenue - expenses. */
   netIncome: number | null;
-  /** What Meta reports the ads cost in the month they ran. A memo: it is in
-   * no total here. Null when Meta spend has never synced. */
-  adSpend: number | null;
   openingCash: number;
   stripePayouts: number;
+  /** Money in that is not a Stripe payout, vendor refunds included. */
   otherReceipts: number;
+  /** Every payment that left Mercury, gross, as a positive number. The cash
+   * statement's figure; `expenses` is the income statement's. */
+  paidOut: number;
   /** Net money moved in from (positive) or out to the company's other accounts. */
   transfers: number;
   closingCash: number;
@@ -123,10 +190,12 @@ export interface FinanceSummary {
   cashOut: string | null;
   /** Who the transfers in came from, so the reader knows what "own accounts" means. */
   transferSources: string[];
-  /** Spend in `months` that has no category in Mercury. */
+  /** Spend in `months` that neither Mercury nor a rule here could categorize. */
   uncategorized: number;
   /** Spend in `months`, the denominator for `uncategorized`. */
   totalExpenses: number;
+  /** Vendor refunds in `months`, already taken off the expense lines. */
+  vendorRefunds: number;
 }
 
 export interface RevenueByMonth {
@@ -152,13 +221,16 @@ export function monthLabel(index: number): string {
 /** The statements, from data already in hand. Pure: everything it needs is an
  * argument, so it is the part the tests exercise. */
 export function buildFinance({
-  accounts, txns, revenue, adSpend, now = new Date(), months = 6,
+  accounts, txns, revenue, adSpend, adsOffBankBefore = CARD_PAID_FROM_MERCURY_SINCE,
+  now = new Date(), months = 6,
 }: {
   accounts: { name: string; balance: number }[];
   txns: BankTxn[];
   revenue: RevenueByMonth;
-  /** Meta's own spend figures, for the memo line only. */
+  /** Meta's own spend figures. Counted only for months before `adsOffBankBefore`. */
   adSpend?: AdSpendByMonth;
+  /** Month index from which the ads are inside Mercury's card payments. */
+  adsOffBankBefore?: number;
   now?: Date;
   /** How many calendar months to show, the current one included. */
   months?: number;
@@ -166,9 +238,19 @@ export function buildFinance({
   const cash = cents(accounts.reduce((s, a) => s + a.balance, 0));
   const nowIdx = monthIndexOf(now.toISOString())!;
 
-  type Agg = { payouts: number; other: number; transfers: number; expenses: number; byCategory: Record<string, number> };
-  const blank = (): Agg => ({ payouts: 0, other: 0, transfers: 0, expenses: 0, byCategory: {} });
+  type Agg = {
+    payouts: number; other: number; transfers: number;
+    /** Payments out, gross. */
+    paidOut: number;
+    /** Vendor refunds in. */
+    refunds: number;
+    byCategory: Record<string, number>;
+  };
+  const blank = (): Agg => ({ payouts: 0, other: 0, transfers: 0, paidOut: 0, refunds: 0, byCategory: {} });
   const agg = new Map<number, Agg>();
+  /** Meta ads that ran in month `i` and were not paid for through Mercury. */
+  const adsOffBank = (i: number) =>
+    adSpend?.ready && i < adsOffBankBefore ? adSpend.byMonth.get(i) ?? 0 : 0;
   const transferSources = new Set<string>();
   for (const t of txns) {
     const i = monthIndexOf(t.at);
@@ -184,20 +266,24 @@ export function buildFinance({
     } else if (flow === "other_receipt") {
       a.other += t.amount;
     } else {
-      const category = t.category?.trim() || UNCATEGORIZED;
-      a.expenses -= t.amount;
+      // A payment adds to its category's line; a vendor's refund comes off it.
+      const category = categoryOf(t);
+      if (flow === "vendor_refund") a.refunds += t.amount;
+      else a.paidOut -= t.amount;
       a.byCategory[category] = (a.byCategory[category] ?? 0) - t.amount;
     }
   }
 
   // Open on the first month in the window where something happened: a column
   // of dashes ahead of it says nothing. "Something" is a dollar or more moving
-  // through the bank, or any Stripe revenue - the pennies a provider deposits
-  // and takes back to verify the account (Intuit, June 2026) do not count.
+  // through the bank, any Stripe revenue, or ads paid for elsewhere - the
+  // pennies a provider deposits and takes back to verify the account (Intuit,
+  // June 2026) do not count.
   const quiet = (i: number) => {
     const a = agg.get(i);
-    const moved = a ? Math.abs(a.payouts) + Math.abs(a.other) + Math.abs(a.transfers) + a.expenses : 0;
-    return moved < 1 && !(revenue.ready && (revenue.byMonth.get(i) ?? 0) > 0);
+    const moved = a
+      ? Math.abs(a.payouts) + Math.abs(a.other) + Math.abs(a.transfers) + a.paidOut + a.refunds : 0;
+    return moved < 1 && adsOffBank(i) < 1 && !(revenue.ready && (revenue.byMonth.get(i) ?? 0) > 0);
   };
   let start = nowIdx - months + 1;
   while (start < nowIdx && quiet(start)) start += 1;
@@ -209,7 +295,13 @@ export function buildFinance({
   let closing = cash;
   for (let i = nowIdx; i >= start; i -= 1) {
     const a = agg.get(i) ?? blank();
-    const opening = closing - (a.payouts + a.other + a.transfers - a.expenses);
+    // Cash moves on what went through the bank; the ads paid elsewhere are a
+    // cost of the month but never left this account.
+    const opening = closing - (a.payouts + a.other + a.refunds + a.transfers - a.paidOut);
+    const ads = adsOffBank(i);
+    const byCategory = { ...a.byCategory };
+    if (ads > 0) byCategory[META_ADS] = ads;
+    const expenses = a.paidOut - a.refunds + ads;
     const rev = revenue.ready ? revenue.byMonth.get(i) ?? 0 : null;
     out.unshift({
       index: i,
@@ -217,14 +309,14 @@ export function buildFinance({
       partial: i === nowIdx,
       revenue: rev === null ? null : cents(rev),
       refunded: revenue.ready ? cents(revenue.refundedByMonth.get(i) ?? 0) : null,
-      expenses: cents(a.expenses),
+      expenses: cents(expenses),
       byCategory: Object.fromEntries(
-        Object.entries(a.byCategory).map(([k, v]) => [k, cents(v)])),
-      netIncome: rev === null ? null : cents(rev - a.expenses),
-      adSpend: adSpend?.ready ? cents(adSpend.byMonth.get(i) ?? 0) : null,
+        Object.entries(byCategory).map(([k, v]) => [k, cents(v)])),
+      netIncome: rev === null ? null : cents(rev - expenses),
       openingCash: cents(opening),
       stripePayouts: cents(a.payouts),
-      otherReceipts: cents(a.other),
+      otherReceipts: cents(a.other + a.refunds),
+      paidOut: cents(a.paidOut),
       transfers: cents(a.transfers),
       closingCash: cents(closing),
     });
@@ -272,6 +364,7 @@ export function buildFinance({
     transferSources: [...transferSources].sort(),
     uncategorized: cents(categoryTotals.get(UNCATEGORIZED) ?? 0),
     totalExpenses: cents(out.reduce((s, m) => s + m.expenses, 0)),
+    vendorRefunds: cents(out.reduce((s, m) => s + (agg.get(m.index)?.refunds ?? 0), 0)),
   };
 }
 
@@ -318,6 +411,7 @@ export async function financeSummary(now = new Date()): Promise<FinanceResult> {
         kind: t.kind ?? null,
         counterparty: t.counterpartyName ?? null,
         description: t.bankDescription ?? null,
+        memo: t.externalMemo ?? null,
         category: t.categoryData?.name ?? null,
       }));
 

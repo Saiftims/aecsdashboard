@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { UNCATEGORIZED, buildFinance, flowOf, type BankTxn } from "@/lib/finance";
+import {
+  CONTRACTORS, META_ADS, PAYROLL, UNCATEGORIZED, buildFinance, categoryOf, flowOf, type BankTxn,
+} from "@/lib/finance";
 import { monthIndexOf } from "@/lib/revenue";
 
 const NOW = new Date("2026-11-25T15:00:00Z");
@@ -7,10 +9,10 @@ const idx = (month: string) => monthIndexOf(`${month}-15T00:00:00Z`)!;
 
 const txn = (
   day: string, amount: number,
-  rest: Partial<Pick<BankTxn, "kind" | "counterparty" | "category" | "description">> = {},
+  rest: Partial<Pick<BankTxn, "kind" | "counterparty" | "category" | "description" | "memo">> = {},
 ): BankTxn => ({
   amount, at: `${day}T12:00:00Z`, kind: "other", counterparty: null,
-  description: null, category: null, ...rest,
+  description: null, memo: null, category: null, ...rest,
 });
 
 const revenue = (byMonth: Record<string, number>, refunded: Record<string, number> = {}) => ({
@@ -43,6 +45,46 @@ describe("flowOf", () => {
     expect(flowOf({ amount: -7_500, kind: "outgoingPayment", counterparty: "Ontario Inc", description: null })).toBe("expense");
     // A card paid from the bank is spend, whatever the bank calls it.
     expect(flowOf({ amount: -16_000, kind: "other", counterparty: "Chase", description: "CHASE CREDIT CRD; EPAY" })).toBe("expense");
+  });
+
+  it("reads money a known vendor sends back as a refund, and nothing else", () => {
+    const wire = { amount: 7_840, kind: "incomingDomesticWire", description: null };
+    expect(flowOf({ ...wire, counterparty: "APRICOT INC.", memo: "Silent Witness Refund" })).toBe("vendor_refund");
+    // The word alone is not enough: this payee has never been paid.
+    expect(flowOf({ ...wire, counterparty: "Some Fund LP", memo: "refund" })).toBe("other_receipt");
+    // Nor is the payee alone.
+    expect(flowOf({ ...wire, counterparty: "APRICOT INC.", memo: "Investment" })).toBe("other_receipt");
+  });
+});
+
+describe("categoryOf", () => {
+  const pay = (counterparty: string, rest: { description?: string; memo?: string; category?: string } = {}) =>
+    categoryOf({ counterparty, description: rest.description ?? null, memo: rest.memo ?? null, category: rest.category ?? null });
+
+  it("files payroll runs, payroll tax and people's pay under Payroll", () => {
+    expect(pay("Intuit", { description: "INTUIT 99321681; PAYROLL; SILENT WITNESS INC" })).toBe(PAYROLL);
+    expect(pay("Intuit", { description: "INTUIT 02651478; TAX; SILENT WITNESS INC" })).toBe(PAYROLL);
+    expect(pay("Victoria Vizcardo", { memo: "Final Pay Pay Period: 7/12/26-7/25/26" })).toBe(PAYROLL);
+    expect(pay("AHMAD ABDULKAREEM MOHAMMAD QOQAZEH", { memo: "From Silent Witness Inc" })).toBe(PAYROLL);
+    expect(pay("MARWANE AIT SI AHMAD", { memo: "From Silent Witness Inc" })).toBe(PAYROLL);
+  });
+
+  it("files contractor invoices under Contractors & Consulting", () => {
+    expect(pay("Ontario Inc", { memo: "From Silent Witness Inc via mercury.com; Contractor:Consulting" })).toBe(CONTRACTORS);
+    // The first payment went out without the memo; it is the same payee.
+    expect(pay("Ontario Inc", { memo: "From Silent Witness Inc via mercury.com" })).toBe(CONTRACTORS);
+    expect(pay("Apricot Technologies", { description: "APRICOT INC.; SALE; RAMI HASHISH" })).toBe(CONTRACTORS);
+    expect(pay("Someone New LLC", { memo: "Contractor:Consulting" })).toBe(CONTRACTORS);
+  });
+
+  it("lets a category set in Mercury win over a rule", () => {
+    expect(pay("Ontario Inc", { memo: "Contractor:Consulting", category: "Legal" })).toBe("Legal");
+  });
+
+  it("leaves a payee it knows nothing about uncategorized rather than guess", () => {
+    expect(pay("Croboost.ai", { memo: "From Silent Witness Inc via mercury.com" })).toBe(UNCATEGORIZED);
+    // Intuit's account-verification pennies are not payroll.
+    expect(pay("Intuit", { description: "INTUIT INC; ACCTVERIFY; RAMI HASHISH" })).toBe(UNCATEGORIZED);
   });
 });
 
@@ -78,36 +120,84 @@ describe("buildFinance", () => {
     expect(s.transferSources).toEqual(["Chase - Checking"]);
   });
 
-  it("shows Meta ad spend as a memo without adding it to expenses or burn", () => {
-    // The ads ran on a card; Mercury paid the card. Counting both is twice.
+  it("adds Meta ad spend to expenses and burn only for months before Mercury paid the card", () => {
     const txns = [
-      txn("2026-10-29", -24_000, { counterparty: "Chase", category: "Credit & Loan Payments" }),
+      txn("2026-08-10", -30_000, { category: "Payroll" }),
+      txn("2026-09-10", -40_000, { category: "Payroll" }),
       txn("2026-10-10", -16_000, { category: "Payroll" }),
+      // The card the ads run on, paid from Mercury from here on.
+      txn("2026-10-29", -24_000, { counterparty: "Chase", category: "Credit & Loan Payments" }),
     ];
     const rev = revenue({ "2026-10": 10_000 });
-    const without = build(txns, rev);
     const s = buildFinance({
       accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: rev, now: NOW,
-      adSpend: { ready: true, byMonth: new Map([[idx("2026-10"), 9_250.5], [idx("2026-11"), 4_100]]) },
+      adSpend: { ready: true, byMonth: new Map([
+        [idx("2026-08"), 7_718], [idx("2026-09"), 4_810], [idx("2026-10"), 9_250], [idx("2026-11"), 4_100],
+      ]) },
     });
-    expect(month(s, "2026-10").adSpend).toBe(9_250.5);
-    expect(month(s, "2026-11").adSpend).toBe(4_100);
+    expect(month(s, "2026-08").byCategory[META_ADS]).toBe(7_718);
+    expect(month(s, "2026-08").expenses).toBe(37_718);
+    expect(month(s, "2026-09").expenses).toBe(44_810);
+    // October and November: already inside the card payment. Counting both is twice.
+    expect(month(s, "2026-10").byCategory[META_ADS]).toBeUndefined();
     expect(month(s, "2026-10").expenses).toBe(40_000);
-    expect(month(s, "2026-10").netIncome).toBe(-30_000);
-    expect(s.categories).toEqual(without.categories);
-    expect(s.grossBurn).toBe(without.grossBurn);
-    expect(s.netBurn).toBe(without.netBurn);
-    expect(s.runwayMonths).toBe(without.runwayMonths);
+    expect(month(s, "2026-11").expenses).toBe(0);
+    expect(s.categories).toContain(META_ADS);
+    expect(s.grossBurn).toBe(Math.round(((37_718 + 44_810 + 40_000) / 3) * 100) / 100);
   });
 
-  it("leaves Meta ad spend unknown, not zero, when it has never synced", () => {
-    const txns = [txn("2026-10-10", -1_000)];
-    expect(build(txns).months.every((m) => m.adSpend === null)).toBe(true);
-    const empty = buildFinance({
+  it("keeps Meta ads paid elsewhere out of the cash statement", () => {
+    const txns = [txn("2026-09-10", -40_000), txn("2026-10-10", -16_000)];
+    const args = { accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: revenue({}), now: NOW };
+    const without = buildFinance(args);
+    const s = buildFinance({ ...args, adSpend: { ready: true, byMonth: new Map([[idx("2026-09"), 4_810]]) } });
+    const sep = month(s, "2026-09");
+    expect(sep.expenses).toBe(44_810);
+    // The money did not leave Mercury: payments out and balances are unmoved.
+    expect(sep.paidOut).toBe(40_000);
+    expect(sep.openingCash).toBe(month(without, "2026-09").openingCash);
+    expect(sep.closingCash).toBe(month(without, "2026-09").closingCash);
+  });
+
+  it("adds no Meta spend when it has never synced", () => {
+    const txns = [txn("2026-09-10", -40_000)];
+    const s = buildFinance({
       accounts: [{ name: "Checking", balance: 1 }], txns, revenue: revenue({}), now: NOW,
-      adSpend: { ready: false, byMonth: new Map() },
+      adSpend: { ready: false, byMonth: new Map([[idx("2026-09"), 4_810]]) },
     });
-    expect(empty.months.every((m) => m.adSpend === null)).toBe(true);
+    expect(month(s, "2026-09").expenses).toBe(40_000);
+    expect(s.categories).not.toContain(META_ADS);
+  });
+
+  it("takes a vendor's refund off that vendor's expense line, not into revenue", () => {
+    const s = build(
+      [txn("2026-10-01", -4_200, { counterparty: "Apricot Inc", memo: "Contractor:Consulting" }),
+       txn("2026-10-13", -7_500, { counterparty: "Ontario Inc", memo: "Contractor:Consulting" }),
+       txn("2026-10-02", 7_840, { kind: "incomingDomesticWire", counterparty: "APRICOT INC.", memo: "Silent Witness Refund" })],
+      revenue({ "2026-10": 1_000 }),
+    );
+    const oct = month(s, "2026-10");
+    expect(oct.byCategory).toEqual({ [CONTRACTORS]: 3_860 });
+    expect(oct.expenses).toBe(3_860);
+    expect(oct.revenue).toBe(1_000);
+    expect(s.vendorRefunds).toBe(7_840);
+    // The cash statement stays literal: what went out, and what came in.
+    expect(oct.paidOut).toBe(11_700);
+    expect(oct.otherReceipts).toBe(7_840);
+    expect(oct.openingCash).toBe(100_000 + 11_700 - 7_840);
+  });
+
+  it("categorizes a payment Mercury left blank from its payee and memo", () => {
+    const s = build([
+      txn("2026-10-09", -645.54, { counterparty: "Intuit", description: "INTUIT 10467781; TAX; SILENT WITNESS INC" }),
+      txn("2026-10-09", -1_500, { counterparty: "Intuit", description: "INTUIT 06254107; PAYROLL; SILENT WITNESS INC", category: "Payroll" }),
+      txn("2026-10-13", -7_500, { counterparty: "Ontario Inc", memo: "Contractor:Consulting" }),
+      txn("2026-10-20", -1_000, { counterparty: "Croboost.ai" }),
+    ]);
+    expect(month(s, "2026-10").byCategory).toEqual({
+      [PAYROLL]: 2_145.54, [CONTRACTORS]: 7_500, [UNCATEGORIZED]: 1_000,
+    });
+    expect(s.uncategorized).toBe(1_000);
   });
 
   it("averages burn over the last three complete months, not the running one", () => {

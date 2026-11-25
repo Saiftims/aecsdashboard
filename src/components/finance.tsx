@@ -4,7 +4,7 @@
 import {
   Callout, Card, CardHeader, Note, Section, Stat, StatGrid, Table, type Column,
 } from "@/components/ui";
-import { type FinanceMonth, type FinanceResult, type FinanceSummary } from "@/lib/finance";
+import { META_ADS, type FinanceMonth, type FinanceResult, type FinanceSummary } from "@/lib/finance";
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 
@@ -90,9 +90,7 @@ function IncomeStatement({ s }: { s: FinanceSummary }) {
     ["Net income (loss)", ...s.months.map((m) => amt(m.netIncome))],
     ["Memo: revenue later refunded", ...s.months.map((m) => amt(m.refunded))],
   ];
-  // Only once Meta spend has synced: a row of dashes would read as "no ads".
-  const showAds = s.months.some((m) => m.adSpend !== null);
-  if (showAds) rows.push(["Memo: Meta ad spend, per Meta", ...s.months.map((m) => amt(m.adSpend))]);
+  const hasMetaLine = s.categories.includes(META_ADS);
   const total = 1 + s.categories.length;
   const uncategorizedPct = s.totalExpenses > 0
     ? Math.round((s.uncategorized / s.totalExpenses) * 100) : 0;
@@ -103,20 +101,24 @@ function IncomeStatement({ s }: { s: FinanceSummary }) {
         headers={monthColumns(s.months)}
         rows={rows}
         rowClassName={(i) =>
-          i === 0 || i === total || i === total + 1 ? BOLD : i >= total + 2 ? MUTED : undefined}
+          i === 0 || i === total || i === total + 1 ? BOLD : i === total + 2 ? MUTED : undefined}
       />
       <Note>
         Revenue is every Stripe charge in the month, gross: refunds are not
         deducted, and the memo line shows how much of it was later refunded.
         Expenses are the payments that left Mercury, under the category each
-        carries in Mercury.
-        {uncategorizedPct > 0
-          ? ` ${uncategorizedPct}% of the spend shown has no category there; set one in Mercury and it moves to its own line here.`
+        carries in Mercury; where a payment has none, the dashboard files it
+        from its payee and memo (payroll runs, contractor invoices).
+        {s.uncategorized >= 1
+          ? ` ${usd(s.uncategorized)}${uncategorizedPct > 0 ? ` (${uncategorizedPct}%)` : ""} could not be placed; set a category in Mercury and it moves to its own line here.`
+          : ""}
+        {s.vendorRefunds >= 1
+          ? ` ${usd(s.vendorRefunds)} a vendor refunded is taken off that vendor's line.`
           : ""}
         {" "}A card paid off from Mercury is one payment, not what was bought
         on it.
-        {showAds
-          ? " Meta ads are billed to the Chase card, so their cost is inside the card payments above, in the month the card was paid rather than the month the ads ran, and only for card bills paid from Mercury. The Meta memo line is what Meta reports for the month the ads ran; it is not added to expenses or burn, which would count it twice."
+        {hasMetaLine
+          ? " Meta ads are billed to a card that Mercury has paid since October 2026, so from then on they are inside the card payments; for earlier months, what Meta reports is added as its own line."
           : ""}
       </Note>
     </Card>
@@ -128,7 +130,7 @@ function CashStatement({ s }: { s: FinanceSummary }) {
     ["Opening cash", ...s.months.map((m) => amt(m.openingCash))],
     ["Stripe payouts received", ...s.months.map((m) => amt(m.stripePayouts))],
     ["Other receipts", ...s.months.map((m) => amt(m.otherReceipts))],
-    ["Payments out", ...s.months.map((m) => amt(-m.expenses))],
+    ["Payments out", ...s.months.map((m) => amt(-m.paidOut))],
     ["Transfers from own accounts", ...s.months.map((m) => amt(m.transfers))],
     ["Closing cash", ...s.months.map((m) => amt(m.closingCash))],
   ];
@@ -145,9 +147,10 @@ function CashStatement({ s }: { s: FinanceSummary }) {
         {s.transferSources.length ? ` (from ${s.transferSources.join(", ")})` : ""}
         , so they count as neither income nor spend. Stripe pays out after
         refunds and its fees, a few days behind, so payouts will not match the
-        revenue line above. Other receipts are in this table only: they are not
-        counted as revenue and do not reduce burn. Cash held in, or bills paid
-        from, any other bank account is not in these figures.
+        revenue line above. Other receipts are not counted as revenue and do
+        not reduce burn, except a vendor&apos;s refund, which comes off that
+        vendor&apos;s expense line above. Cash held in, or bills paid from, any
+        other bank account is not in these figures.
       </Note>
     </Card>
   );
