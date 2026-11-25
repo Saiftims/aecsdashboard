@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { FunnelChart } from "@/components/charts";
+import { Finance } from "@/components/finance";
 import { Card, CardBody, CardHeader, PageHeader, Section, Stat, StatGrid } from "@/components/ui";
+import { financeSummary } from "@/lib/finance";
 import { leadsReport } from "@/lib/leads";
 import { execOverview } from "@/lib/queries";
 import { loadSettings } from "@/lib/settings";
@@ -12,9 +14,13 @@ export default async function ExecutivePage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
-  const [{ kpis, funnel, postSaleFunnel }, leads] = await Promise.all([
+  const [{ kpis, funnel, postSaleFunnel }, leads, finance] = await Promise.all([
     execOverview(),
     loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
+    // The bank balance, payroll totals and runway are the one thing on the
+    // dashboard not open to every signed-in user: executives only, and the
+    // bank is not even called for anyone else.
+    user.role === "executive" ? financeSummary() : null,
   ]);
   const fmtMoney = (n: number | null) =>
     n === null ? "-" : `$${Math.round(n).toLocaleString()}`;
@@ -81,6 +87,8 @@ export default async function ExecutivePage() {
           <Stat label="Avg cases / active firm" value={kpis.avgCasesPerActiveFirm} sub="last 30 days" />
         </StatGrid>
       </Section>
+
+      {finance ? <Finance result={finance} /> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

@@ -55,6 +55,9 @@ export const env = {
   readaiClientId: () => clean("READAI_CLIENT_ID"),
   readaiClientSecret: () => clean("READAI_CLIENT_SECRET"),
   readaiRedirectUri: () => clean("READAI_REDIRECT_URI") || "https://gtm-dashboard-fawn.vercel.app/api/readai/oauth/callback",
+  /** Mercury API token, read-only, `secret-token:` prefix included. Unset, the
+   * Executive page simply has no Finance section. */
+  mercuryApiKey: () => clean("MERCURY_API_KEY"),
   /** True on Vercel (build and runtime, every environment). */
   isVercel: () => Boolean(clean("VERCEL")),
 };
