@@ -90,6 +90,9 @@ function IncomeStatement({ s }: { s: FinanceSummary }) {
     ["Net income (loss)", ...s.months.map((m) => amt(m.netIncome))],
     ["Memo: revenue later refunded", ...s.months.map((m) => amt(m.refunded))],
   ];
+  // Only once Meta spend has synced: a row of dashes would read as "no ads".
+  const showAds = s.months.some((m) => m.adSpend !== null);
+  if (showAds) rows.push(["Memo: Meta ad spend, per Meta", ...s.months.map((m) => amt(m.adSpend))]);
   const total = 1 + s.categories.length;
   const uncategorizedPct = s.totalExpenses > 0
     ? Math.round((s.uncategorized / s.totalExpenses) * 100) : 0;
@@ -100,7 +103,7 @@ function IncomeStatement({ s }: { s: FinanceSummary }) {
         headers={monthColumns(s.months)}
         rows={rows}
         rowClassName={(i) =>
-          i === 0 || i === total || i === total + 1 ? BOLD : i === total + 2 ? MUTED : undefined}
+          i === 0 || i === total || i === total + 1 ? BOLD : i >= total + 2 ? MUTED : undefined}
       />
       <Note>
         Revenue is every Stripe charge in the month, gross: refunds are not
@@ -112,6 +115,9 @@ function IncomeStatement({ s }: { s: FinanceSummary }) {
           : ""}
         {" "}A card paid off from Mercury is one payment, not what was bought
         on it.
+        {showAds
+          ? " Meta ads are billed to the Chase card, so their cost is inside the card payments above, in the month the card was paid rather than the month the ads ran, and only for card bills paid from Mercury. The Meta memo line is what Meta reports for the month the ads ran; it is not added to expenses or burn, which would count it twice."
+          : ""}
       </Note>
     </Card>
   );

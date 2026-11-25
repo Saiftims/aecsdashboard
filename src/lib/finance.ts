@@ -24,11 +24,19 @@
  * What this cannot see: money held in, or bills paid from, any other bank or
  * card. A card paid off from Mercury shows as one payment, not as what was
  * bought on it.
+ *
+ * META AD SPEND IS A MEMO, NEVER AN EXPENSE LINE. Meta is billed to the Chase
+ * card that Mercury pays off (owner, 2026-11-25), and Mercury has never paid
+ * Meta directly, so the ads' cost is already inside the card payments. What
+ * Meta itself reports (`meta_ad_spend_daily`, by the month the ads ran) is
+ * shown under the statement so the reader can see it; adding it to expenses
+ * or burn would count it twice.
  */
 import {
   listAccounts, listTransactions, mercuryConfigured,
 } from "@/lib/mercury/client";
 import { loadRevenueFacts, monthIndexOf } from "@/lib/revenue";
+import { selectAll } from "@/lib/supabase/server";
 
 /** Spend with no category set on it in Mercury. */
 export const UNCATEGORIZED = "Uncategorized";
@@ -84,6 +92,9 @@ export interface FinanceMonth {
   byCategory: Record<string, number>;
   /** revenue - expenses. */
   netIncome: number | null;
+  /** What Meta reports the ads cost in the month they ran. A memo: it is in
+   * no total here. Null when Meta spend has never synced. */
+  adSpend: number | null;
   openingCash: number;
   stripePayouts: number;
   otherReceipts: number;
@@ -125,6 +136,12 @@ export interface RevenueByMonth {
   refundedByMonth: Map<number, number>;
 }
 
+export interface AdSpendByMonth {
+  /** False when Meta spend has never synced: unknown, not zero. */
+  ready: boolean;
+  byMonth: Map<number, number>;
+}
+
 const cents = (n: number) => Math.round(n * 100) / 100;
 
 export function monthLabel(index: number): string {
@@ -135,11 +152,13 @@ export function monthLabel(index: number): string {
 /** The statements, from data already in hand. Pure: everything it needs is an
  * argument, so it is the part the tests exercise. */
 export function buildFinance({
-  accounts, txns, revenue, now = new Date(), months = 6,
+  accounts, txns, revenue, adSpend, now = new Date(), months = 6,
 }: {
   accounts: { name: string; balance: number }[];
   txns: BankTxn[];
   revenue: RevenueByMonth;
+  /** Meta's own spend figures, for the memo line only. */
+  adSpend?: AdSpendByMonth;
   now?: Date;
   /** How many calendar months to show, the current one included. */
   months?: number;
@@ -202,6 +221,7 @@ export function buildFinance({
       byCategory: Object.fromEntries(
         Object.entries(a.byCategory).map(([k, v]) => [k, cents(v)])),
       netIncome: rev === null ? null : cents(rev - a.expenses),
+      adSpend: adSpend?.ready ? cents(adSpend.byMonth.get(i) ?? 0) : null,
       openingCash: cents(opening),
       stripePayouts: cents(a.payouts),
       otherReceipts: cents(a.other),
@@ -262,16 +282,30 @@ export type FinanceResult =
   /** Mercury did not answer. The rest of the page must still render. */
   | { status: "error"; message: string };
 
+/** Meta's reported ad spend by month, from the daily rows /api/cron/meta-spend
+ * keeps. Paged: a row a day passes PostgREST's 1,000-row cap in time. */
+async function loadAdSpend(): Promise<AdSpendByMonth> {
+  const days = await selectAll<{ day: string; spend_cents: number }>(
+    "meta_ad_spend_daily", "day, spend_cents", "day");
+  const byMonth = new Map<number, number>();
+  for (const d of days) {
+    const i = monthIndexOf(d.day);
+    if (i !== null) byMonth.set(i, (byMonth.get(i) ?? 0) + d.spend_cents / 100);
+  }
+  return { ready: days.length > 0, byMonth };
+}
+
 /** Read Mercury live and Stripe revenue from the cache, and build the
  * statements. Never throws: a bank outage is reported, not propagated. */
 export async function financeSummary(now = new Date()): Promise<FinanceResult> {
   if (!mercuryConfigured()) return { status: "off" };
   try {
-    // Stripe failing is not a reason to hide the bank balance: revenue then
-    // reads as unknown and the cash side still shows.
-    const [accounts, facts] = await Promise.all([
+    // Stripe or Meta failing is not a reason to hide the bank balance: that
+    // figure then reads as unknown and the cash side still shows.
+    const [accounts, facts, adSpend] = await Promise.all([
       listAccounts(),
       loadRevenueFacts().catch(() => null),
+      loadAdSpend().catch(() => undefined),
     ]);
     const ledgers = await Promise.all(accounts.map((a) => listTransactions(a.id)));
 
@@ -305,6 +339,7 @@ export async function financeSummary(now = new Date()): Promise<FinanceResult> {
           byMonth: facts?.byMonth ?? new Map(),
           refundedByMonth,
         },
+        adSpend,
         now,
       }),
     };

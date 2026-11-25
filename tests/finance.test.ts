@@ -78,6 +78,38 @@ describe("buildFinance", () => {
     expect(s.transferSources).toEqual(["Chase - Checking"]);
   });
 
+  it("shows Meta ad spend as a memo without adding it to expenses or burn", () => {
+    // The ads ran on a card; Mercury paid the card. Counting both is twice.
+    const txns = [
+      txn("2026-10-29", -24_000, { counterparty: "Chase", category: "Credit & Loan Payments" }),
+      txn("2026-10-10", -16_000, { category: "Payroll" }),
+    ];
+    const rev = revenue({ "2026-10": 10_000 });
+    const without = build(txns, rev);
+    const s = buildFinance({
+      accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: rev, now: NOW,
+      adSpend: { ready: true, byMonth: new Map([[idx("2026-10"), 9_250.5], [idx("2026-11"), 4_100]]) },
+    });
+    expect(month(s, "2026-10").adSpend).toBe(9_250.5);
+    expect(month(s, "2026-11").adSpend).toBe(4_100);
+    expect(month(s, "2026-10").expenses).toBe(40_000);
+    expect(month(s, "2026-10").netIncome).toBe(-30_000);
+    expect(s.categories).toEqual(without.categories);
+    expect(s.grossBurn).toBe(without.grossBurn);
+    expect(s.netBurn).toBe(without.netBurn);
+    expect(s.runwayMonths).toBe(without.runwayMonths);
+  });
+
+  it("leaves Meta ad spend unknown, not zero, when it has never synced", () => {
+    const txns = [txn("2026-10-10", -1_000)];
+    expect(build(txns).months.every((m) => m.adSpend === null)).toBe(true);
+    const empty = buildFinance({
+      accounts: [{ name: "Checking", balance: 1 }], txns, revenue: revenue({}), now: NOW,
+      adSpend: { ready: false, byMonth: new Map() },
+    });
+    expect(empty.months.every((m) => m.adSpend === null)).toBe(true);
+  });
+
   it("averages burn over the last three complete months, not the running one", () => {
     const s = build(
       [txn("2026-07-10", -90_000), // older than the three-month window
