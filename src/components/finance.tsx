@@ -115,11 +115,9 @@ function IncomeStatement({ s }: { s: FinanceSummary }) {
         {s.vendorRefunds >= 1
           ? ` ${usd(s.vendorRefunds)} a vendor refunded is taken off that vendor's line.`
           : ""}
-        {" "}A card paid off from Mercury is one payment, not what was bought
-        on it.
         {hasMetaLine
-          ? " Meta ads are billed to a card that Mercury has paid since October 2026, so from then on they are inside the card payments; for earlier months, what Meta reports is added as its own line."
-          : ""}
+          ? " Meta ads are what Meta reports for the month the ads ran. They are billed to the Chase card, which Mercury has paid since October 2026: from then on the same amount is taken out of the card payments, leaving that line as everything else bought on the card, which the bank cannot break down. Earlier months' ads were paid for outside Mercury and are added on top."
+          : " A card paid off from Mercury is one payment, not what was bought on it."}
       </Note>
     </Card>
   );

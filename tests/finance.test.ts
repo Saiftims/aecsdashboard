@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CONTRACTORS, META_ADS, PAYROLL, UNCATEGORIZED, buildFinance, categoryOf, flowOf, type BankTxn,
+  CARD_OTHER, CONTRACTORS, META_ADS, PAYROLL, UNCATEGORIZED, buildFinance, categoryOf, flowOf, type BankTxn,
 } from "@/lib/finance";
 import { monthIndexOf } from "@/lib/revenue";
 
@@ -120,30 +120,68 @@ describe("buildFinance", () => {
     expect(s.transferSources).toEqual(["Chase - Checking"]);
   });
 
-  it("adds Meta ad spend to expenses and burn only for months before Mercury paid the card", () => {
+  const CARD = { counterparty: "Chase", description: "CHASE CREDIT CRD; EPAY; RAMI HASHISH", category: "Credit & Loan Payments" };
+
+  it("gives Meta ads their own line: on top before Mercury paid the card, carved out of it after", () => {
     const txns = [
       txn("2026-08-10", -30_000, { category: "Payroll" }),
       txn("2026-09-10", -40_000, { category: "Payroll" }),
       txn("2026-10-10", -16_000, { category: "Payroll" }),
       // The card the ads run on, paid from Mercury from here on.
-      txn("2026-10-29", -24_000, { counterparty: "Chase", category: "Credit & Loan Payments" }),
+      txn("2026-10-29", -24_000, CARD),
     ];
-    const rev = revenue({ "2026-10": 10_000 });
     const s = buildFinance({
-      accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: rev, now: NOW,
+      accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: revenue({ "2026-10": 10_000 }), now: NOW,
       adSpend: { ready: true, byMonth: new Map([
-        [idx("2026-08"), 7_718], [idx("2026-09"), 4_810], [idx("2026-10"), 9_250], [idx("2026-11"), 4_100],
+        [idx("2026-08"), 7_718], [idx("2026-09"), 4_810], [idx("2026-10"), 9_250],
       ]) },
     });
+    // Before October the card was paid elsewhere: the ads are extra spend.
     expect(month(s, "2026-08").byCategory[META_ADS]).toBe(7_718);
     expect(month(s, "2026-08").expenses).toBe(37_718);
     expect(month(s, "2026-09").expenses).toBe(44_810);
-    // October and November: already inside the card payment. Counting both is twice.
-    expect(month(s, "2026-10").byCategory[META_ADS]).toBeUndefined();
-    expect(month(s, "2026-10").expenses).toBe(40_000);
-    expect(month(s, "2026-11").expenses).toBe(0);
-    expect(s.categories).toContain(META_ADS);
+    // October: the ads are inside the $24,000 card payment. Splitting it must
+    // not change the month's total - counting both would be twice.
+    const oct = month(s, "2026-10");
+    expect(oct.byCategory).toEqual({ Payroll: 16_000, [META_ADS]: 9_250, [CARD_OTHER]: 14_750 });
+    expect(oct.expenses).toBe(40_000);
+    expect(oct.paidOut).toBe(40_000);
     expect(s.grossBurn).toBe(Math.round(((37_718 + 44_810 + 40_000) / 3) * 100) / 100);
+  });
+
+  it("carries ads the card has not been paid for yet to the next card payment", () => {
+    // October's ads ran with no card payment that month; November's payment
+    // covers both months' ads and $4,000 of other purchases.
+    const s = buildFinance({
+      accounts: [{ name: "Checking", balance: 100_000 }],
+      txns: [txn("2026-10-10", -1_000, { category: "Payroll" }), txn("2026-11-16", -12_000, CARD)],
+      revenue: revenue({}), now: NOW,
+      adSpend: { ready: true, byMonth: new Map([[idx("2026-10"), 5_000], [idx("2026-11"), 3_000]]) },
+    });
+    expect(month(s, "2026-10").byCategory).toEqual({ Payroll: 1_000, [META_ADS]: 5_000 });
+    expect(month(s, "2026-10").expenses).toBe(6_000);
+    expect(month(s, "2026-11").byCategory).toEqual({ [META_ADS]: 3_000, [CARD_OTHER]: 4_000 });
+    expect(month(s, "2026-11").expenses).toBe(7_000);
+    // Across the two months, spend comes to exactly what left the bank.
+    expect(s.months.reduce((sum, m) => sum + m.expenses, 0)).toBe(13_000);
+    expect(s.months.reduce((sum, m) => sum + m.paidOut, 0)).toBe(13_000);
+  });
+
+  it("never takes more out of a card payment than was paid", () => {
+    const s = buildFinance({
+      accounts: [{ name: "Checking", balance: 100_000 }],
+      txns: [txn("2026-10-29", -2_000, CARD)], revenue: revenue({}), now: NOW,
+      adSpend: { ready: true, byMonth: new Map([[idx("2026-10"), 9_000]]) },
+    });
+    const oct = month(s, "2026-10");
+    expect(oct.byCategory[CARD_OTHER]).toBe(0);
+    expect(oct.byCategory[META_ADS]).toBe(9_000);
+    expect(oct.expenses).toBe(9_000);
+  });
+
+  it("leaves the card payment whole, under Mercury's category, when Meta has never synced", () => {
+    const s = build([txn("2026-10-29", -24_000, CARD)]);
+    expect(month(s, "2026-10").byCategory).toEqual({ "Credit & Loan Payments": 24_000 });
   });
 
   it("keeps Meta ads paid elsewhere out of the cash statement", () => {
