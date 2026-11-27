@@ -22,15 +22,29 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
-/** Click anywhere in a month's column to open `${drillBase}${row.key}`. */
+/** Click a month to open `${drillBase}${row.key}`. Two handlers, because
+ * recharts 3's chart-level click only knows the month through the TOOLTIP's
+ * hover state - a tap on a phone, or a click that lands before the hover
+ * registers, arrives with no index and did nothing (owner, 2026-11-27: "i
+ * want to open new firms for month when i click on bar chart"). The bar-level
+ * handler gets the index straight from the bar, so spread `bar` onto every
+ * <Bar> and `chart` onto the <BarChart> (which still covers the empty column
+ * above a short bar on desktop). */
 function useMonthDrill(data: { key?: string }[], drillBase?: string) {
   const router = useRouter();
-  if (!drillBase) return {};
+  const go = (index: number | string | null | undefined) => {
+    const key = data[Number(index)]?.key;
+    if (drillBase && index != null && key) router.push(`${drillBase}${key}`);
+  };
+  if (!drillBase) return { chart: {}, bar: {} };
   return {
-    style: { cursor: "pointer" },
-    onClick: (state: { activeIndex?: number | string | null } | null) => {
-      const key = data[Number(state?.activeIndex)]?.key;
-      if (state?.activeIndex != null && key) router.push(`${drillBase}${key}`);
+    chart: {
+      style: { cursor: "pointer" },
+      onClick: (state: { activeIndex?: number | string | null } | null) => go(state?.activeIndex),
+    },
+    bar: {
+      cursor: "pointer",
+      onClick: (_: unknown, index: number) => go(index),
     },
   };
 }
@@ -268,12 +282,12 @@ export function MonthlyRevenueChart({
   stretch?: number;
   drillBase?: string;
 }) {
-  const drillProps = useMonthDrill(data, drillBase);
+  const drill = useMonthDrill(data, drillBase);
   const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
   const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.total), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 72 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 72 : 8 }} {...drill.chart}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis width={58} tick={{ fontSize: 11 }} domain={[0, Math.ceil(maxVal * 1.15)]}
@@ -289,8 +303,9 @@ export function MonthlyRevenueChart({
           }}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="subscription" stackId="rev" name="Subscription" fill={C.green} />
-        <Bar dataKey="transactional" stackId="rev" name="Transactional" fill={C.blue} radius={[4, 4, 0, 0]} />
+        <Bar dataKey="subscription" stackId="rev" name="Subscription" fill={C.green} {...drill.bar} />
+        <Bar dataKey="transactional" stackId="rev" name="Transactional" fill={C.blue} radius={[4, 4, 0, 0]}
+             {...drill.bar} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -313,12 +328,12 @@ export function MonthlyMqlChart<K extends string>({
   stretch?: number;
   drillBase?: string;
 }) {
-  const drillProps = useMonthDrill(data, drillBase);
+  const drill = useMonthDrill(data, drillBase);
   const shown = series.filter((s) => data.some((d) => Number(d[s.key] ?? 0) > 0));
   const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drill.chart}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={36} domain={[0, Math.ceil(maxVal * 1.15)]} />
@@ -326,7 +341,7 @@ export function MonthlyMqlChart<K extends string>({
         <Legend wrapperStyle={{ fontSize: 11 }} />
         {shown.map((s, i) => (
           <Bar key={s.key} dataKey={s.key} stackId="mql" name={s.label} fill={s.color}
-               radius={i === shown.length - 1 ? [4, 4, 0, 0] : undefined} />
+               radius={i === shown.length - 1 ? [4, 4, 0, 0] : undefined} {...drill.bar} />
         ))}
         {target ? targetLine(target, `Target ${target}`) : null}
         {stretch ? targetLine(stretch, `Stretch ${stretch}`, C.amber) : null}
@@ -381,19 +396,19 @@ export function MonthlyNewFirmsChart({
   stretch?: number;
   drillBase?: string;
 }) {
-  const drillProps = useMonthDrill(data, drillBase);
+  const drill = useMonthDrill(data, drillBase);
   const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drill.chart}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="firstCase" stackId="firms" name="Submitted a case" fill={C.violet} />
+        <Bar dataKey="firstCase" stackId="firms" name="Submitted a case" fill={C.violet} {...drill.bar} />
         <Bar dataKey="noCase" stackId="firms" name="Signed up or on a plan, no case yet" fill={C.violetSoft}
-             radius={[4, 4, 0, 0]} />
+             radius={[4, 4, 0, 0]} {...drill.bar} />
         {target ? targetLine(target, `Target ${target}`) : null}
         {stretch ? targetLine(stretch, `Stretch ${stretch}`, C.amber) : null}
       </BarChart>
@@ -429,16 +444,16 @@ export function MonthlyBarChart({
   stretch?: number;
   drillBase?: string;
 }) {
-  const drillProps = useMonthDrill(data, drillBase);
+  const drill = useMonthDrill(data, drillBase);
   const maxVal = Math.max(target ?? 0, stretch ?? 0, ...data.map((d) => d.count), 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drillProps}>
+      <BarChart data={data} margin={{ top: 8, right: target || stretch ? 64 : 8 }} {...drill.chart}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
         <YAxis allowDecimals={false} width={28} domain={[0, Math.ceil(maxVal * 1.15)]} />
         <Tooltip />
-        <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} />
+        <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} {...drill.bar} />
         {target ? targetLine(target, `Target ${target}`) : null}
         {stretch ? targetLine(stretch, `Stretch ${stretch}`, C.amber) : null}
       </BarChart>

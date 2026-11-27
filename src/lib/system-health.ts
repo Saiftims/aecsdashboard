@@ -165,7 +165,7 @@ export async function systemHealth(): Promise<SystemHealth> {
   ] = await Promise.all([
     latestRunsByKind,
     selectAll<Co>("companies", "hubspot_id, name, domain, signed_up_at, first_case_at", "hubspot_id"),
-    sb.from("cases").select("case_id, sw_id, company_hubspot_id, submitted_date, source, creator_email").order("submitted_date", { ascending: false }).limit(2000),
+    sb.from("cases").select("case_id, sw_id, company_hubspot_id, submitted_date, source, creator_email, case_name, hubspot_note_id").order("submitted_date", { ascending: false }).limit(2000),
     sb.from("stripe_customers").select("customer_id, email, name, company_hubspot_id, is_internal"),
     sb.from("stripe_subscriptions").select("subscription_id, company_hubspot_id, status, is_internal, customer_id"),
     sb.from("meta_leads").select("leadgen_id, created_time, full_name, email, company, is_test, hubspot_pushed_at, hubspot_deal_id").order("created_time", { ascending: false }).limit(1000),
@@ -280,6 +280,15 @@ export async function systemHealth(): Promise<SystemHealth> {
   mk("invoiced_not_counted", "Invoiced cases not in the table (60 d)", "Stripe raised a case invoice for a matter the cases table does not hold, so the month total, the firm and the plan allowance all under-count.",
     "If the payer has no firm, match the Stripe customer first (see above); otherwise the next cases sync inserts it as source 'stripe_invoice'. Check no hand-entered stand-in row is absorbing it.",
     invoicedMissing.map((i) => ({ id: i.invoice_id, label: i.case_name ?? i.case_id, detail: `${i.created_at?.slice(0, 10)} · ${i.company_hubspot_id ? `firm ${i.company_hubspot_id}` : "no firm"} · ${i.case_id.slice(0, 18)}` })), 1, 3);
+
+  // Every case with a firm gets a HubSpot note from the hourly rollup
+  // (sync/case-notes.ts). One still without after 3 h means the write failed
+  // or HUBSPOT_APPLY is off - the CS team would not see the case in the CRM.
+  const noteMissing = ((cases ?? []) as { case_id: string; sw_id: string | null; company_hubspot_id: string | null; submitted_date: string | null; case_name: string | null; hubspot_note_id: string | null }[])
+    .filter((c) => c.company_hubspot_id && !c.hubspot_note_id && c.submitted_date && now - Date.parse(c.submitted_date) > 3 * HOUR);
+  mk("case_note_missing", "Cases not yet on the HubSpot record", "Each customer case is written to HubSpot as a note on the firm by the hourly rollup; these have a firm but no note three hours on, so the CS team cannot see them in the CRM.",
+    "Check the latest `rollup` run's caseNotes stats and that HUBSPOT_APPLY is true; the next run retries any case without a note id.",
+    noteMissing.map((c) => ({ id: c.sw_id ?? c.case_id, label: c.case_name ?? c.case_id, detail: `${c.submitted_date?.slice(0, 10)} · firm ${c.company_hubspot_id}`, href: `/firms/${c.company_hubspot_id}` })), 1, 5);
 
   // Firms with a case or signup but no domain - their next case will drop.
   const noDomain = companies.filter((c) => !c.domain && (c.first_case_at || c.signed_up_at));

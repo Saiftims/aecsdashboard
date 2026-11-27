@@ -15,6 +15,7 @@ import {
   computeAccountHealth, type AccountHealthStatus, type FirmSegment, type SegmentRule,
 } from "@/lib/health";
 import { hsCreateObject, hsUpdateProperties, ASSOC } from "@/lib/hubspot/client";
+import { pushCaseNotes } from "@/lib/sync/case-notes";
 import { SALES_PIPELINE_ID, SALES_STAGES } from "@/lib/hubspot/stages";
 import { computeFirmUsage } from "@/lib/metrics";
 import { loadSettings } from "@/lib/settings";
@@ -1112,5 +1113,10 @@ export async function computeRollups() {
   }
 
   void nowMs;
-  return stats;
+
+  // ---- one HubSpot note per case (see sync/case-notes.ts) ----
+  // After the rollup so a case that just arrived has its firm's totals on the
+  // company record by the time the note appears under it.
+  const caseNotes = await pushCaseNotes();
+  return { ...stats, caseNotes };
 }
