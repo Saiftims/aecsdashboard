@@ -38,6 +38,10 @@ export interface GtmSettings {
    * `stretch`, a second set of numbers drawn as a stretch line - no fallback,
    * a month without one has no stretch. */
   monthlyTargetsByMonth: Record<string, MonthlyTargetEntry>;
+  /** The month ("YYYY-MM") whose income statement the Executive page's burn,
+   * net burn and runway are read from (owner, 2026-11-27: "use the november
+   * snapshot"). Empty = the average of the last three complete months. */
+  burnBasisMonth: string;
   /** Paid-ads spend for the current month and the share of MQLs (and so of new
    * subscribers) those ads get credit for. Drives CAC in the unit economics. */
   monthlyAdSpend: number;
@@ -116,6 +120,7 @@ export const DEFAULT_SETTINGS: GtmSettings = {
     },
     "2027-01": { mqls: 250, demos: 80, newFirms: 26, cases: 165, revenue: 44500 },
   },
+  burnBasisMonth: "2026-11",
   monthlyAdSpend: 7500,
   adSpendByMonth: { "2026-07": 5856, "2026-08": 7718, "2026-09": 4810 },
   adLeadSharePct: 95,
@@ -168,6 +173,7 @@ const KEY_MAP: Record<string, keyof GtmSettings> = {
   monthly_cases_target: "monthlyCasesTarget",
   monthly_revenue_target: "monthlyRevenueTarget",
   monthly_targets_by_month: "monthlyTargetsByMonth",
+  burn_basis_month: "burnBasisMonth",
   monthly_ad_spend: "monthlyAdSpend",
   ad_spend_by_month: "adSpendByMonth",
   ad_lead_share_pct: "adLeadSharePct",
@@ -223,10 +229,9 @@ export async function loadSettings(): Promise<GtmSettings> {
     try { out.monthlyTargetsByMonth = JSON.parse(out.monthlyTargetsByMonth); } catch { out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth; }
   }
   if (!out.monthlyTargetsByMonth || typeof out.monthlyTargetsByMonth !== "object") out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth;
-  if (typeof out.monthlyTargetsByMonth === "string") {
-    try { out.monthlyTargetsByMonth = JSON.parse(out.monthlyTargetsByMonth); } catch { out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth; }
-  }
-  if (!out.monthlyTargetsByMonth || typeof out.monthlyTargetsByMonth !== "object") out.monthlyTargetsByMonth = DEFAULT_SETTINGS.monthlyTargetsByMonth;
+  // A month key or nothing; anything else (a typo, a number) means "average".
+  out.burnBasisMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(out.burnBasisMonth ?? "").trim())
+    ? String(out.burnBasisMonth).trim() : "";
   if (typeof out.adSpendByMonth === "string") {
     try { out.adSpendByMonth = JSON.parse(out.adSpendByMonth); } catch { out.adSpendByMonth = DEFAULT_SETTINGS.adSpendByMonth; }
   }

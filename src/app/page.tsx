@@ -14,13 +14,14 @@ export default async function ExecutivePage() {
   const user = await currentAppUser();
   if (!user) redirect("/login");
 
+  const settings = await loadSettings();
   const [{ kpis, funnel, postSaleFunnel }, leads, finance] = await Promise.all([
     execOverview(),
-    loadSettings().then((s) => leadsReport(s.dashboardTimezone)),
+    leadsReport(settings.dashboardTimezone),
     // The bank balance, payroll totals and runway are the one thing on the
     // dashboard not open to every signed-in user: executives only, and the
     // bank is not even called for anyone else.
-    user.role === "executive" ? financeSummary() : null,
+    user.role === "executive" ? financeSummary({ burnBasisMonth: settings.burnBasisMonth }) : null,
   ]);
   const fmtMoney = (n: number | null) =>
     n === null ? "-" : `$${Math.round(n).toLocaleString()}`;

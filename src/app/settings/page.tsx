@@ -105,6 +105,18 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
+          <CardHeader title="Finance" />
+          <CardBody className="space-y-3">
+            <p className="text-xs text-zinc-500">
+              Which month&apos;s income statement the Executive page reads burn,
+              net burn and runway from. The month is used as it stands, even if it
+              is still running. Clear it to average the last three complete months.
+            </p>
+            <SettingField settingKey="burn_basis_month" type="text" label='Burn basis month (YYYY-MM, e.g. "2026-11"; blank = 3-month average)' defaultValue={settings.burnBasisMonth} />
+          </CardBody>
+        </Card>
+
+        <Card>
           <CardHeader title="HubSpot" />
           <CardBody className="space-y-3">
             <SettingField settingKey="hubspot_portal_id" label="Portal ID" defaultValue={settings.hubspotPortalId} type="text" />

@@ -255,6 +255,48 @@ describe("buildFinance", () => {
     expect(month(s, "2026-11").partial).toBe(true);
   });
 
+  it("reads burn from one month's column, as it stands, when a basis month is set", () => {
+    const txns = [
+      txn("2026-08-10", -30_000), txn("2026-09-10", -40_000),
+      txn("2026-10-10", -56_000), txn("2026-11-10", -35_000),
+    ];
+    const rev = revenue({ "2026-08": 10_000, "2026-09": 12_000, "2026-10": 20_000, "2026-11": 25_000 });
+    // November is still running on NOW (the 25th): taken to date, not prorated.
+    const s = buildFinance({
+      accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: rev, now: NOW, burnBasisMonth: "2026-11",
+    });
+    expect(s.burnMode).toBe("snapshot");
+    expect(s.burnBasis).toEqual(["Nov 2026"]);
+    expect(s.burnBasisPartial).toBe(true);
+    expect(s.grossBurn).toBe(35_000);
+    expect(s.netBurn).toBe(10_000);
+    expect(s.runwayMonths).toBeCloseTo(10, 6);
+    // The average it replaced is kept for context.
+    expect(s.averageGrossBurn).toBe(42_000);
+    expect(s.averageNetBurn).toBe(28_000);
+
+    // A complete month reads the same way and is not flagged partial.
+    const oct = buildFinance({
+      accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: rev, now: NOW, burnBasisMonth: "2026-10",
+    });
+    expect(oct.burnBasisPartial).toBe(false);
+    expect(oct.grossBurn).toBe(56_000);
+    expect(oct.netBurn).toBe(36_000);
+  });
+
+  it("falls back to the average when the basis month is not on the statement", () => {
+    const txns = [txn("2026-09-10", -40_000), txn("2026-10-10", -50_000)];
+    for (const bad of ["2025-01", "2027-03", "", "november"]) {
+      const s = buildFinance({
+        accounts: [{ name: "Checking", balance: 100_000 }], txns, revenue: revenue({}), now: NOW, burnBasisMonth: bad,
+      });
+      expect(s.burnMode).toBe("average");
+      expect(s.burnBasis).toEqual(["Sep 2026", "Oct 2026"]);
+      expect(s.grossBurn).toBe(45_000);
+      expect(s.averageGrossBurn).toBeNull();
+    }
+  });
+
   it("uses the months it has when the account is younger than three months", () => {
     const s = build([txn("2026-10-10", -20_000)], revenue({}));
     expect(s.burnBasis).toEqual(["Oct 2026"]);

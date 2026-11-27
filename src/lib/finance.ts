@@ -13,7 +13,12 @@
  *    account, grouped by the category the transaction carries in Mercury.
  *
  * Net burn is spend less revenue, so it is the income statement's loss with
- * the sign turned round, and runway is cash divided by its recent average.
+ * the sign turned round, and runway is cash divided by it. WHICH MONTH'S loss
+ * is a setting: `burn_basis_month` names one month's column of the income
+ * statement (owner, 2026-11-27: "use the november snapshot for burn and net
+ * burn and runway") and the tiles read that column as it stands - to date if
+ * the month is still running, nothing prorated. Left empty, the tiles fall
+ * back to the average of the last three complete months.
  *
  * MONEY MOVED BETWEEN THE COMPANY'S OWN ACCOUNTS IS NEITHER. As of 2026-11-25,
  * $516k of the $548k that had ever arrived in Mercury was transferred in from
@@ -193,12 +198,22 @@ export interface FinanceSummary {
   months: FinanceMonth[];
   /** Expense categories across `months`, largest first, Uncategorized last. */
   categories: string[];
-  /** Labels of the complete months the burn figures average. */
+  /** Labels of the months the burn figures are read from: one month in
+   * snapshot mode, up to three complete months when averaging. */
   burnBasis: string[];
-  /** Average monthly spend. Null with no complete month to measure. */
+  /** "snapshot": one named month's column as it stands (`burnBasisPartial`
+   * says whether it is still running). "average": the last three complete
+   * months. */
+  burnMode: "snapshot" | "average";
+  burnBasisPartial: boolean;
+  /** Monthly spend on the chosen basis. Null with nothing to measure. */
   grossBurn: number | null;
-  /** Average monthly spend less revenue. Zero or below is not burning. */
+  /** Monthly spend less revenue. Zero or below is not burning. */
   netBurn: number | null;
+  /** The three-complete-month averages, for context beside a snapshot. Null
+   * in average mode (they ARE the figures then) or with no complete month. */
+  averageGrossBurn: number | null;
+  averageNetBurn: number | null;
   /** Cash divided by net burn. Null when not burning or not measurable. */
   runwayMonths: number | null;
   /** "Mar 2028": the month cash reaches zero at this rate. */
@@ -237,7 +252,7 @@ export function monthLabel(index: number): string {
  * argument, so it is the part the tests exercise. */
 export function buildFinance({
   accounts, txns, revenue, adSpend, cardPaidFromBankSince = CARD_PAID_FROM_MERCURY_SINCE,
-  now = new Date(), months = 6,
+  now = new Date(), months = 6, burnBasisMonth = "",
 }: {
   accounts: { name: string; balance: number }[];
   txns: BankTxn[];
@@ -249,6 +264,10 @@ export function buildFinance({
   now?: Date;
   /** How many calendar months to show, the current one included. */
   months?: number;
+  /** "YYYY-MM" whose column the burn tiles read; "" for the trailing average.
+   * A month outside the statement (too old, or in the future) falls back to
+   * the average rather than reading a column that is not there. */
+  burnBasisMonth?: string;
 }): FinanceSummary {
   const cash = cents(accounts.reduce((s, a) => s + a.balance, 0));
   const nowIdx = monthIndexOf(now.toISOString())!;
@@ -379,11 +398,22 @@ export function buildFinance({
   // any month before the account's first payment (it was not operating yet).
   const complete = out.filter((m) => !m.partial);
   const firstSpend = complete.findIndex((m) => m.expenses > 0);
-  const basis = firstSpend < 0 ? [] : complete.slice(firstSpend).slice(-3);
+  const avgBasis = firstSpend < 0 ? [] : complete.slice(firstSpend).slice(-3);
   const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
-  const grossBurn = basis.length ? cents(mean(basis.map((m) => m.expenses))) : null;
-  const netBurn = basis.length && revenue.ready
-    ? cents(mean(basis.map((m) => m.expenses - (m.revenue ?? 0)))) : null;
+  const averageGrossBurn = avgBasis.length ? cents(mean(avgBasis.map((m) => m.expenses))) : null;
+  const averageNetBurn = avgBasis.length && revenue.ready
+    ? cents(mean(avgBasis.map((m) => m.expenses - (m.revenue ?? 0)))) : null;
+
+  // Snapshot: one month's column, read as it stands. The month has to be on
+  // the statement; a key for a month that is not falls back to the average.
+  const snapIdx = monthIndexOf(`${burnBasisMonth}-15T00:00:00Z`);
+  const snap = snapIdx === null ? undefined : out.find((m) => m.index === snapIdx);
+  const burnMode: FinanceSummary["burnMode"] = snap ? "snapshot" : "average";
+  const basis = snap ? [snap] : avgBasis;
+  const grossBurn = snap ? snap.expenses : averageGrossBurn;
+  const netBurn = snap
+    ? (revenue.ready && snap.netIncome !== null ? cents(-snap.netIncome) : null)
+    : averageNetBurn;
   const runwayMonths = netBurn !== null && netBurn > 0 ? cash / netBurn : null;
   // Past ten years the date is noise.
   const cashOut = runwayMonths !== null && runwayMonths < 120
@@ -397,8 +427,12 @@ export function buildFinance({
     months: out,
     categories,
     burnBasis: basis.map((m) => m.label),
+    burnMode,
+    burnBasisPartial: Boolean(snap?.partial),
     grossBurn,
     netBurn,
+    averageGrossBurn: snap ? averageGrossBurn : null,
+    averageNetBurn: snap ? averageNetBurn : null,
     runwayMonths,
     cashOut,
     transferSources: [...transferSources].sort(),
@@ -430,7 +464,9 @@ async function loadAdSpend(): Promise<AdSpendByMonth> {
 
 /** Read Mercury live and Stripe revenue from the cache, and build the
  * statements. Never throws: a bank outage is reported, not propagated. */
-export async function financeSummary(now = new Date()): Promise<FinanceResult> {
+export async function financeSummary(
+  { now = new Date(), burnBasisMonth = "" }: { now?: Date; burnBasisMonth?: string } = {},
+): Promise<FinanceResult> {
   if (!mercuryConfigured()) return { status: "off" };
   try {
     // Stripe or Meta failing is not a reason to hide the bank balance: that
@@ -475,6 +511,7 @@ export async function financeSummary(now = new Date()): Promise<FinanceResult> {
         },
         adSpend,
         now,
+        burnBasisMonth,
       }),
     };
   } catch (e) {

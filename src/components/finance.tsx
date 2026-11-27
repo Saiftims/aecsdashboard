@@ -41,15 +41,23 @@ const BOLD = "font-semibold";
 const MUTED = "text-zinc-500 dark:text-zinc-400";
 
 function Tiles({ s }: { s: FinanceSummary }) {
-  const basis = s.burnBasis.length ? `avg of ${basisText(s.burnBasis)}` : "no complete month yet";
+  const snapshot = s.burnMode === "snapshot";
+  const basis = snapshot
+    ? `${s.burnBasis[0]}${s.burnBasisPartial ? " to date" : ""}`
+    : s.burnBasis.length ? `avg of ${basisText(s.burnBasis)}` : "no complete month yet";
   const notBurning = s.netBurn !== null && s.netBurn <= 0;
-  // The latest complete month beside each average: an average of three months
-  // hides a spend that has stepped up in the last one.
-  const last = s.burnBasis.length ? s.months.filter((m) => !m.partial).at(-1) : undefined;
+  const signed = (net: number) => (net <= 0 ? `+${usd(-net)}` : usd(net));
+  // Context beside the headline. In snapshot mode that is the three-month
+  // average the snapshot replaced; in average mode it is the latest complete
+  // month, because an average of three hides a spend that stepped up in one.
+  const last = !snapshot && s.burnBasis.length ? s.months.filter((m) => !m.partial).at(-1) : undefined;
   const lastName = last?.label.split(" ")[0];
-  const lastGross = last ? ` · ${lastName} ${usd(last.expenses)}` : "";
-  const lastNet = last && last.netIncome !== null
-    ? ` · ${lastName} ${last.netIncome > 0 ? `+${usd(last.netIncome)}` : usd(-last.netIncome)}` : "";
+  const lastGross = snapshot
+    ? (s.averageGrossBurn !== null ? ` · 3-mo avg ${usd(s.averageGrossBurn)}` : "")
+    : last ? ` · ${lastName} ${usd(last.expenses)}` : "";
+  const lastNet = snapshot
+    ? (s.averageNetBurn !== null ? ` · 3-mo avg ${signed(s.averageNetBurn)}` : "")
+    : last && last.netIncome !== null ? ` · ${lastName} ${signed(-last.netIncome)}` : "";
   return (
     <StatGrid cols={4}>
       <Stat
@@ -79,6 +87,20 @@ function Tiles({ s }: { s: FinanceSummary }) {
         sub={s.cashOut ? `cash lasts to about ${s.cashOut}` : "cash divided by net burn"}
       />
     </StatGrid>
+  );
+}
+
+function BurnBasisNote({ s }: { s: FinanceSummary }) {
+  if (s.burnMode !== "snapshot") return null;
+  const m = s.burnBasis[0];
+  return (
+    <Note className="px-0 pb-0">
+      Burn, net burn and runway are read from the {m} column of the income
+      statement below{s.burnBasisPartial
+        ? `, as it stands today - ${m} is still running and nothing is prorated, so runway will shorten as the month's remaining bills land`
+        : ""}. Change the month, or clear it to use a three-month average, in
+      Settings.
+    </Note>
   );
 }
 
@@ -174,6 +196,7 @@ export function Finance({ result }: { result: FinanceResult }) {
     >
       <div className="space-y-4">
         <Tiles s={s} />
+        <BurnBasisNote s={s} />
         <IncomeStatement s={s} />
         <CashStatement s={s} />
       </div>

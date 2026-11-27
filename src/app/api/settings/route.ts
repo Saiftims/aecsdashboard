@@ -16,6 +16,7 @@ const ALLOWED_KEYS = new Set([
   "ae_daily_calls_target", "ae_daily_emails_target",
   "monthly_mqls_target", "monthly_demos_target", "monthly_new_firms_target",
   "monthly_cases_target", "monthly_revenue_target", "monthly_targets_by_month",
+  "burn_basis_month",
   // Ledgers the Settings page already shows but this list never admitted, so
   // their Save button answered 400 until 2026-11-02.
   "people_cost_by_month", "agency_cost_by_month",
